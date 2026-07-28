@@ -45,10 +45,42 @@ redeclare them locally — if the cull timer and the fade timer disagree,
 sprites pop out mid-fade or linger invisible.
 
 ## Play field layout
-Grounded enemies march in from the LEFT and RIGHT screen edges along the
-temple plaza toward TEMPLE_CENTER_X; reaching BREACH_RADIUS of it costs a
-life. Enemies do not walk down the screen — the background art only has
-walkable ground in its bottom band.
+Enemies materialise in a smoke puff and converge on TEMPLE_CENTER_X /
+GROUND_LINE_Y. Reaching BREACH_RADIUS of that point costs a life. Spawns
+are deliberately ON-SCREEN — the poof is what makes that read as
+materialising rather than popping in. Preah Ream stands at
+TEMPLE_CENTER_X in the foreground, back to the viewer.
+
+## Approach routes
+ApproachPath gives each enemy one of two shapes, picked from the family
+matching its GroundBehavior:
+- FLANK: purely horizontal, spawns level with its target, always drawn
+  at full size (it enters on the near plane).
+- DIAGONAL: exact 45 degrees, spawns back up the causeway, scales up
+  with depth.
+Ground types get GROUND_FLANK / GROUND_DIAGONAL, flyers get the AIR_
+variants at hover altitude. Never give a flyer a ground route or the
+hover height is ignored.
+
+Depth scaling runs from DEPTH_SCALE_MIN to full size at
+DEPTH_FULL_SIZE_AT. Full size is reached BEFORE the breach point on
+purpose — scaling to 1.0 only at the temple centre would mean monsters
+got culled before ever being drawn at 100%.
+
+Diagonal spawn runs are capped per-type by
+ApproachPath.maxRunFor(targetY, headroom): a tall monster or a
+high-hovering flyer on a long run would otherwise spawn with its word
+plate behind the HUD bar, making it unreadable and untypeable. The run is
+shortened rather than the position clamped, so the 45 degrees survives.
+There is a test asserting every spawn clears HUD_BAR_HEIGHT.
+
+## Difficulty
+All level scaling lives in engine/DifficultyCurve. Every curve is
+monotonic AND capped — an uncapped curve eventually produces an
+unplayable level. Light types (Ahp, Beisach) carry a large
+levelSpeedGain so they get frantic; heavies (Pret, bosses) barely
+accelerate, because their threat is word length, not pace. There is a
+test asserting a Pret never outruns an Ahp at any level.
 
 ## Ground behaviour
 EnemyType carries a GroundBehavior. GROUNDED (Beisach, Yeak, Pret, Naga,
@@ -70,9 +102,38 @@ resource is absent (placeholder shape, built-in word list, default font)
 and log one line. Every roster entry is fully configured even without
 art, so dropping a PNG into resources/images needs no code change.
 
+## Attack animation
+Yeak is the only type that throws (throwIntervalTicks > 0; others are 0
+and enable with a one-number change). The throw is a phase machine —
+WINDUP / RELEASE / RECOVER in AttackPhase — and the renderer maps each
+phase to a lean angle and lunge offset applied around the FEET. This
+builds a convincing throw from a single static image via anticipation
+and follow-through. When real pose art arrives, the sprite swap plugs
+into the same phases and the timing does not change. Enemies stop
+walking while an attack phase is active, or the throw reads as a stumble.
+
+## One-shot flags
+Projectile.hasJustLanded() and Enemy.isProjectileDue() are true for
+exactly ONE tick and are cleared at the top of update(). They must stay
+that way: a sticky landed flag charges the player a life on every tick
+of the fade-out and drains a whole run from a single missed bolt.
+
+## Controls
+Type to attack. Tab arms restart and Enter within RESTART_ARMED_TICKS
+confirms (so one stray Tab cannot wipe a run). Escape quits. Ctrl+P
+pauses — pause cannot use a bare letter key, since the typing field
+consumes those. TypingInputField must keep
+setFocusTraversalKeysEnabled(false) or Tab moves focus instead of
+reaching the key binding.
+
+## Input field
+TypingInputField is custom-painted (setOpaque(false), paintComponent
+draws the glass plate then calls super for the text). It is not a plain
+JTextField — do not set a background colour on it, tint the glass
+gradient instead. Its tick() drives both the typo flash decay and the
+idle glow pulse, so the loop must keep calling it.
+
 ## Build phases
-Phases 1-4 and 6 are implemented (engine, prefix matching, input, waves,
-HUD, save/autosave). Phase 5 (word-projectiles) is next — TargetResolver
-already accepts a priority list, so it only needs filling. Phase 9
-(Khmer) needs words_km.json and NotoSansKhmer-Regular.ttf added to
-resources.
+Phases 1-6 are implemented (engine, prefix matching, input, waves, HUD,
+projectiles, save/autosave, player, game over). Phase 9 (Khmer) needs
+words_km.json and NotoSansKhmer-Regular.ttf added to resources.

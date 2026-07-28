@@ -1,5 +1,6 @@
 package com.guardiansofangkor.engine;
 
+import com.guardiansofangkor.entities.ApproachPath;
 import com.guardiansofangkor.entities.Enemy;
 import com.guardiansofangkor.entities.EnemyType;
 import com.guardiansofangkor.i18n.WordBank;
@@ -10,43 +11,42 @@ import java.util.List;
 import java.util.Random;
 
 /**
- * Owns wave composition, spawn pacing and escalation.
+ * Owns level composition, spawn pacing and escalation.
  *
- * <p>Enemies march in from the left and right screen edges toward the temple
- * entrance at the centre. Which edge is chosen alternates with a random nudge so
- * pressure arrives from both sides rather than settling into a pattern.
+ * <p>Enemies materialise back along a 45-degree line from the temple — up-left
+ * or up-right — and walk down and inward toward it. Spawning happens on-screen
+ * rather than beyond the edges, which is why every spawn is accompanied by a
+ * puff of smoke: without it monsters would visibly pop into existence.
  *
- * <p>Escalation per dev brief Section 1: enemy count, word length and variety
- * all climb with the wave number. Word length comes free — later waves unlock
- * heavier enemy types, and each type requests its own tier from the
- * {@link WordBank}.
+ * <p>All difficulty scaling is delegated to {@link DifficultyCurve} so balance
+ * lives in one readable place.
  */
 public class WaveManager {
 
-    /** Every 5th wave is a Naga mini-boss wave. */
+    /** Every 5th level is a Naga mini-boss level. */
     private static final int MINI_BOSS_INTERVAL = 5;
 
-    /** Krong Reap appears at this wave. */
-    private static final int FINAL_BOSS_WAVE = 15;
+    /** Krong Reap appears at this level. */
+    private static final int FINAL_BOSS_LEVEL = 15;
 
-    /** Pause between a wave being cleared and the next spawning. */
+    /** Pause between a level being cleared and the next starting. */
     private static final int INTERMISSION_TICKS = GameConfig.TARGET_FPS * 2;
 
     private final WordBank wordBank;
     private final Random random;
 
-    private int wave;
+    private int level;
     private int remainingToSpawn;
     private int spawnCooldown;
     private int intermissionCooldown;
-    private boolean waveInProgress;
+    private boolean levelInProgress;
     private int lastDirection = -1;
 
     public WaveManager(WordBank wordBank) {
         this(wordBank, new Random());
     }
 
-    /** Seeded constructor so wave composition is reproducible in tests. */
+    /** Seeded constructor so level composition is reproducible in tests. */
     public WaveManager(WordBank wordBank, Random random) {
         this.wordBank = wordBank == null ? new WordBank(null) : wordBank;
         this.random = random == null ? new Random() : random;
@@ -56,18 +56,18 @@ public class WaveManager {
      * Advances spawn timing by one tick.
      *
      * @param activeEnemies enemies currently on the field, used to detect a
-     *                      cleared wave and to avoid duplicate words
+     *                      cleared level and to avoid duplicate words
      * @return enemies spawned this tick; usually empty
      */
     public List<Enemy> update(List<Enemy> activeEnemies) {
         List<Enemy> spawned = new ArrayList<>();
 
-        if (!waveInProgress) {
+        if (!levelInProgress) {
             if (intermissionCooldown > 0) {
                 intermissionCooldown--;
                 return spawned;
             }
-            beginWave(wave + 1);
+            beginLevel(level + 1);
         }
 
         if (remainingToSpawn > 0) {
@@ -76,26 +76,25 @@ public class WaveManager {
             } else {
                 spawned.add(spawnOne(activeEnemies));
                 remainingToSpawn--;
-                spawnCooldown = spawnIntervalTicks();
+                spawnCooldown = DifficultyCurve.spawnIntervalTicks(level);
             }
         } else if (activeEnemies.isEmpty()) {
-            // Everything spawned and everything killed — wave cleared.
-            waveInProgress = false;
+            levelInProgress = false;
             intermissionCooldown = INTERMISSION_TICKS;
         }
 
         return spawned;
     }
 
-    /** True the tick a wave finishes, so GameState knows to autosave. */
-    public boolean isWaveCleared() {
-        return !waveInProgress && intermissionCooldown == INTERMISSION_TICKS;
+    /** True the tick a level finishes, so GameState knows to autosave. */
+    public boolean isLevelCleared() {
+        return !levelInProgress && intermissionCooldown == INTERMISSION_TICKS;
     }
 
-    private void beginWave(int newWave) {
-        this.wave = newWave;
-        this.waveInProgress = true;
-        this.remainingToSpawn = enemyCountFor(newWave);
+    private void beginLevel(int newLevel) {
+        this.level = newLevel;
+        this.levelInProgress = true;
+        this.remainingToSpawn = DifficultyCurve.enemyCount(newLevel);
         this.spawnCooldown = 0;
     }
 
@@ -112,62 +111,64 @@ public class WaveManager {
         int direction = random.nextInt(4) == 0 ? lastDirection : -lastDirection;
         lastDirection = direction;
 
-        double startX = direction > 0
-                ? -GameConfig.SPAWN_MARGIN
-                : GameConfig.SCREEN_WIDTH + GameConfig.SPAWN_MARGIN;
+        // Ground types walk in from a flank or descend the causeway; flyers do
+        // the same two shapes but at hover altitude.
+        ApproachPath[] routes = ApproachPath.forBehaviour(type.getGroundBehavior());
+        ApproachPath path = routes[random.nextInt(routes.length)];
 
-        return new Enemy(type, word, startX, direction, baseSpeedFor(wave));
+        // Varying the run means monsters do not all appear at the same few pixels.
+        // The ceiling is per-type: a high-hovering flyer has less headroom before
+        // its word plate would collide with the HUD bar.
+        int maxRun = path.maxRunFor(type.anchorTargetY(), type.spawnHeadroom());
+        int run = path.runMin() + random.nextInt(Math.max(1, maxRun - path.runMin() + 1));
+
+        double speed = DifficultyCurve.speedFor(type, level);
+
+        return new Enemy(type, path, word, run, direction, speed);
     }
 
     private EnemyType chooseType() {
-        if (wave == FINAL_BOSS_WAVE && remainingToSpawn == 1) {
+        if (level == FINAL_BOSS_LEVEL && remainingToSpawn == 1) {
             return EnemyType.KRONG_REAP;
         }
-        if (wave % MINI_BOSS_INTERVAL == 0 && remainingToSpawn == 1) {
+        if (level % MINI_BOSS_INTERVAL == 0 && remainingToSpawn == 1) {
             return EnemyType.NAGA;
         }
-        return WaveWeights.pick(wave, random);
+        return WaveWeights.pick(level, random);
     }
 
-    // ---- escalation curves ------------------------------------------------
-
-    /** Enemies in a wave: starts at 4 and climbs, capped so it stays readable. */
-    int enemyCountFor(int wave) {
-        return Math.min(4 + (wave - 1) * 2, 18);
+    public int getLevel() {
+        return level;
     }
 
-    /** Ticks between spawns: tightens as waves progress, floored for fairness. */
-    int spawnIntervalTicks() {
-        return Math.max(GameConfig.TARGET_FPS * 2 - (wave * 6), GameConfig.TARGET_FPS / 2);
-    }
-
-    /** Pixels per tick before the type multiplier. Creeps up with the wave. */
-    double baseSpeedFor(int wave) {
-        return Math.min(0.35 + (wave - 1) * 0.04, 1.1);
-    }
-
-    public int getWave() {
-        return wave;
-    }
-
-    public boolean isWaveInProgress() {
-        return waveInProgress;
+    public boolean isLevelInProgress() {
+        return levelInProgress;
     }
 
     public int getRemainingToSpawn() {
         return remainingToSpawn;
     }
 
-    /** True while the game is between waves. Used by the HUD for the banner. */
+    /** True while the game is between levels. Used by the HUD for the banner. */
     public boolean isIntermission() {
-        return !waveInProgress && intermissionCooldown > 0;
+        return !levelInProgress && intermissionCooldown > 0;
     }
 
     /** Restores spawn state after loading a save. */
-    public void resumeAtWave(int savedWave) {
-        this.wave = Math.max(0, savedWave);
-        this.waveInProgress = false;
+    public void resumeAtLevel(int savedLevel) {
+        this.level = Math.max(0, savedLevel);
+        this.levelInProgress = false;
         this.remainingToSpawn = 0;
         this.intermissionCooldown = INTERMISSION_TICKS;
+    }
+
+    /** Full reset for a new run. */
+    public void reset() {
+        this.level = 0;
+        this.levelInProgress = false;
+        this.remainingToSpawn = 0;
+        this.spawnCooldown = 0;
+        this.intermissionCooldown = 0;
+        this.lastDirection = -1;
     }
 }

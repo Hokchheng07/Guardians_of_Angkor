@@ -33,6 +33,8 @@ public class SpriteCache {
     private static final int ALPHA_THRESHOLD = 32;
 
     private static final String BACKGROUND_PATH = "/images/Background.png";
+    private static final String PLAYER_IDLE_PATH = "/images/Prea_Ream(idle).png";
+    private static final String PLAYER_ACTION_PATH = "/images/Preas_Ream(Action).png";
 
     private final Map<EnemyType, BufferedImage> sprites = new EnumMap<>(EnemyType.class);
     private final Map<EnemyType, BufferedImage> silhouettes = new EnumMap<>(EnemyType.class);
@@ -40,6 +42,10 @@ public class SpriteCache {
 
     private BufferedImage background;
     private boolean backgroundAttempted;
+
+    private BufferedImage playerIdle;
+    private BufferedImage playerAction;
+    private boolean playerAttempted;
 
     /**
      * The trimmed sprite for {@code type}, or null when its art has not been
@@ -77,6 +83,46 @@ public class SpriteCache {
                     + " — falling back to a painted gradient.");
         }
         return background;
+    }
+
+    /**
+     * Preah Ream's sprite for the requested pose.
+     *
+     * <p>Both poses are loaded together so the swap on the first shot does not
+     * cause a one-frame stall while the action image decodes.
+     *
+     * @param firing true for the drawn-bow pose, false for idle
+     */
+    public BufferedImage player(boolean firing) {
+        if (!playerAttempted) {
+            playerAttempted = true;
+            BufferedImage idle = read(PLAYER_IDLE_PATH);
+            BufferedImage action = read(PLAYER_ACTION_PATH);
+            playerIdle = idle == null ? null : trim(idle);
+            playerAction = action == null ? null : trim(action);
+
+            if (playerIdle == null && playerAction == null) {
+                System.out.println("[SpriteCache] No Preah Ream art found — "
+                        + "drawing a placeholder guardian.");
+            }
+        }
+        // Fall back to whichever pose exists, so a single missing file does not
+        // make the hero vanish mid-shot.
+        BufferedImage wanted = firing ? playerAction : playerIdle;
+        if (wanted != null) {
+            return wanted;
+        }
+        return firing ? playerIdle : playerAction;
+    }
+
+    /** Width for Preah Ream at a given height, preserving his aspect ratio. */
+    public int playerWidth(boolean firing, int height) {
+        BufferedImage image = player(firing);
+        if (image == null || image.getHeight() == 0) {
+            return (int) Math.round(height * 0.6);
+        }
+        return Math.max(1,
+                (int) Math.round(height * (image.getWidth() / (double) image.getHeight())));
     }
 
     /** True when this type has real art, as opposed to a placeholder. */

@@ -1,8 +1,12 @@
 package com.guardiansofangkor.renderer;
 
 import com.guardiansofangkor.engine.GameState;
+import com.guardiansofangkor.entities.AttackPhase;
 import com.guardiansofangkor.entities.Enemy;
 import com.guardiansofangkor.entities.EnemyType;
+import com.guardiansofangkor.entities.Player;
+import com.guardiansofangkor.entities.Projectile;
+import com.guardiansofangkor.entities.VisualEffect;
 import com.guardiansofangkor.i18n.FontManager;
 import com.guardiansofangkor.i18n.Language;
 import com.guardiansofangkor.matching.WordTarget;
@@ -19,9 +23,12 @@ import java.awt.GradientPaint;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
+import java.awt.geom.AffineTransform;
 import java.awt.geom.Ellipse2D;
 import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 
 /**
@@ -30,9 +37,10 @@ import java.util.List;
  * never scores a word, never mutates anything it reads.
  *
  * <p>Sprites are anchored by ground behaviour: grounded monsters have the bottom
- * of their artwork placed exactly on the ground line and never bob, so their feet
- * stay planted on the plaza. Floaters are centred on a hover height and bob on a
- * sine wave.
+ * of their artwork placed exactly on their current ground Y and never bob, so
+ * their feet stay planted. Floaters are centred on a hover height and bob on a
+ * sine wave. Everything is scaled by its approach progress, which is what makes
+ * the diagonal read as depth rather than sliding.
  */
 public class GamePanel extends JPanel {
 
@@ -44,9 +52,14 @@ public class GamePanel extends JPanel {
     private static final Color COLOR_TEXT = new Color(0xF3, 0xEE, 0xFA);
     private static final Color COLOR_TYPED = new Color(0xE8, 0xB9, 0x3B);
     private static final Color COLOR_LOCKED_GLOW = new Color(0xFF, 0xD9, 0x6B);
-    private static final Color COLOR_WORD_BG = new Color(0x0D, 0x09, 0x14, 190);
+    private static final Color COLOR_WORD_BG = new Color(0x0D, 0x09, 0x14, 195);
     private static final Color COLOR_SHADOW = new Color(0x00, 0x00, 0x00, 110);
-    private static final Color COLOR_BREACH = new Color(0xD9, 0x4F, 0x5C, 60);
+    private static final Color COLOR_POOF = new Color(0xCE, 0xC2, 0xD8);
+    private static final Color COLOR_BOLT_CORE = new Color(0xFF, 0xE7, 0xA8);
+    private static final Color COLOR_BOLT_EDGE = new Color(0xD9, 0x5B, 0x3C);
+    private static final Color COLOR_BOLT_WORD = new Color(0xFF, 0xC9, 0x5C);
+    private static final Color COLOR_ARROW = new Color(0xF4, 0xE3, 0xB0);
+    private static final Color COLOR_TELEGRAPH = new Color(0xE8, 0x6A, 0x4A);
 
     /** Vertical bob amplitude in pixels. Floaters only. */
     private static final double BOB_AMPLITUDE = 7.0;
@@ -54,22 +67,37 @@ public class GamePanel extends JPanel {
     /** Bob cycles per tick — multiplied by each type's speed for variety. */
     private static final double BOB_FREQUENCY = 0.07;
 
+    /** How far a throwing enemy leans back at full windup, in radians. */
+    private static final double WINDUP_LEAN = Math.toRadians(11);
+
+    /** How far it snaps forward on release. */
+    private static final double RELEASE_LEAN = Math.toRadians(-15);
+
     private final GameState state;
     private final SpriteCache sprites = new SpriteCache();
     private final HUDRenderer hud;
 
-    private Font wordFont;
+    private final Font wordFont;
+    private final Font boltFont;
+
+    /** Set by Main each tick so the HUD can show the restart prompt. */
+    private boolean restartArmed;
 
     public GamePanel(GameState state) {
         this.state = state;
         Language language = state.getLanguage();
         this.hud = new HUDRenderer(language);
         this.wordFont = FontManager.wordFont(language, 20, Font.BOLD);
+        this.boltFont = FontManager.wordFont(language, 17, Font.BOLD);
 
         setPreferredSize(new Dimension(GameConfig.SCREEN_WIDTH, GameConfig.SCREEN_HEIGHT));
         setBackground(COLOR_SKY_TOP);
         setDoubleBuffered(true);
         setFocusable(false);
+    }
+
+    public void setRestartArmed(boolean restartArmed) {
+        this.restartArmed = restartArmed;
     }
 
     @Override
@@ -87,19 +115,32 @@ public class GamePanel extends JPanel {
                     RenderingHints.VALUE_RENDER_QUALITY);
 
             drawBackdrop(g2);
-            drawBreachZone(g2);
 
             String typed = state.getResolver().getValidBuffer();
             List<WordTarget> highlighted = state.getResolver().getHighlighted();
             WordTarget locked = state.getResolver().getLockedTarget();
 
-            // Draw far-to-near so bigger monsters overlap smaller ones sensibly.
-            List<Enemy> enemies = state.getEnemies();
-            for (Enemy enemy : enemies) {
+            drawEffects(g2, VisualEffect.Kind.SPAWN_POOF);
+
+            // Painter's algorithm: things further from the temple are higher on
+            // screen, so sorting by Y makes near monsters overlap far ones.
+            List<Enemy> ordered = new ArrayList<>(state.getEnemies());
+            ordered.sort(Comparator.comparingDouble(Enemy::getAnchorY));
+            for (Enemy enemy : ordered) {
                 drawEnemy(g2, enemy, typed, highlighted.contains(enemy), locked == enemy);
             }
 
-            hud.draw(g2, state);
+            drawPlayer(g2, state.getPlayer());
+
+            for (Projectile projectile : state.getProjectiles()) {
+                drawProjectile(g2, projectile, typed,
+                        highlighted.contains(projectile), locked == projectile);
+            }
+
+            drawEffects(g2, VisualEffect.Kind.ARROW);
+            drawEffects(g2, VisualEffect.Kind.IMPACT);
+
+            hud.draw(g2, state, restartArmed);
         } finally {
             g2.dispose();
         }
@@ -111,7 +152,6 @@ public class GamePanel extends JPanel {
             g2.drawImage(bg, 0, 0, GameConfig.SCREEN_WIDTH, GameConfig.SCREEN_HEIGHT, null);
             return;
         }
-        // Painted fallback so the game still reads correctly without the art.
         g2.setPaint(new GradientPaint(
                 0, 0, COLOR_SKY_TOP, 0, GameConfig.GROUND_LINE_Y, COLOR_SKY_BOTTOM));
         g2.fillRect(0, 0, GameConfig.SCREEN_WIDTH, GameConfig.GROUND_LINE_Y);
@@ -120,13 +160,7 @@ public class GamePanel extends JPanel {
                 GameConfig.SCREEN_WIDTH, GameConfig.SCREEN_HEIGHT);
     }
 
-    /** Subtle marker showing where enemies breach, so the stakes are legible. */
-    private void drawBreachZone(Graphics2D g2) {
-        int width = GameConfig.BREACH_RADIUS * 2;
-        g2.setColor(COLOR_BREACH);
-        g2.fillRect(GameConfig.TEMPLE_CENTER_X - GameConfig.BREACH_RADIUS,
-                GameConfig.GROUND_LINE_Y - 150, width, 165);
-    }
+    // ---- enemies -----------------------------------------------------------
 
     private void drawEnemy(Graphics2D g2, Enemy enemy, String typed,
                            boolean isCandidate, boolean isLocked) {
@@ -134,25 +168,20 @@ public class GamePanel extends JPanel {
         EnemyType type = enemy.getType();
         BufferedImage sprite = sprites.sprite(type);
 
-        int baseHeight = type.getTargetHeight();
-        int baseWidth = sprites.widthFor(type);
+        double depth = enemy.depthScale();
 
-        // --- defeat scale + fade -------------------------------------------
-        double scale = 1.0;
+        double scale = depth;
         float alpha = 1.0f;
         if (!enemy.isActive()) {
             double t = Math.min(1.0,
                     enemy.getDefeatTicks() / (double) GameConfig.DEFEAT_ANIMATION_TICKS);
-            scale = 1.0 - (0.35 * t);
+            scale = depth * (1.0 - 0.35 * t);
             alpha = (float) Math.max(0.0, 1.0 - t);
         }
 
-        int drawW = Math.max(1, (int) Math.round(baseWidth * scale));
-        int drawH = Math.max(1, (int) Math.round(baseHeight * scale));
+        int drawH = Math.max(1, (int) Math.round(type.getTargetHeight() * scale));
+        int drawW = Math.max(1, (int) Math.round(sprites.widthFor(type) * scale));
 
-        // --- anchoring ------------------------------------------------------
-        // Grounded: bottom of the artwork sits on the ground line, no bobbing.
-        // Floating: centred on the hover height, bobbing on a sine wave.
         double bob = 0;
         int topY;
         int feetY;
@@ -164,7 +193,7 @@ public class GamePanel extends JPanel {
             bob = Math.sin(phase) * BOB_AMPLITUDE;
             int centerY = (int) Math.round(enemy.getAnchorY() + bob);
             topY = centerY - drawH / 2;
-            feetY = GameConfig.GROUND_LINE_Y;
+            feetY = centerY + drawH / 2;
         }
 
         int cx = (int) Math.round(enemy.getX());
@@ -179,8 +208,13 @@ public class GamePanel extends JPanel {
                 drawLockGlow(eg, cx, topY, drawW, drawH);
             }
 
+            // Attack lean is applied around the feet so a grounded monster
+            // pivots on the ground rather than floating as it winds up.
+            AffineTransform saved = eg.getTransform();
+            applyAttackLean(eg, enemy, cx, feetY);
+
             if (sprite != null) {
-                drawSprite(eg, sprite, enemy, cx, topY, drawW, drawH);
+                drawSprite(eg, sprite, enemy.getDirection(), cx, topY, drawW, drawH);
             } else {
                 drawPlaceholder(eg, cx, topY, drawW, drawH, isCandidate, isLocked);
             }
@@ -189,17 +223,82 @@ public class GamePanel extends JPanel {
                 drawHitFlash(eg, enemy, cx, topY, drawW, drawH, alpha);
             }
 
-            drawWord(eg, enemy.getWord(), typed, isCandidate, cx, topY - 14);
+            eg.setTransform(saved);
+
+            if (enemy.getAttackPhase() == AttackPhase.WINDUP) {
+                drawThrowTelegraph(eg, enemy, drawH);
+            }
+
+            drawWord(eg, enemy.getWord(), typed, isCandidate, cx, topY - 14, wordFont);
         } finally {
             eg.dispose();
         }
     }
 
-    private void drawSprite(Graphics2D g2, BufferedImage sprite, Enemy enemy,
+    /**
+     * Rotates and shifts a throwing enemy through its windup and release.
+     *
+     * <p>This is the whole "throw" illusion on a single static image:
+     * anticipation (lean back, drift away from the target) followed by a fast
+     * snap forward. Timing carries the read, not drawn poses — so when real
+     * throw art arrives it slots into the same phases unchanged.
+     */
+    private void applyAttackLean(Graphics2D g2, Enemy enemy, int pivotX, int pivotY) {
+        AttackPhase phase = enemy.getAttackPhase();
+        if (phase == AttackPhase.NONE) {
+            return;
+        }
+        double t = enemy.getAttackPhaseProgress();
+        int facing = enemy.getDirection();
+
+        double lean;
+        double shift;
+        switch (phase) {
+            case WINDUP -> {
+                double eased = t * t;
+                lean = -facing * WINDUP_LEAN * eased;
+                shift = -facing * 9 * eased;
+            }
+            case RELEASE -> {
+                lean = -facing * (WINDUP_LEAN + (RELEASE_LEAN - WINDUP_LEAN) * t);
+                shift = facing * 12 * t;
+            }
+            case RECOVER -> {
+                double remaining = 1.0 - t;
+                lean = -facing * RELEASE_LEAN * remaining;
+                shift = facing * 12 * remaining;
+            }
+            default -> {
+                return;
+            }
+        }
+
+        g2.translate(pivotX + shift, pivotY);
+        g2.rotate(lean);
+        g2.translate(-pivotX, -pivotY);
+    }
+
+    /** Warning glow while an enemy winds up, so the throw is never a surprise. */
+    private void drawThrowTelegraph(Graphics2D g2, Enemy enemy, int drawH) {
+        double t = enemy.getAttackPhaseProgress();
+        Graphics2D tg = (Graphics2D) g2.create();
+        try {
+            tg.setComposite(AlphaComposite.getInstance(
+                    AlphaComposite.SRC_OVER, (float) (0.25 + 0.45 * t)));
+            tg.setColor(COLOR_TELEGRAPH);
+            double radius = 10 + 8 * t;
+            tg.fill(new Ellipse2D.Double(
+                    enemy.getThrowOriginX() - radius,
+                    enemy.getThrowOriginY() - radius,
+                    radius * 2, radius * 2));
+        } finally {
+            tg.dispose();
+        }
+    }
+
+    private void drawSprite(Graphics2D g2, BufferedImage sprite, int facing,
                             int cx, int topY, int drawW, int drawH) {
-        // Sprites are drawn facing their direction of travel. The source art
-        // faces the viewer, so mirroring on one side reads as "turning around".
-        if (enemy.getDirection() < 0) {
+        if (facing < 0) {
             g2.drawImage(sprite,
                     cx + drawW / 2, topY, cx - drawW / 2, topY + drawH,
                     0, 0, sprite.getWidth(), sprite.getHeight(), null);
@@ -208,7 +307,6 @@ public class GamePanel extends JPanel {
         }
     }
 
-    /** Placeholder body for roster entries whose art has not arrived yet. */
     private void drawPlaceholder(Graphics2D g2, int cx, int topY, int drawW, int drawH,
                                  boolean isCandidate, boolean isLocked) {
         g2.setColor(COLOR_PLACEHOLDER);
@@ -218,10 +316,6 @@ public class GamePanel extends JPanel {
         g2.draw(new RoundRectangle2D.Double(cx - drawW / 2.0, topY, drawW, drawH, 18, 18));
     }
 
-    /**
-     * Ellipse under the sprite. For floaters it shrinks as they rise, which is
-     * what sells that they are airborne rather than badly positioned.
-     */
     private void drawContactShadow(Graphics2D g2, EnemyType type,
                                    int cx, int feetY, int drawW, double bob) {
         double shrink = type.isGrounded() ? 1.0 : 1.0 - (bob / (BOB_AMPLITUDE * 3));
@@ -233,7 +327,6 @@ public class GamePanel extends JPanel {
                 cx - shadowW / 2.0, feetY - shadowH / 2.0, shadowW, shadowH));
     }
 
-    /** Soft halo behind the locked target so it is unmistakable. */
     private void drawLockGlow(Graphics2D g2, int cx, int topY, int drawW, int drawH) {
         Graphics2D glow = (Graphics2D) g2.create();
         try {
@@ -247,10 +340,6 @@ public class GamePanel extends JPanel {
         }
     }
 
-    /**
-     * White wash on a correct keystroke. Drawn through the sprite's own alpha so
-     * the flash follows the monster's silhouette instead of a rectangle.
-     */
     private void drawHitFlash(Graphics2D g2, Enemy enemy,
                               int cx, int topY, int drawW, int drawH, float alpha) {
         Graphics2D flash = (Graphics2D) g2.create();
@@ -260,7 +349,7 @@ public class GamePanel extends JPanel {
 
             BufferedImage white = sprites.silhouette(enemy.getType());
             if (white != null) {
-                drawSprite(flash, white, enemy, cx, topY, drawW, drawH);
+                drawSprite(flash, white, enemy.getDirection(), cx, topY, drawW, drawH);
             } else {
                 flash.setColor(Color.WHITE);
                 flash.fill(new RoundRectangle2D.Double(
@@ -271,14 +360,194 @@ public class GamePanel extends JPanel {
         }
     }
 
-    /**
-     * Draws the word above an enemy, colouring the already-typed prefix
-     * differently from the remainder so ambiguity is visible at a glance.
-     */
-    private void drawWord(Graphics2D g2, String word, String typed,
-                          boolean isCandidate, int centerX, int baselineY) {
+    // ---- player ------------------------------------------------------------
 
-        g2.setFont(wordFont);
+    private void drawPlayer(Graphics2D g2, Player player) {
+        boolean firing = player.isFiring();
+        BufferedImage sprite = sprites.player(firing);
+
+        int height = GameConfig.PLAYER_HEIGHT;
+        int width = sprites.playerWidth(firing, height);
+        int cx = (int) Math.round(player.getX());
+        int feetY = (int) Math.round(player.getFeetY() + player.getRecoil() * 0.4);
+        int topY = feetY - height;
+
+        g2.setColor(COLOR_SHADOW);
+        g2.fill(new Ellipse2D.Double(
+                cx - width * 0.3, feetY - 9, width * 0.6, width * 0.16));
+
+        if (sprite != null) {
+            g2.drawImage(sprite, cx - width / 2, topY, width, height, null);
+        } else {
+            g2.setColor(COLOR_PLACEHOLDER);
+            g2.fill(new RoundRectangle2D.Double(
+                    cx - width / 2.0, topY, width, height, 20, 20));
+            g2.setColor(COLOR_TYPED);
+            g2.setStroke(new BasicStroke(2.5f));
+            g2.draw(new RoundRectangle2D.Double(
+                    cx - width / 2.0, topY, width, height, 20, 20));
+        }
+    }
+
+    // ---- projectiles -------------------------------------------------------
+
+    private void drawProjectile(Graphics2D g2, Projectile projectile, String typed,
+                                boolean isCandidate, boolean isLocked) {
+        double x = projectile.getX();
+        double y = projectile.getY();
+
+        float alpha = 1.0f;
+        double scale = 1.0;
+        if (!projectile.isActive()) {
+            double t = Math.min(1.0,
+                    projectile.getDefeatTicks() / (double) GameConfig.DEFEAT_ANIMATION_TICKS);
+            alpha = (float) Math.max(0, 1.0 - t);
+            scale = 1.0 + t * 1.4;
+        }
+
+        Graphics2D pg = (Graphics2D) g2.create();
+        try {
+            pg.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
+
+            double radius = 15 * scale;
+
+            // Trailing wisp so the bolt reads as moving, not hanging.
+            pg.setComposite(AlphaComposite.getInstance(
+                    AlphaComposite.SRC_OVER, alpha * 0.28f));
+            pg.setColor(COLOR_BOLT_EDGE);
+            double heading = projectile.getHeading();
+            for (int i = 1; i <= 3; i++) {
+                double trail = radius * (1.0 - i * 0.22);
+                double tx = x - Math.cos(heading) * i * 13;
+                double ty = y - Math.sin(heading) * i * 13;
+                pg.fill(new Ellipse2D.Double(tx - trail, ty - trail, trail * 2, trail * 2));
+            }
+
+            pg.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
+            if (isLocked) {
+                pg.setColor(COLOR_LOCKED_GLOW);
+                pg.fill(new Ellipse2D.Double(
+                        x - radius - 8, y - radius - 8,
+                        (radius + 8) * 2, (radius + 8) * 2));
+            }
+            pg.setColor(COLOR_BOLT_EDGE);
+            pg.fill(new Ellipse2D.Double(x - radius, y - radius, radius * 2, radius * 2));
+            pg.setColor(COLOR_BOLT_CORE);
+            pg.fill(new Ellipse2D.Double(
+                    x - radius * 0.5, y - radius * 0.5, radius, radius));
+
+            if (projectile.getHitFlashTicks() > 0) {
+                pg.setColor(Color.WHITE);
+                pg.fill(new Ellipse2D.Double(
+                        x - radius * 0.7, y - radius * 0.7, radius * 1.4, radius * 1.4));
+            }
+
+            if (projectile.isActive()) {
+                drawWord(pg, projectile.getWord(), typed, isCandidate,
+                        (int) Math.round(x), (int) Math.round(y - radius - 12), boltFont);
+            }
+        } finally {
+            pg.dispose();
+        }
+    }
+
+    // ---- effects -----------------------------------------------------------
+
+    private void drawEffects(Graphics2D g2, VisualEffect.Kind kind) {
+        for (VisualEffect effect : state.getEffects()) {
+            if (effect.getKind() != kind) {
+                continue;
+            }
+            switch (kind) {
+                case SPAWN_POOF -> drawPoof(g2, effect);
+                case ARROW -> drawArrow(g2, effect);
+                case IMPACT -> drawImpact(g2, effect);
+            }
+        }
+    }
+
+    /** Expanding, fading smoke cloud built from offset puffs. */
+    private void drawPoof(Graphics2D g2, VisualEffect effect) {
+        double t = effect.getProgress();
+        float alpha = (float) Math.max(0, 0.75 * (1.0 - t));
+        double spread = 30 * effect.getScale() * (0.4 + t * 1.5);
+
+        Graphics2D pg = (Graphics2D) g2.create();
+        try {
+            pg.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
+            pg.setColor(COLOR_POOF);
+
+            double[][] puffs = {
+                    {0, 0, 1.0}, {-0.8, 0.15, 0.72}, {0.8, 0.1, 0.72},
+                    {-0.4, -0.55, 0.6}, {0.45, -0.5, 0.62}, {0, 0.45, 0.55}
+            };
+            for (double[] puff : puffs) {
+                double r = spread * puff[2] * (0.55 + t * 0.5);
+                double px = effect.getX() + puff[0] * spread;
+                double py = effect.getY() + puff[1] * spread - t * 14;
+                pg.fill(new Ellipse2D.Double(px - r, py - r, r * 2, r * 2));
+            }
+        } finally {
+            pg.dispose();
+        }
+    }
+
+    private void drawArrow(Graphics2D g2, VisualEffect effect) {
+        Graphics2D ag = (Graphics2D) g2.create();
+        try {
+            double x = effect.getX();
+            double y = effect.getY();
+            ag.translate(x, y);
+            ag.rotate(effect.getHeading());
+
+            ag.setColor(COLOR_ARROW);
+            ag.setStroke(new BasicStroke(2.6f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            ag.drawLine(-16, 0, 12, 0);
+            // Arrowhead
+            ag.drawLine(12, 0, 4, -5);
+            ag.drawLine(12, 0, 4, 5);
+            // Fletching
+            ag.setStroke(new BasicStroke(2f));
+            ag.drawLine(-16, 0, -21, -4);
+            ag.drawLine(-16, 0, -21, 4);
+
+            ag.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.35f));
+            ag.setStroke(new BasicStroke(1.2f));
+            ag.drawLine(-40, 0, -18, 0);
+        } finally {
+            ag.dispose();
+        }
+    }
+
+    private void drawImpact(Graphics2D g2, VisualEffect effect) {
+        double t = effect.getProgress();
+        // Only bloom for the back half of the lifetime — the front half is the
+        // arrow still travelling toward this point.
+        if (t < 0.5) {
+            return;
+        }
+        double local = (t - 0.5) / 0.5;
+        float alpha = (float) Math.max(0, 0.8 * (1.0 - local));
+        double radius = 8 + local * 26;
+
+        Graphics2D ig = (Graphics2D) g2.create();
+        try {
+            ig.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
+            ig.setColor(COLOR_BOLT_CORE);
+            ig.setStroke(new BasicStroke(2.4f));
+            ig.draw(new Ellipse2D.Double(
+                    effect.getX() - radius, effect.getY() - radius, radius * 2, radius * 2));
+        } finally {
+            ig.dispose();
+        }
+    }
+
+    // ---- words -------------------------------------------------------------
+
+    private void drawWord(Graphics2D g2, String word, String typed,
+                          boolean isCandidate, int centerX, int baselineY, Font font) {
+
+        g2.setFont(font);
         FontMetrics fm = g2.getFontMetrics();
 
         int matched = (isCandidate && typed != null && word.startsWith(typed))
@@ -291,14 +560,13 @@ public class GamePanel extends JPanel {
         int totalWidth = fm.stringWidth(word);
         int x = centerX - totalWidth / 2;
 
-        // Plate behind the text so words stay readable over busy artwork.
         g2.setColor(COLOR_WORD_BG);
         g2.fill(new RoundRectangle2D.Double(
                 x - 10, baselineY - fm.getAscent() - 5,
                 totalWidth + 20, fm.getHeight() + 8, 10, 10));
 
         if (!head.isEmpty()) {
-            g2.setColor(COLOR_TYPED);
+            g2.setColor(font == boltFont ? COLOR_BOLT_WORD : COLOR_TYPED);
             g2.drawString(head, x, baselineY);
             x += fm.stringWidth(head);
         }

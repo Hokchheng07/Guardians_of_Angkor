@@ -1,16 +1,31 @@
 package com.guardiansofangkor.input;
 
+import javax.swing.BorderFactory;
+import javax.swing.JComponent;
 import javax.swing.JTextField;
+import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.text.BadLocationException;
+import java.awt.AlphaComposite;
+import java.awt.BasicStroke;
 import java.awt.Color;
+import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.FontMetrics;
+import java.awt.GradientPaint;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.event.KeyEvent;
+import java.awt.geom.Area;
+import java.awt.geom.RoundRectangle2D;
 import java.util.function.Consumer;
 
 /**
- * The persistent input bar the player types into.
+ * The persistent input bar the player types into, painted as a frosted glass
+ * plate rather than a default Swing text box.
  *
  * <p>Uses a {@link DocumentListener} rather than a raw KeyListener on purpose:
  * Khmer combines base consonants with diacritics across several codepoints per
@@ -20,10 +35,22 @@ import java.util.function.Consumer;
  */
 public class TypingInputField extends JTextField {
 
-    private static final Color COLOR_BG = new Color(0x1B, 0x14, 0x28);
-    private static final Color COLOR_FG = new Color(0xEC, 0xE6, 0xF5);
+    private static final Color COLOR_FG = new Color(0xF6, 0xF2, 0xFC);
     private static final Color COLOR_CARET = new Color(0xE8, 0xB9, 0x3B);
-    private static final Color COLOR_ERROR = new Color(0x8C, 0x2F, 0x39);
+    private static final Color COLOR_HINT = new Color(0x7E, 0x6E, 0x96);
+
+    private static final Color GLASS_TOP = new Color(0x6E, 0x59, 0x8F, 78);
+    private static final Color GLASS_BOTTOM = new Color(0x1A, 0x11, 0x2A, 150);
+    private static final Color GLASS_TOP_ERROR = new Color(0xA8, 0x3C, 0x46, 120);
+    private static final Color GLASS_BOTTOM_ERROR = new Color(0x3A, 0x10, 0x18, 175);
+
+    private static final Color BORDER_OUTER = new Color(0xE8, 0xB9, 0x3B, 130);
+    private static final Color BORDER_OUTER_ERROR = new Color(0xE6, 0x6A, 0x5A, 190);
+    private static final Color SHEEN = new Color(0xFF, 0xFF, 0xFF, 46);
+
+    private static final int PLATE_HEIGHT = 62;
+    private static final int PLATE_MAX_WIDTH = 780;
+    private static final int ARC = 20;
 
     /** Notified with the full buffer contents every time it changes. */
     private Consumer<String> onBufferChanged = text -> { };
@@ -33,13 +60,28 @@ public class TypingInputField extends JTextField {
 
     private int errorFlashTicks;
 
+    /** Slow pulse so the plate feels alive rather than static. */
+    private double glowPhase;
+
+    private String hintText = "type to strike";
+
     public TypingInputField() {
-        setBackground(COLOR_BG);
+        setOpaque(false);
         setForeground(COLOR_FG);
         setCaretColor(COLOR_CARET);
-        setFont(new Font(Font.SANS_SERIF, Font.BOLD, 22));
+        setFont(new Font(Font.SANS_SERIF, Font.BOLD, 24));
         setHorizontalAlignment(CENTER);
-        setBorder(javax.swing.BorderFactory.createEmptyBorder(10, 12, 10, 12));
+        setBorder(BorderFactory.createEmptyBorder(20, 40, 20, 40));
+        setPreferredSize(new Dimension(0, PLATE_HEIGHT + 34));
+
+        // Tab and Enter are the restart chord, so this field must not eat them.
+        // Without this, Tab moves focus out of the field and never reaches the
+        // window-level key binding.
+        setFocusTraversalKeysEnabled(false);
+        getInputMap(JComponent.WHEN_FOCUSED)
+                .put(KeyStroke.getKeyStroke(KeyEvent.VK_TAB, 0), "none");
+        getInputMap(JComponent.WHEN_FOCUSED)
+                .put(KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, 0), "none");
 
         getDocument().addDocumentListener(new DocumentListener() {
             @Override
@@ -59,6 +101,116 @@ public class TypingInputField extends JTextField {
         });
     }
 
+    // ---- painting ----------------------------------------------------------
+
+    @Override
+    protected void paintComponent(Graphics g) {
+        Graphics2D g2 = (Graphics2D) g.create();
+        try {
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                    RenderingHints.VALUE_ANTIALIAS_ON);
+
+            int plateWidth = Math.min(PLATE_MAX_WIDTH, getWidth() - 60);
+            int x = (getWidth() - plateWidth) / 2;
+            int y = (getHeight() - PLATE_HEIGHT) / 2;
+
+            boolean error = errorFlashTicks > 0;
+            RoundRectangle2D plate =
+                    new RoundRectangle2D.Double(x, y, plateWidth, PLATE_HEIGHT, ARC, ARC);
+
+            drawOuterGlow(g2, plate, error);
+            drawGlassBody(g2, plate, x, y, plateWidth, error);
+            drawSheen(g2, plate, x, y, plateWidth);
+            drawBorder(g2, plate, error);
+
+            if (getDocument().getLength() == 0 && isEnabled()) {
+                drawHint(g2, y);
+            }
+        } finally {
+            g2.dispose();
+        }
+
+        // Text and caret last, on top of the glass.
+        super.paintComponent(g);
+    }
+
+    /** Soft halo behind the plate — the thing that reads as "lit glass". */
+    private void drawOuterGlow(Graphics2D g2, RoundRectangle2D plate, boolean error) {
+        double pulse = 0.5 + 0.5 * Math.sin(glowPhase);
+        float strength = error ? 0.34f : (float) (0.11 + 0.07 * pulse);
+
+        Graphics2D glow = (Graphics2D) g2.create();
+        try {
+            glow.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, strength));
+            glow.setColor(error ? BORDER_OUTER_ERROR : BORDER_OUTER);
+            for (int i = 4; i >= 1; i--) {
+                double pad = i * 3.0;
+                glow.setStroke(new BasicStroke((float) (pad * 0.9)));
+                glow.draw(new RoundRectangle2D.Double(
+                        plate.getX() - pad / 2, plate.getY() - pad / 2,
+                        plate.getWidth() + pad, plate.getHeight() + pad,
+                        ARC + pad, ARC + pad));
+            }
+        } finally {
+            glow.dispose();
+        }
+    }
+
+    private void drawGlassBody(Graphics2D g2, RoundRectangle2D plate,
+                               int x, int y, int width, boolean error) {
+        g2.setPaint(new GradientPaint(
+                x, y, error ? GLASS_TOP_ERROR : GLASS_TOP,
+                x, y + PLATE_HEIGHT, error ? GLASS_BOTTOM_ERROR : GLASS_BOTTOM));
+        g2.fill(plate);
+    }
+
+    /**
+     * Highlight across the top third only. Clipping it to the plate is what
+     * stops it looking like a stripe pasted over the top.
+     */
+    private void drawSheen(Graphics2D g2, RoundRectangle2D plate,
+                           int x, int y, int width) {
+        Graphics2D sheen = (Graphics2D) g2.create();
+        try {
+            Area clip = new Area(plate);
+            clip.intersect(new Area(new java.awt.Rectangle(
+                    x, y, width, (int) (PLATE_HEIGHT * 0.45))));
+            sheen.setClip(clip);
+            sheen.setPaint(new GradientPaint(
+                    x, y, SHEEN,
+                    x, y + PLATE_HEIGHT * 0.45f, new Color(255, 255, 255, 0)));
+            sheen.fillRect(x, y, width, PLATE_HEIGHT);
+        } finally {
+            sheen.dispose();
+        }
+    }
+
+    private void drawBorder(Graphics2D g2, RoundRectangle2D plate, boolean error) {
+        g2.setColor(error ? BORDER_OUTER_ERROR : BORDER_OUTER);
+        g2.setStroke(new BasicStroke(1.6f));
+        g2.draw(plate);
+
+        // Inner hairline, inset by a pixel, for glass thickness.
+        g2.setColor(new Color(255, 255, 255, error ? 40 : 30));
+        g2.setStroke(new BasicStroke(1f));
+        g2.draw(new RoundRectangle2D.Double(
+                plate.getX() + 2, plate.getY() + 2,
+                plate.getWidth() - 4, plate.getHeight() - 4,
+                ARC - 3, ARC - 3));
+    }
+
+    private void drawHint(Graphics2D g2, int plateY) {
+        g2.setFont(getFont().deriveFont(Font.PLAIN, 17f));
+        g2.setColor(COLOR_HINT);
+        FontMetrics fm = g2.getFontMetrics();
+        int width = fm.stringWidth(hintText);
+        g2.drawString(hintText,
+                (getWidth() - width) / 2,
+                plateY + PLATE_HEIGHT / 2 + fm.getAscent() / 2 - 2);
+    }
+
+    // ---- input plumbing ----------------------------------------------------
+
     /** Registers the callback that receives the buffer on every edit. */
     public void setOnBufferChanged(Consumer<String> listener) {
         this.onBufferChanged = listener == null ? text -> { } : listener;
@@ -69,6 +221,10 @@ public class TypingInputField extends JTextField {
         if (font != null) {
             setFont(font);
         }
+    }
+
+    public void setHintText(String hintText) {
+        this.hintText = hintText == null ? "" : hintText;
     }
 
     private void fireChanged() {
@@ -115,19 +271,29 @@ public class TypingInputField extends JTextField {
         revertTo("");
     }
 
+    /** Full reset for a new run: clears text, re-enables input, drops the flash. */
+    public void resetForNewRun() {
+        errorFlashTicks = 0;
+        setEnabled(true);
+        clearBuffer();
+        repaint();
+    }
+
     /** Starts the red typo flash. Ticked down by {@link #tick()}. */
     public void flashError(int ticks) {
         this.errorFlashTicks = Math.max(this.errorFlashTicks, ticks);
-        setBackground(COLOR_ERROR);
+        repaint();
     }
 
-    /** Called once per game tick so the error flash can decay. */
+    /** Called once per game tick so the error flash and glow pulse advance. */
     public void tick() {
+        glowPhase += 0.045;
+        if (glowPhase > Math.PI * 2) {
+            glowPhase -= Math.PI * 2;
+        }
         if (errorFlashTicks > 0) {
             errorFlashTicks--;
-            if (errorFlashTicks == 0) {
-                setBackground(COLOR_BG);
-            }
         }
+        repaint();
     }
 }

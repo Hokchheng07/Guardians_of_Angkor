@@ -16,7 +16,7 @@ import java.util.Random;
  */
 final class WaveWeights {
 
-    /** Wave at which each type first appears. */
+    /** Level at which each type first appears. */
     private static final Map<EnemyType, Integer> UNLOCK_WAVE = new EnumMap<>(EnemyType.class);
 
     /** Relative spawn weight once unlocked. */

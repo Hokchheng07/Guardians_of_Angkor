@@ -24,12 +24,13 @@ import java.awt.Font;
 /**
  * Entry point. Assembles the window, wires input to the game state, restores any
  * saved progress and starts the loop.
+ *
+ * <p>Controls: type to attack, Tab then Enter to restart, Escape to quit,
+ * Ctrl+P to pause.
  */
 public final class Main {
 
     public static void main(String[] args) {
-        // A crash during construction should still surface clearly rather than
-        // dying silently on the EDT.
         SwingUtilities.invokeLater(() -> {
             try {
                 launch();
@@ -84,18 +85,31 @@ public final class Main {
             autosave.saveQuietly();
             System.exit(0);
         });
+        keys.setOnRestart(() -> {
+            state.restart();
+            input.resetForNewRun();
+            input.requestFocusInWindow();
+            autosave.saveQuietly();
+            panel.repaint();
+        });
         keys.install(root);
 
         GameLoop loop = new GameLoop(state, () -> {
             input.tick();
-            // Autosave on every wave clear, not only on a clean exit (Section 5.4).
-            if (state.isWaveJustCleared()) {
+            keys.tick();
+
+            if (state.isLevelJustCleared()) {
                 autosave.saveQuietly();
             }
             if (state.isGameOver() && input.isEnabled()) {
+                // Stop accepting typing and offer the restart chord immediately,
+                // so the player does not have to discover Tab on their own.
                 input.setEnabled(false);
+                keys.forceArmRestart();
                 autosave.saveQuietly();
             }
+
+            panel.setRestartArmed(keys.isRestartArmed());
             panel.repaint();
         });
 

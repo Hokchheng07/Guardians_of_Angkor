@@ -98,6 +98,35 @@ public class WordBank {
         return words.isEmpty() ? "temple" : words.get(random.nextInt(words.size()));
     }
 
+    /**
+     * A very short word for a thrown projectile (dev brief Section 5.2).
+     *
+     * <p>Kept to 2-3 characters deliberately: projectiles have a short time
+     * budget, so a long word here would be impossible to intercept rather than
+     * merely tense.
+     */
+    public String projectileWord(List<String> exclude) {
+        List<String> candidates = new ArrayList<>();
+        for (String word : words) {
+            int length = GraphemeCounter.count(word);
+            if (length >= 2 && length <= 3
+                    && (exclude == null || !exclude.contains(word))) {
+                candidates.add(word);
+            }
+        }
+        if (!candidates.isEmpty()) {
+            return candidates.get(random.nextInt(candidates.size()));
+        }
+        // The loaded list may have no words this short — fall back to a fixed
+        // set rather than letting an attack fail to spawn.
+        List<String> emergency = new ArrayList<>(
+                List.of("ka", "om", "ra", "sok", "vy", "nak", "sar"));
+        if (exclude != null) {
+            emergency.removeAll(exclude);
+        }
+        return emergency.isEmpty() ? "ka" : emergency.get(random.nextInt(emergency.size()));
+    }
+
     public Language getLanguage() {
         return language;
     }
