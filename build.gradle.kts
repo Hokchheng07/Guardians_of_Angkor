@@ -11,6 +11,15 @@ repositories {
     mavenCentral()
 }
 
+// Pins the compiler for every team machine. Without this, Gradle silently uses
+// whatever JDK each person happens to have, and code using records or pattern
+// matching compiles for some of the team and not others.
+java {
+    toolchain {
+        languageVersion.set(JavaLanguageVersion.of(21))
+    }
+}
+
 dependencies {
     testImplementation(platform("org.junit:junit-bom:6.0.0"))
     testImplementation("org.junit.jupiter:junit-jupiter")
