@@ -1,6 +1,7 @@
 package com.guardiansofangkor.engine;
 
 import com.guardiansofangkor.entities.Enemy;
+import com.guardiansofangkor.entities.EnemyType;
 import com.guardiansofangkor.i18n.Language;
 import com.guardiansofangkor.i18n.WordBank;
 import com.guardiansofangkor.util.GameConfig;
@@ -25,27 +26,63 @@ class WaveManagerTest {
     }
 
     @Test
-    @DisplayName("diagonal spawns sit on an exact 45-degree line, flank spawns are level")
+    @DisplayName("airborne descents hold 45 degrees, flanks stay level")
     void spawnGeometryMatchesRoute() {
         WaveManager waves = newManager();
         List<Enemy> spawned = collectSpawns(waves, 6000);
 
         assertFalse(spawned.isEmpty(), "a level should produce enemies");
         for (Enemy enemy : spawned) {
-            double targetY = enemy.getType().isGrounded()
-                    ? GameConfig.GROUND_LINE_Y
-                    : GameConfig.GROUND_LINE_Y - enemy.getType().getHoverHeight();
-
             double dx = Math.abs(enemy.getSpawnX() - GameConfig.TEMPLE_CENTER_X);
-            double dy = targetY - enemy.getSpawnY();
+            double dy = enemy.getType().anchorTargetY() - enemy.getSpawnY();
 
-            if (enemy.getPath().isDiagonal()) {
+            if (enemy.getPath().isFortyFiveDegrees()) {
                 assertEquals(dx, dy, 0.001,
                         "equal horizontal and vertical offset is what makes it 45 degrees");
-                assertTrue(dy > 0, "diagonal spawns start back up the causeway");
+            } else if (enemy.getPath().isDescending()) {
+                assertTrue(dy > 0, "a descending route must lose some altitude");
+                assertTrue(dy < dx,
+                        "the ground drift must stay shallower than 45 degrees");
             } else {
                 assertEquals(0, dy, 0.001, "flank spawns must be level with their target");
                 assertTrue(dx > 0, "flank spawns start out to one side");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("grounded enemies never spawn off the plaza")
+    void groundedEnemiesStayOnThePlaza() {
+        WaveManager waves = newManager();
+
+        for (Enemy enemy : collectSpawns(waves, 6000)) {
+            if (!enemy.getType().isGrounded()) {
+                continue;
+            }
+            assertTrue(enemy.getSpawnY() >= GameConfig.PLAZA_TOP_Y,
+                    enemy.getType().getDisplayName() + " spawned at y="
+                            + Math.round(enemy.getSpawnY())
+                            + ", above the plaza at " + GameConfig.PLAZA_TOP_Y
+                            + " — it would be standing in the sky");
+        }
+    }
+
+    @Test
+    @DisplayName("grounded enemies keep their feet on the plaza for the whole walk")
+    void groundedEnemiesStayGroundedWhileWalking() {
+        WaveManager waves = newManager();
+        List<Enemy> spawned = collectSpawns(waves, 3000);
+
+        for (Enemy enemy : spawned) {
+            if (!enemy.getType().isGrounded()) {
+                continue;
+            }
+            for (int tick = 0; tick < 1500; tick++) {
+                enemy.update();
+                assertTrue(enemy.getAnchorY() >= GameConfig.PLAZA_TOP_Y,
+                        enemy.getType().getDisplayName() + " left the plaza mid-walk");
+                assertTrue(enemy.getAnchorY() <= GameConfig.GROUND_LINE_Y + 0.001,
+                        enemy.getType().getDisplayName() + " sank below the ground line");
             }
         }
     }
@@ -67,6 +104,10 @@ class WaveManagerTest {
         WaveManager waves = newManager();
 
         for (Enemy enemy : collectSpawns(waves, 6000)) {
+            if (!enemy.getPath().isFortyFiveDegrees()) {
+                // Only the long airborne descent can reach the bar.
+                continue;
+            }
             double drawnHeight = enemy.getType().getTargetHeight() * enemy.depthScale();
             double topY = enemy.getType().isGrounded()
                     ? enemy.getSpawnY() - drawnHeight
@@ -80,21 +121,89 @@ class WaveManagerTest {
     }
 
     @Test
-    @DisplayName("both flank and diagonal routes actually get used")
+    @DisplayName("both flank and descending routes actually get used")
     void bothRouteShapesAppear() {
         WaveManager waves = newManager();
 
         boolean sawFlank = false;
-        boolean sawDiagonal = false;
+        boolean sawDescent = false;
         for (Enemy enemy : collectSpawns(waves, 6000)) {
-            if (enemy.getPath().isDiagonal()) {
-                sawDiagonal = true;
+            if (enemy.getPath().isDescending()) {
+                sawDescent = true;
             } else {
                 sawFlank = true;
             }
         }
         assertTrue(sawFlank, "some enemies should walk in from a flank");
-        assertTrue(sawDiagonal, "some enemies should descend the causeway");
+        assertTrue(sawDescent, "some enemies should approach with a descent");
+    }
+
+    @Test
+    @DisplayName("the Naga arrives every fifth level with a real word chain")
+    void nagaAppearsEveryFifthLevel() {
+        WaveManager waves = newManager();
+        List<Enemy> field = new ArrayList<>();
+
+        int nagaLevels = 0;
+        int seenLevels = 0;
+        int lastLevel = 0;
+
+        for (int tick = 0; tick < 40_000 && waves.getLevel() <= 12; tick++) {
+            List<Enemy> spawned = waves.update(field);
+            if (waves.getLevel() != lastLevel) {
+                lastLevel = waves.getLevel();
+                seenLevels++;
+            }
+            for (Enemy enemy : spawned) {
+                if (enemy.getType() == EnemyType.NAGA) {
+                    nagaLevels++;
+                    assertEquals(0, waves.getLevel() % 5,
+                            "a Naga appeared on level " + waves.getLevel());
+                    assertTrue(enemy.isChained(),
+                            "a mini-boss must take more than one word");
+                    assertTrue(enemy.getChainLength() >= 2
+                                    && enemy.getChainLength() <= 3,
+                            "chain should be 2-3 words, got " + enemy.getChainLength());
+                }
+            }
+            field.clear();
+        }
+
+        assertTrue(seenLevels > 10, "should have run through several levels");
+        assertTrue(nagaLevels >= 2,
+                "expected a Naga on levels 5 and 10, saw " + nagaLevels);
+    }
+
+    @Test
+    @DisplayName("ordinary enemies are never chained")
+    void ordinaryEnemiesAreNotChained() {
+        WaveManager waves = newManager();
+
+        for (Enemy enemy : collectSpawns(waves, 6000)) {
+            if (enemy.getType() != EnemyType.NAGA) {
+                assertEquals(1, enemy.getChainLength(),
+                        enemy.getType().getDisplayName() + " should die to one word");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("chained words never collide with words already on the field")
+    void chainWordsAreUniqueAcrossTheField() {
+        WaveManager waves = newManager();
+        List<Enemy> field = new ArrayList<>();
+
+        for (int tick = 0; tick < 6000; tick++) {
+            field.addAll(waves.update(field));
+
+            Set<String> promised = new HashSet<>();
+            for (Enemy enemy : field) {
+                for (String word : enemy.getAllWords()) {
+                    assertTrue(promised.add(word),
+                            "word '" + word + "' is promised twice on the field");
+                }
+            }
+        }
     }
 
     @Test

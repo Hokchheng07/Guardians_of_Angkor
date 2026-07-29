@@ -3,6 +3,10 @@ package com.guardiansofangkor.entities;
 import com.guardiansofangkor.matching.WordTarget;
 import com.guardiansofangkor.util.GameConfig;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 /**
  * A shadow spirit converging on the temple with a word above its head.
  *
@@ -10,10 +14,14 @@ import com.guardiansofangkor.util.GameConfig;
  * rather than a subclass per monster — composition over inheritance, per the
  * team conventions.
  *
- * <p>Enemies materialise in a puff of smoke back along a 45-degree line from the
- * temple and walk down-and-inward toward it. Because they start further away
- * they are also drawn smaller, growing to full size as they arrive — that depth
- * cue is what stops the diagonal from looking like sliding.
+ * <p>Most enemies carry one word. Mini-bosses carry a <em>chain</em>: clearing
+ * one word staggers them and reveals the next, and only the last one kills. The
+ * chain lives here rather than in a Naga subclass so the same update, render and
+ * matching paths serve both.
+ *
+ * <p>Movement is a straight line from the spawn puff to the temple, described by
+ * a horizontal run and a vertical rise. See {@link ApproachPath} for why those
+ * are separate rather than a single angle.
  *
  * <p>This class holds gameplay state only and knows nothing about Graphics2D.
  * The animation counters below are plain numbers the renderer reads and turns
@@ -21,22 +29,32 @@ import com.guardiansofangkor.util.GameConfig;
  */
 public class Enemy implements WordTarget {
 
+    /** How long a mini-boss recoils after losing a word in its chain. */
+    private static final int STAGGER_TICKS = 32;
+
     private final EnemyType type;
     private final ApproachPath path;
-    private final String word;
+
+    /** Words to be typed in order. Length one for ordinary enemies. */
+    private final List<String> wordChain;
+    private int chainIndex;
 
     private double x;
 
     /**
      * Current Y of the anchor. For grounded types this is where the feet rest;
-     * for floating types it is the sprite centre before bobbing. It rises toward
-     * the ground line as the enemy approaches.
+     * for floating types it is the sprite centre before bobbing. It descends
+     * toward the arrival altitude as the enemy approaches.
      */
     private double y;
 
     private final double spawnX;
     private final double spawnY;
     private final double targetY;
+
+    /** Unit travel vector, derived from the route's run and rise. */
+    private final double unitX;
+    private final double unitY;
 
     /** +1 marching rightward (spawned on the left), -1 marching leftward. */
     private final int direction;
@@ -50,6 +68,7 @@ public class Enemy implements WordTarget {
 
     private int hitFlashTicks;
     private int defeatTicks;
+    private int staggerTicks;
 
     // ---- ranged attack state ----------------------------------------------
 
@@ -58,13 +77,20 @@ public class Enemy implements WordTarget {
     private int throwCooldown;
     private boolean projectileDue;
 
+    /** Single-word constructor, for ordinary enemies. */
+    public Enemy(EnemyType type, ApproachPath path, String word,
+                 double run, int direction, double speed) {
+        this(type, path, List.of(word == null ? "" : word), run, direction, speed);
+    }
+
     /**
      * @param path      which route this enemy takes to the temple
-     * @param run       path distance back from the temple to materialise at
+     * @param words     the chain to type, in order; one entry for most enemies
+     * @param run       horizontal distance back from the temple to materialise at
      * @param direction +1 to march right, -1 to march left
      * @param speed     pixels per tick along the path
      */
-    public Enemy(EnemyType type, ApproachPath path, String word,
+    public Enemy(EnemyType type, ApproachPath path, List<String> words,
                  double run, int direction, double speed) {
         if (type == null) {
             throw new IllegalArgumentException("type must not be null");
@@ -72,21 +98,38 @@ public class Enemy implements WordTarget {
         if (path == null) {
             throw new IllegalArgumentException("path must not be null");
         }
-        if (word == null || word.isEmpty()) {
-            throw new IllegalArgumentException("word must not be null or empty");
+        if (words == null || words.isEmpty()) {
+            throw new IllegalArgumentException("an enemy needs at least one word");
         }
+        for (String word : words) {
+            if (word == null || word.isEmpty()) {
+                throw new IllegalArgumentException("words must not be null or empty");
+            }
+        }
+
         this.type = type;
         this.path = path;
-        this.word = word;
+        this.wordChain = List.copyOf(words);
         this.direction = direction >= 0 ? 1 : -1;
         this.speed = speed;
 
         this.targetY = type.anchorTargetY();
-
         this.spawnX = path.spawnX(this.direction, run);
         this.spawnY = path.spawnY(this.targetY, run);
         this.x = spawnX;
         this.y = spawnY;
+
+        // Normalise run and rise into a unit vector, so speed stays "pixels
+        // along the path" regardless of how steep the route is.
+        double rise = path.riseFor(run);
+        double length = Math.hypot(run, rise);
+        if (length < 0.0001) {
+            this.unitX = 1;
+            this.unitY = 0;
+        } else {
+            this.unitX = run / length;
+            this.unitY = rise / length;
+        }
 
         this.throwCooldown = type.getThrowIntervalTicks();
     }
@@ -105,6 +148,13 @@ public class Enemy implements WordTarget {
             return;
         }
 
+        if (staggerTicks > 0) {
+            // Recoiling from losing a word — hold position so the player gets a
+            // clear beat to read the next one.
+            staggerTicks--;
+            return;
+        }
+
         advanceAttack();
 
         // A throwing enemy plants itself to wind up rather than walking through
@@ -115,12 +165,68 @@ public class Enemy implements WordTarget {
     }
 
     private void march() {
-        x += direction * speed * path.unitX();
+        x += direction * speed * unitX;
 
         if (y < targetY) {
-            y = Math.min(targetY, y + speed * path.unitY());
+            y = Math.min(targetY, y + speed * unitY);
         }
     }
+
+    // ---- word chain --------------------------------------------------------
+
+    /** True when clearing the current word will not yet kill this enemy. */
+    public boolean hasMoreWords() {
+        return chainIndex < wordChain.size() - 1;
+    }
+
+    /**
+     * Moves to the next word in the chain and staggers.
+     *
+     * @return true if there was another word to move to
+     */
+    public boolean advanceChain() {
+        if (!hasMoreWords()) {
+            return false;
+        }
+        chainIndex++;
+        staggerTicks = STAGGER_TICKS;
+        return true;
+    }
+
+    /** How many words this enemy started with. One for ordinary enemies. */
+    public int getChainLength() {
+        return wordChain.size();
+    }
+
+    /** How many words have already been cleared. */
+    public int getChainCleared() {
+        return chainIndex;
+    }
+
+    /** True when this enemy takes more than one word to kill. */
+    public boolean isChained() {
+        return wordChain.size() > 1;
+    }
+
+    /** True while recoiling from a cleared word. */
+    public boolean isStaggered() {
+        return staggerTicks > 0;
+    }
+
+    /** Stagger progress, 1 at the moment of the hit down to 0. For the renderer. */
+    public double getStaggerProgress() {
+        return staggerTicks / (double) STAGGER_TICKS;
+    }
+
+    /**
+     * Every word this enemy will ever show, so the spawner can avoid handing
+     * another enemy a word that would collide later in this chain.
+     */
+    public List<String> getAllWords() {
+        return Collections.unmodifiableList(wordChain);
+    }
+
+    // ---- ranged attacks ----------------------------------------------------
 
     private void advanceAttack() {
         if (!type.canThrow()) {
@@ -175,17 +281,15 @@ public class Enemy implements WordTarget {
 
     /** Where a thrown projectile leaves this enemy's hand. */
     public double getThrowOriginX() {
-        return x + direction * (getScaledWidthHint() * 0.25);
+        return x + direction * (type.getTargetHeight() * depthScale() * 0.30);
     }
 
     /** Vertical release point — roughly shoulder height. */
     public double getThrowOriginY() {
-        return y - (type.getTargetHeight() * depthScale() * 0.62);
+        return y - (type.getTargetHeight() * depthScale() * 0.66);
     }
 
-    private double getScaledWidthHint() {
-        return type.getTargetHeight() * depthScale() * 0.5;
-    }
+    // ---- geometry ----------------------------------------------------------
 
     /**
      * How far along its approach this enemy is, 0 at the spawn puff and 1 at the
@@ -194,25 +298,35 @@ public class Enemy implements WordTarget {
     public double getApproachProgress() {
         double span = targetY - spawnY;
         if (span <= 0.0001) {
-            return 1.0;
+            // A flank route has no vertical travel, so fall back to horizontal.
+            double horizontal = Math.abs(spawnX - GameConfig.TEMPLE_CENTER_X);
+            if (horizontal <= 0.0001) {
+                return 1.0;
+            }
+            double covered = Math.abs(x - spawnX);
+            return Math.max(0.0, Math.min(1.0, covered / horizontal));
         }
         return Math.max(0.0, Math.min(1.0, (y - spawnY) / span));
     }
 
     /**
      * Render scale from distance. Far enemies are drawn smaller, which is what
-     * makes the diagonal read as walking toward the temple instead of sliding
-     * down the screen.
+     * makes an approach read as coming toward the temple rather than sliding
+     * across it.
      *
-     * <p>Full size is reached at {@link GameConfig#DEPTH_FULL_SIZE_AT} rather
-     * than at the very end of the path. Enemies breach a
-     * {@code BREACH_RADIUS} short of the temple centre, so scaling all the way
-     * to 1.0 at the centre would mean they were never actually drawn at full
-     * size before being removed.
+     * <p>The floor comes from the route: a walker on its shallow plaza drift
+     * barely shrinks, while a flyer descending 45 degrees from the sky shrinks a
+     * lot. Full size is reached at {@link GameConfig#DEPTH_FULL_SIZE_AT} rather
+     * than at the very end, because enemies breach a {@code BREACH_RADIUS} short
+     * of the centre and would otherwise never be drawn at 100%.
      */
     public double depthScale() {
+        double min = path.depthScaleMin();
+        if (min >= 1.0) {
+            return 1.0;
+        }
         double eased = Math.min(1.0, getApproachProgress() / GameConfig.DEPTH_FULL_SIZE_AT);
-        return GameConfig.DEPTH_SCALE_MIN + (1.0 - GameConfig.DEPTH_SCALE_MIN) * eased;
+        return min + (1.0 - min) * eased;
     }
 
     /**
@@ -233,6 +347,7 @@ public class Enemy implements WordTarget {
     public void defeat() {
         this.alive = false;
         this.attackPhase = AttackPhase.NONE;
+        this.staggerTicks = 0;
     }
 
     /** True once the defeat animation has finished and this can be culled. */
@@ -242,7 +357,7 @@ public class Enemy implements WordTarget {
 
     @Override
     public String getWord() {
-        return word;
+        return wordChain.get(chainIndex);
     }
 
     @Override
@@ -311,6 +426,15 @@ public class Enemy implements WordTarget {
 
     @Override
     public String toString() {
-        return type.getDisplayName() + "[\"" + word + "\"]";
+        String label = type.getDisplayName() + "[\"" + getWord() + "\"";
+        if (isChained()) {
+            label += " " + (chainIndex + 1) + "/" + wordChain.size();
+        }
+        return label + "]";
+    }
+
+    /** Convenience for tests and spawning. */
+    public static List<String> chainOf(String... words) {
+        return new ArrayList<>(List.of(words));
     }
 }

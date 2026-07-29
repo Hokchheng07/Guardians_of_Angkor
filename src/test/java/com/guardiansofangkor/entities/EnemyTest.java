@@ -4,6 +4,8 @@ import com.guardiansofangkor.util.GameConfig;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -12,14 +14,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DisplayName("Enemy — diagonal approach, depth and attacks")
 class EnemyTest {
 
-    private static final int RUN = 380;
-
-    /** Builds an enemy on the diagonal route appropriate to its category. */
+    /** Builds an enemy on the descending route appropriate to its category. */
     private static Enemy onApproach(EnemyType type, String word, int direction, double speed) {
         ApproachPath path = type.isGrounded()
                 ? ApproachPath.GROUND_DIAGONAL
                 : ApproachPath.AIR_DIAGONAL;
-        return new Enemy(type, path, word, RUN, direction, speed);
+        return new Enemy(type, path, word, path.runMin(), direction, speed);
     }
 
     /** Builds an enemy walking in horizontally from a flank. */
@@ -123,22 +123,60 @@ class EnemyTest {
     }
 
     @Test
-    @DisplayName("enemies travel on an exact 45-degree diagonal")
-    void travelsOnDiagonal() {
-        Enemy enemy = onApproach(EnemyType.BEISACH, "ash", 1, 2.0);
-        double x0 = enemy.getX();
-        double y0 = enemy.getAnchorY();
+    @DisplayName("flying enemies descend on an exact 45-degree diagonal")
+    void flyersTravelOnDiagonal() {
+        Enemy ahp = onApproach(EnemyType.AHP, "mist", 1, 2.0);
+        double x0 = ahp.getX();
+        double y0 = ahp.getAnchorY();
 
         for (int i = 0; i < 50; i++) {
-            enemy.update();
+            ahp.update();
         }
 
-        double dx = enemy.getX() - x0;
-        double dy = enemy.getAnchorY() - y0;
+        double dx = ahp.getX() - x0;
+        double dy = ahp.getAnchorY() - y0;
 
         assertTrue(dx > 0, "should advance horizontally");
         assertEquals(dx, dy, 0.001,
                 "equal horizontal and vertical travel is what makes it 45 degrees");
+    }
+
+    @Test
+    @DisplayName("walkers drift shallowly and never leave the plaza")
+    void walkersStayOnThePlaza() {
+        // The plaza is only ~55px deep above the ground line, so a walker's
+        // descent has to be far shallower than 45 degrees or its feet end up in
+        // the sky above the temple.
+        for (EnemyType type : EnemyType.values()) {
+            if (!type.isGrounded()) {
+                continue;
+            }
+            Enemy enemy = new Enemy(type, ApproachPath.GROUND_DIAGONAL, "word",
+                    ApproachPath.GROUND_DIAGONAL.runMax(), 1, 2.0);
+
+            assertTrue(enemy.getSpawnY() >= GameConfig.PLAZA_TOP_Y,
+                    type.getDisplayName() + " spawned above the plaza at y="
+                            + Math.round(enemy.getSpawnY()));
+
+            double dx = Math.abs(enemy.getSpawnX() - GameConfig.TEMPLE_CENTER_X);
+            double dy = GameConfig.GROUND_LINE_Y - enemy.getSpawnY();
+            assertTrue(dy < dx,
+                    type.getDisplayName() + " descends too steeply to stay on stone");
+            assertTrue(dy > 0, type.getDisplayName() + " should still drift a little");
+        }
+    }
+
+    @Test
+    @DisplayName("walkers barely shrink, flyers shrink a lot")
+    void depthShrinkMatchesRoute() {
+        assertEquals(GameConfig.GROUND_DEPTH_SCALE_MIN,
+                ApproachPath.GROUND_DIAGONAL.depthScaleMin(), 0.001);
+        assertEquals(GameConfig.DEPTH_SCALE_MIN,
+                ApproachPath.AIR_DIAGONAL.depthScaleMin(), 0.001);
+        assertTrue(ApproachPath.GROUND_DIAGONAL.depthScaleMin()
+                        > ApproachPath.AIR_DIAGONAL.depthScaleMin(),
+                "a walker descending fifty pixels must not shrink like a "
+                        + "flyer descending three hundred");
     }
 
     @Test
@@ -164,7 +202,7 @@ class EnemyTest {
     @Test
     @DisplayName("depth scale grows from the minimum to full size")
     void depthScaleGrowsToFullSize() {
-        Enemy enemy = onApproach(EnemyType.YEAK, "temple", 1, 3.0);
+        Enemy enemy = onApproach(EnemyType.AHP, "mist", 1, 3.0);
 
         assertEquals(GameConfig.DEPTH_SCALE_MIN, enemy.depthScale(), 0.001,
                 "should start at the far-away size");
@@ -290,6 +328,95 @@ class EnemyTest {
                         "must not slide forward mid-throw");
             }
         }
+    }
+
+    // ---- mini-boss word chains --------------------------------------------
+
+    @Test
+    @DisplayName("an ordinary enemy is not chained")
+    void ordinaryEnemyIsNotChained() {
+        Enemy enemy = onFlank(EnemyType.BEISACH, "ash", 1, 1.0);
+
+        assertFalse(enemy.isChained());
+        assertEquals(1, enemy.getChainLength());
+        assertFalse(enemy.hasMoreWords(), "one word should be enough to kill it");
+    }
+
+    @Test
+    @DisplayName("a chained enemy reveals its words in order")
+    void chainRevealsWordsInOrder() {
+        Enemy naga = new Enemy(EnemyType.NAGA, ApproachPath.GROUND_FLANK,
+                List.of("first", "second", "third"),
+                GameConfig.FLANK_RUN_MIN, 1, 1.0);
+
+        assertEquals("first", naga.getWord());
+        assertTrue(naga.hasMoreWords());
+
+        assertTrue(naga.advanceChain());
+        assertEquals("second", naga.getWord());
+        assertEquals(1, naga.getChainCleared());
+
+        assertTrue(naga.advanceChain());
+        assertEquals("third", naga.getWord());
+        assertFalse(naga.hasMoreWords(), "the last word should be the killing one");
+
+        assertFalse(naga.advanceChain(), "there is nothing left to advance to");
+    }
+
+    @Test
+    @DisplayName("clearing a chain word staggers it instead of killing it")
+    void chainWordStaggersRatherThanKills() {
+        Enemy naga = new Enemy(EnemyType.NAGA, ApproachPath.GROUND_FLANK,
+                List.of("one", "two"), GameConfig.FLANK_RUN_MIN, 1, 2.0);
+
+        naga.advanceChain();
+
+        assertTrue(naga.isActive(), "a mid-chain hit must not kill it");
+        assertTrue(naga.isStaggered(), "it should recoil so the hit is readable");
+
+        double heldAt = naga.getX();
+        naga.update();
+        assertEquals(heldAt, naga.getX(), 0.001,
+                "it should hold position while staggered, giving the player a "
+                        + "beat to read the next word");
+    }
+
+    @Test
+    @DisplayName("the stagger wears off and it resumes advancing")
+    void staggerWearsOff() {
+        Enemy naga = new Enemy(EnemyType.NAGA, ApproachPath.GROUND_FLANK,
+                List.of("one", "two"), GameConfig.FLANK_RUN_MIN, 1, 2.0);
+        naga.advanceChain();
+
+        for (int i = 0; i < 200; i++) {
+            naga.update();
+        }
+
+        assertFalse(naga.isStaggered());
+        assertTrue(naga.getX() > GameConfig.TEMPLE_CENTER_X - GameConfig.FLANK_RUN_MIN,
+                "it should be walking again once the stagger ends");
+    }
+
+    @Test
+    @DisplayName("every word in a chain is exposed for duplicate checking")
+    void chainExposesAllWords() {
+        Enemy naga = new Enemy(EnemyType.NAGA, ApproachPath.GROUND_FLANK,
+                List.of("alpha", "beta"), GameConfig.FLANK_RUN_MIN, 1, 1.0);
+
+        assertEquals(List.of("alpha", "beta"), naga.getAllWords());
+    }
+
+    @Test
+    @DisplayName("defeating a chained enemy clears its stagger")
+    void defeatClearsStagger() {
+        Enemy naga = new Enemy(EnemyType.NAGA, ApproachPath.GROUND_FLANK,
+                List.of("one", "two"), GameConfig.FLANK_RUN_MIN, 1, 1.0);
+        naga.advanceChain();
+        naga.defeat();
+
+        assertFalse(naga.isStaggered(),
+                "a dying enemy must not hold a stagger that blocks its fade");
+        assertFalse(naga.isActive());
     }
 
     @Test

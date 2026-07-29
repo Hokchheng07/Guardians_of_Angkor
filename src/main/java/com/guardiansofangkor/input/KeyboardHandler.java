@@ -1,6 +1,7 @@
 package com.guardiansofangkor.input;
 
 import com.guardiansofangkor.util.GameConfig;
+import com.guardiansofangkor.util.Platform;
 
 import javax.swing.AbstractAction;
 import javax.swing.ActionMap;
@@ -48,10 +49,19 @@ public class KeyboardHandler {
                 this::confirmRestart);
         bind(inputMap, actionMap, KeyEvent.VK_ESCAPE, 0, "goa.quit", () -> onQuit.run());
 
-        // Pause lives on Ctrl+P rather than a bare letter — a bare P would be
-        // swallowed by the typing field, since P is a letter players type.
+        // Pause lives on the platform's own command modifier plus P: Cmd+P on
+        // macOS, Ctrl+P everywhere else. A bare P is impossible here, because
+        // the typing field legitimately consumes every letter key.
         bind(inputMap, actionMap, KeyEvent.VK_P,
-                KeyEvent.CTRL_DOWN_MASK, "goa.pause", () -> onPauseToggle.run());
+                Platform.commandModifier(), "goa.pause", () -> onPauseToggle.run());
+
+        // Some macOS keyboards and remote sessions still deliver Ctrl. Binding
+        // both costs nothing and avoids a dead shortcut.
+        if (Platform.commandModifier() != KeyEvent.CTRL_DOWN_MASK) {
+            bind(inputMap, actionMap, KeyEvent.VK_P,
+                    KeyEvent.CTRL_DOWN_MASK, "goa.pauseAlt", () -> onPauseToggle.run());
+        }
+
         bind(inputMap, actionMap, KeyEvent.VK_BACK_SPACE,
                 KeyEvent.CTRL_DOWN_MASK, "goa.clear", () -> onClearBuffer.run());
     }

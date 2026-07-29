@@ -6,6 +6,7 @@ import com.guardiansofangkor.engine.WaveManager;
 import com.guardiansofangkor.i18n.FontManager;
 import com.guardiansofangkor.i18n.Language;
 import com.guardiansofangkor.util.GameConfig;
+import com.guardiansofangkor.util.Platform;
 
 import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
@@ -80,9 +81,55 @@ public class HUDRenderer {
         drawLevelBanner(g2, state);
         if (state.isGameOver()) {
             drawGameOver(g2, state, restartArmed);
+        } else if (state.isPaused()) {
+            drawPauseOverlay(g2);
         } else if (restartArmed) {
             drawRestartPrompt(g2);
         }
+    }
+
+    /**
+     * Full-screen pause state.
+     *
+     * <p>The game loop keeps ticking while paused so this can be drawn — without
+     * it the screen simply freezes, which is indistinguishable from a hang.
+     */
+    private void drawPauseOverlay(Graphics2D g2) {
+        g2.setColor(Palette.SCRIM);
+        g2.fillRect(0, 0, GameConfig.SCREEN_WIDTH, GameConfig.SCREEN_HEIGHT);
+
+        int centerX = GameConfig.SCREEN_WIDTH / 2;
+        int centerY = GameConfig.SCREEN_HEIGHT / 2;
+
+        g2.setFont(titleFont);
+        FontMetrics fm = g2.getFontMetrics();
+        String title = "Paused";
+        int titleWidth = fm.stringWidth(title);
+
+        int panelWidth = 420;
+        int panelHeight = 210;
+        RoundRectangle2D panel = new RoundRectangle2D.Double(
+                centerX - panelWidth / 2.0, centerY - panelHeight / 2.0,
+                panelWidth, panelHeight, 20, 20);
+
+        g2.setColor(Palette.HUD_BG);
+        g2.fill(panel);
+        g2.setColor(Palette.HUD_DIVIDER);
+        g2.setStroke(new BasicStroke(1.5f));
+        g2.draw(panel);
+
+        g2.setColor(Palette.HUD_TEXT_GOLD);
+        g2.drawString(title, centerX - titleWidth / 2, centerY - 34);
+
+        g2.setColor(Palette.HUD_DIVIDER_SOFT);
+        g2.setStroke(new BasicStroke(1.5f));
+        g2.drawLine(centerX - 110, centerY - 16, centerX + 110, centerY - 16);
+
+        // The label follows the platform, so macOS players are told Cmd and
+        // everyone else is told Ctrl.
+        drawKeyHint(g2, centerX, centerY + 22, Platform.pauseShortcutLabel(),
+                "resume", Palette.HUD_TEXT_GOLD);
+        drawKeyHint(g2, centerX, centerY + 66, "ESC", "quit", Palette.HUD_TEXT_DIM);
     }
 
     // ---- top bar -----------------------------------------------------------

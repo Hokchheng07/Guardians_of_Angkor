@@ -101,18 +101,28 @@ public class WaveManager {
     private Enemy spawnOne(List<Enemy> activeEnemies) {
         EnemyType type = chooseType();
 
+        // Collect every word already promised to the field, including words
+        // later in a mini-boss chain that have not been revealed yet — otherwise
+        // a Naga's second word could duplicate a live enemy's.
         List<String> inPlay = new ArrayList<>();
         for (Enemy enemy : activeEnemies) {
-            inPlay.add(enemy.getWord());
+            inPlay.addAll(enemy.getAllWords());
         }
-        String word = wordBank.wordFor(type, inPlay);
+
+        List<String> words = new ArrayList<>();
+        int chainLength = chainLengthFor(type);
+        for (int i = 0; i < chainLength; i++) {
+            String word = wordBank.wordFor(type, inPlay);
+            words.add(word);
+            inPlay.add(word);
+        }
 
         // Alternate sides, with a random chance to repeat so it is not metronomic.
         int direction = random.nextInt(4) == 0 ? lastDirection : -lastDirection;
         lastDirection = direction;
 
-        // Ground types walk in from a flank or descend the causeway; flyers do
-        // the same two shapes but at hover altitude.
+        // Ground types walk in from a flank or drift down the plaza; flyers do
+        // the same two shapes but at hover altitude and a true 45 degrees.
         ApproachPath[] routes = ApproachPath.forBehaviour(type.getGroundBehavior());
         ApproachPath path = routes[random.nextInt(routes.length)];
 
@@ -124,7 +134,22 @@ public class WaveManager {
 
         double speed = DifficultyCurve.speedFor(type, level);
 
-        return new Enemy(type, path, word, run, direction, speed);
+        return new Enemy(type, path, words, run, direction, speed);
+    }
+
+    /**
+     * How many words this spawn must take to kill.
+     *
+     * <p>Mini-bosses get a randomised chain within their configured range, so
+     * two Naga encounters do not feel identical.
+     */
+    private int chainLengthFor(EnemyType type) {
+        int max = type.getMaxChainLength();
+        if (max <= 1) {
+            return 1;
+        }
+        int min = Math.min(2, max);
+        return min + random.nextInt(max - min + 1);
     }
 
     private EnemyType chooseType() {

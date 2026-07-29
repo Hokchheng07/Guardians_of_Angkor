@@ -25,6 +25,7 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Ellipse2D;
+import java.awt.geom.Path2D;
 import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
@@ -67,11 +68,30 @@ public class GamePanel extends JPanel {
     /** Bob cycles per tick — multiplied by each type's speed for variety. */
     private static final double BOB_FREQUENCY = 0.07;
 
-    /** How far a throwing enemy leans back at full windup, in radians. */
+    /** Whole-body lean, used only when there is no sprite to articulate. */
     private static final double WINDUP_LEAN = Math.toRadians(11);
 
-    /** How far it snaps forward on release. */
+    /** Whole-body forward snap, placeholder fallback only. */
     private static final double RELEASE_LEAN = Math.toRadians(-15);
+
+    /**
+     * Where the sprite is cut for the throw. Just above the hips on the
+     * delivered art, so the pivot sits where a real waist would.
+     */
+    private static final double WAIST_RATIO = 0.52;
+
+    /** Torso pixels drawn past the cut, so rotation cannot open a seam. */
+    private static final int SEAM_OVERLAP = 10;
+
+    /** Torso rotation at full windup. Larger than the old whole-body value,
+     *  because planted legs make a big lean read as effort rather than falling. */
+    private static final double TORSO_WINDUP_LEAN = Math.toRadians(17);
+
+    /** Torso rotation at the end of the release snap. */
+    private static final double TORSO_RELEASE_LEAN = Math.toRadians(-24);
+
+    /** How far a mini-boss rocks back when a word in its chain is cleared. */
+    private static final double STAGGER_LEAN = Math.toRadians(13);
 
     /** Strength of the halo behind Preah Ream. Subtle by design. */
     private static final float RIM_LIGHT_ALPHA = 0.18f;
@@ -254,13 +274,24 @@ public class GamePanel extends JPanel {
 
             // Attack lean is applied around the feet so a grounded monster
             // pivots on the ground rather than floating as it winds up.
+            boolean throwing = enemy.getAttackPhase() != AttackPhase.NONE;
             AffineTransform saved = eg.getTransform();
-            applyAttackLean(eg, enemy, cx, feetY);
 
-            if (sprite != null) {
-                drawSprite(eg, sprite, enemy.getDirection(), cx, topY, drawW, drawH);
+            if (throwing && sprite != null) {
+                // Real art gets the articulated throw: legs planted, torso pivots.
+                drawThrowingSprite(eg, sprite, enemy, cx, topY, drawW, drawH);
             } else {
-                drawPlaceholder(eg, cx, topY, drawW, drawH, isCandidate, isLocked);
+                if (throwing) {
+                    // No art to split, so fall back to leaning the whole body.
+                    applyAttackLean(eg, enemy, cx, feetY);
+                }
+                applyStaggerRecoil(eg, enemy, cx, feetY);
+
+                if (sprite != null) {
+                    drawSprite(eg, sprite, enemy.getDirection(), cx, topY, drawW, drawH);
+                } else {
+                    drawPlaceholder(eg, cx, topY, drawW, drawH, isCandidate, isLocked);
+                }
             }
 
             if (enemy.getHitFlashTicks() > 0) {
@@ -269,11 +300,11 @@ public class GamePanel extends JPanel {
 
             eg.setTransform(saved);
 
-            if (enemy.getAttackPhase() == AttackPhase.WINDUP) {
-                drawThrowTelegraph(eg, enemy, drawH);
-            }
-
             drawWord(eg, enemy.getWord(), typed, isCandidate, cx, topY - 14, wordFont);
+
+            if (enemy.isChained()) {
+                drawChainPips(eg, enemy, cx, topY - 44);
+            }
         } finally {
             eg.dispose();
         }
@@ -322,21 +353,181 @@ public class GamePanel extends JPanel {
         g2.translate(-pivotX, -pivotY);
     }
 
-    /** Warning glow while an enemy winds up, so the throw is never a surprise. */
-    private void drawThrowTelegraph(Graphics2D g2, Enemy enemy, int drawH) {
+    /**
+     * The articulated throw, built from one static image.
+     *
+     * <p>The sprite is cut at the waist and the two halves are drawn with
+     * different transforms: the legs stay planted with a slight brace, while the
+     * torso pivots about the waist — back through the windup, then snapping
+     * forward on release. That reads as a throw in a way that rotating the whole
+     * body never does, because a whole-body rotation looks like the monster is
+     * toppling rather than winding up.
+     *
+     * <p>Each half is isolated by clipping <em>after</em> its transform is
+     * applied, so the clip travels with the pixels it selects. The torso clip
+     * runs a few pixels past the waist so the rotation cannot open a seam.
+     *
+     * <p>When real throw art lands, this method is what gets replaced — the
+     * phase machine and timings in {@link AttackPhase} stay exactly as they are.
+     */
+    private void drawThrowingSprite(Graphics2D g2, BufferedImage sprite, Enemy enemy,
+                                    int cx, int topY, int drawW, int drawH) {
         double t = enemy.getAttackPhaseProgress();
-        Graphics2D tg = (Graphics2D) g2.create();
+        int facing = enemy.getDirection();
+
+        double lean;
+        double lunge;
+        double brace;
+
+        switch (enemy.getAttackPhase()) {
+            case WINDUP -> {
+                double eased = t * t;
+                lean = TORSO_WINDUP_LEAN * eased;
+                lunge = -7 * eased;
+                brace = 4 * eased;
+            }
+            case RELEASE -> {
+                // Fast ease-out: most of the rotation happens in the first ticks.
+                double eased = 1 - (1 - t) * (1 - t);
+                lean = TORSO_WINDUP_LEAN + (TORSO_RELEASE_LEAN - TORSO_WINDUP_LEAN) * eased;
+                lunge = 13 * eased;
+                brace = 4 * (1 - eased);
+            }
+            case RECOVER -> {
+                double remaining = 1 - t;
+                lean = TORSO_RELEASE_LEAN * remaining;
+                lunge = 13 * remaining;
+                brace = 0;
+            }
+            default -> {
+                return;
+            }
+        }
+
+        int waistY = topY + (int) Math.round(drawH * WAIST_RATIO);
+        int left = cx - drawW / 2;
+
+        // Legs: untransformed apart from a small brace downward.
+        Graphics2D legs = (Graphics2D) g2.create();
         try {
-            tg.setComposite(AlphaComposite.getInstance(
-                    AlphaComposite.SRC_OVER, (float) (0.25 + 0.45 * t)));
-            tg.setColor(COLOR_TELEGRAPH);
-            double radius = 10 + 8 * t;
-            tg.fill(new Ellipse2D.Double(
-                    enemy.getThrowOriginX() - radius,
-                    enemy.getThrowOriginY() - radius,
-                    radius * 2, radius * 2));
+            legs.clipRect(left - 30, waistY, drawW + 60, drawH);
+            drawSprite(legs, sprite, facing, cx,
+                    topY + (int) Math.round(brace), drawW, drawH);
         } finally {
-            tg.dispose();
+            legs.dispose();
+        }
+
+        AffineTransform torsoTx = new AffineTransform();
+        torsoTx.translate(cx + facing * lunge, waistY);
+        torsoTx.rotate(-facing * lean);
+        torsoTx.translate(-cx, -waistY);
+
+        Graphics2D torso = (Graphics2D) g2.create();
+        try {
+            torso.transform(torsoTx);
+            torso.clipRect(left - 60, topY - 60,
+                    drawW + 120, (waistY - topY) + 60 + SEAM_OVERLAP);
+            drawSprite(torso, sprite, facing, cx, topY, drawW, drawH);
+        } finally {
+            torso.dispose();
+        }
+
+        // The orb rides the same transform as the torso, so it swings with the
+        // arm rather than floating independently.
+        if (enemy.getAttackPhase() == AttackPhase.WINDUP) {
+            Graphics2D orb = (Graphics2D) g2.create();
+            try {
+                orb.transform(torsoTx);
+                drawHeldOrb(orb, enemy, t);
+            } finally {
+                orb.dispose();
+            }
+        }
+    }
+
+    /**
+     * The bolt gathering in the raised hand during windup.
+     *
+     * <p>Doubles as the telegraph: it grows and brightens as the release
+     * approaches, so the player always has warning before a projectile appears.
+     */
+    private void drawHeldOrb(Graphics2D g2, Enemy enemy, double windupProgress) {
+        double x = enemy.getThrowOriginX();
+        double y = enemy.getThrowOriginY();
+        double radius = (5 + 11 * windupProgress) * enemy.depthScale();
+
+        Graphics2D og = (Graphics2D) g2.create();
+        try {
+            og.setComposite(AlphaComposite.getInstance(
+                    AlphaComposite.SRC_OVER, (float) (0.35 + 0.55 * windupProgress)));
+
+            og.setColor(COLOR_TELEGRAPH);
+            og.fill(new Ellipse2D.Double(
+                    x - radius * 1.5, y - radius * 1.5, radius * 3, radius * 3));
+            og.setColor(COLOR_BOLT_EDGE);
+            og.fill(new Ellipse2D.Double(x - radius, y - radius, radius * 2, radius * 2));
+            og.setColor(COLOR_BOLT_CORE);
+            og.fill(new Ellipse2D.Double(
+                    x - radius * 0.45, y - radius * 0.45, radius * 0.9, radius * 0.9));
+        } finally {
+            og.dispose();
+        }
+    }
+
+    /**
+     * Recoil after a mini-boss loses a word from its chain.
+     *
+     * <p>Without a physical reaction the word simply swaps and the player cannot
+     * tell whether they landed a hit or the game glitched.
+     */
+    private void applyStaggerRecoil(Graphics2D g2, Enemy enemy, int pivotX, int pivotY) {
+        if (!enemy.isStaggered()) {
+            return;
+        }
+        double t = enemy.getStaggerProgress();
+        int facing = enemy.getDirection();
+
+        double lean = STAGGER_LEAN * t;
+        double knock = -facing * 10 * t;
+
+        g2.translate(pivotX + knock, pivotY);
+        g2.rotate(facing * lean);
+        g2.translate(-pivotX, -pivotY);
+    }
+
+    /**
+     * Pips above a mini-boss showing how many words are left in its chain.
+     *
+     * <p>Otherwise a Naga looks identical to an ordinary enemy that refuses to
+     * die, which reads as a bug rather than as a boss.
+     */
+    private void drawChainPips(Graphics2D g2, Enemy enemy, int cx, int y) {
+        int total = enemy.getChainLength();
+        int cleared = enemy.getChainCleared();
+
+        int size = 11;
+        int gap = 7;
+        int totalWidth = total * size + (total - 1) * gap;
+        int x = cx - totalWidth / 2;
+
+        for (int i = 0; i < total; i++) {
+            int px = x + i * (size + gap);
+            Path2D diamond = new Path2D.Double();
+            diamond.moveTo(px + size / 2.0, y);
+            diamond.lineTo(px + size, y + size / 2.0);
+            diamond.lineTo(px + size / 2.0, y + size);
+            diamond.lineTo(px, y + size / 2.0);
+            diamond.closePath();
+
+            if (i < cleared) {
+                // Spent: hollow, so remaining threat is what stands out.
+                g2.setColor(Palette.LIFE_LOST);
+                g2.setStroke(new BasicStroke(1.4f));
+                g2.draw(diamond);
+            } else {
+                g2.setColor(Palette.HUD_DIVIDER);
+                g2.fill(diamond);
+            }
         }
     }
 

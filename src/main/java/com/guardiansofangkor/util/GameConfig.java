@@ -70,9 +70,28 @@ public final class GameConfig {
     public static final int BREACH_RADIUS = 105;
 
     /**
-     * Shortest distance back along the 45-degree approach line that an enemy can
-     * materialise. Measured along the diagonal, so both the horizontal and
-     * vertical offsets are this over root two.
+     * Top of the walkable plaza, measured from the background art.
+     *
+     * <p>Everything above this line is temple masonry and sky. A grounded enemy
+     * whose feet go above it is standing on nothing — this is the constraint
+     * that makes a true 45-degree walk impossible, since it leaves only
+     * {@code GROUND_LINE_Y - PLAZA_TOP_Y} pixels of usable depth.
+     */
+    public static final int PLAZA_TOP_Y = 585;
+
+    /**
+     * Largest descent a grounded enemy may make on its approach, kept inside
+     * the plaza with a small safety margin.
+     */
+    public static final int GROUND_RISE_MAX = GROUND_LINE_Y - PLAZA_TOP_Y - 5;
+
+    /** Smallest descent, so the drift is still perceptible. */
+    public static final int GROUND_RISE_MIN = 28;
+
+    /**
+     * Shortest distance back along the 45-degree approach line that an airborne
+     * enemy can materialise. Measured along the diagonal, so both the horizontal
+     * and vertical offsets are this over root two.
      */
     public static final int APPROACH_RUN_MIN = 340;
 
@@ -103,10 +122,29 @@ public final class GameConfig {
     public static final int WORD_PLATE_CLEARANCE = 44;
 
     /**
-     * How small a freshly spawned enemy is drawn, relative to its full size.
-     * It grows to 1.0 as it nears the temple, which is what reads as depth.
+     * Extra slack between a capped spawn and the HUD bar.
+     *
+     * <p>Without it the cap is exact: solving the run so the plate just clears
+     * the bar puts the plate <em>on</em> the bar, and a pixel of rounding either
+     * way decides whether the word is readable. This buys unambiguous daylight.
+     */
+    public static final int HUD_SAFETY_MARGIN = 12;
+
+    /**
+     * How small a freshly spawned airborne enemy is drawn, relative to full
+     * size. It grows to 1.0 as it nears the temple, which is what reads as
+     * depth over the long 45-degree descent.
      */
     public static final double DEPTH_SCALE_MIN = 0.55;
+
+    /**
+     * Depth shrink for a grounded enemy on its shallow plaza drift.
+     *
+     * <p>Much milder than the airborne figure on purpose: a walker only
+     * descends around fifty pixels, and shrinking it to 55% over that distance
+     * would read as the monster deflating rather than as perspective.
+     */
+    public static final double GROUND_DEPTH_SCALE_MIN = 0.82;
 
     /**
      * Fraction of the approach after which an enemy is drawn at full size.

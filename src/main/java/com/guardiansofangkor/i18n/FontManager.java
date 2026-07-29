@@ -5,22 +5,71 @@ import java.awt.FontFormatException;
 import java.awt.GraphicsEnvironment;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * Loads the bundled Noto Sans Khmer font.
+ * Loads the bundled Khmer typefaces.
  *
  * <p>Dev brief Section 5.1: default Swing fonts do not render Khmer glyphs, so
- * the font has to be bundled as a resource and registered explicitly with
- * {@link Font#createFont}. The font file has not been added yet — until it is,
- * every accessor falls back to a sane sans-serif so English play is unaffected.
- * Drop {@code NotoSansKhmer-Regular.ttf} into {@code src/main/resources/fonts/}
- * and it activates with no code change.
+ * faces have to be bundled as resources and registered explicitly with
+ * {@link Font#createFont}. Swing will not silently substitute a system font for
+ * missing glyphs the way a browser does — unbundled Khmer renders as tofu boxes.
+ *
+ * <p>There is a deliberate chain rather than a single file:
+ *
+ * <ol>
+ *   <li><b>Suwannaphum</b> — the primary face. Traditional Khmer proportions,
+ *       good at the sizes words are drawn at.</li>
+ *   <li><b>Kamtumruy Pro</b> — the backup. A cleaner sans that stays legible at
+ *       small sizes, used if Suwannaphum is missing or fails to parse.</li>
+ *   <li><b>A registered system Khmer face</b> — whatever the machine already
+ *       has, found by name.</li>
+ *   <li><b>Sans-serif</b> — English play is then unaffected even though Khmer
+ *       will not render.</li>
+ * </ol>
+ *
+ * <p>Every step is optional. Missing font files are logged once, never thrown,
+ * so a fresh clone runs before anyone has added the assets.
  */
 public final class FontManager {
 
-    private static final String KHMER_FONT_PATH = "/fonts/NotoSansKhmer-Regular.ttf";
+    /** Primary Khmer face. */
+    private static final String SUWANNAPHUM_PATH = "/fonts/Suwannaphum-Regular.ttf";
+
+    /** Backup Khmer face, used when the primary is unavailable. */
+    private static final String KAMTUMRUY_PATH = "/fonts/KantumruyPro-Regular.ttf";
+
+    /**
+     * Alternative filenames accepted for each slot.
+     *
+     * <p>Google Fonts has shipped these under several names over the years —
+     * "Kantumruy" versus "KamtumruyPro", with and without a weight suffix. The
+     * team should not have to rename a file to make the game find it.
+     */
+    private static final String[] PRIMARY_CANDIDATES = {
+        SUWANNAPHUM_PATH,
+        "/fonts/Suwannaphum.ttf",
+        "/fonts/Suwannaphum-Regular.otf",
+    };
+
+    private static final String[] BACKUP_CANDIDATES = {
+        KAMTUMRUY_PATH,
+        "/fonts/KantumruyPro-Regular.otf",
+        "/fonts/KamtumruyPro-Regular.ttf",
+        "/fonts/Kantumruy-Regular.ttf",
+        "/fonts/KhmerOS.ttf",
+        "/fonts/NotoSansKhmer-Regular.ttf",
+    };
+
+    /** System faces to look for if nothing is bundled. */
+    private static final String[] SYSTEM_FALLBACKS = {
+        "Suwannaphum", "Kantumruy Pro", "Khmer OS", "Khmer OS System",
+        "Noto Sans Khmer", "Khmer MN", "Khmer Sangam MN",
+    };
 
     private static Font khmerBase;
+    private static String loadedFrom;
     private static boolean loadAttempted;
 
     private FontManager() {
@@ -28,8 +77,8 @@ public final class FontManager {
     }
 
     /**
-     * The Khmer-capable base font, or null when the resource is absent.
-     * Loaded once and cached; a failed load is not retried.
+     * The Khmer-capable base font, or null when nothing usable was found.
+     * Resolved once and cached; a failed resolution is not retried.
      */
     public static synchronized Font khmerBase() {
         if (loadAttempted) {
@@ -37,21 +86,85 @@ public final class FontManager {
         }
         loadAttempted = true;
 
-        try (InputStream in = FontManager.class.getResourceAsStream(KHMER_FONT_PATH)) {
+        Font primary = loadFirstAvailable(PRIMARY_CANDIDATES);
+        if (primary != null) {
+            khmerBase = primary;
+            return khmerBase;
+        }
+
+        Font backup = loadFirstAvailable(BACKUP_CANDIDATES);
+        if (backup != null) {
+            System.out.println("[FontManager] Suwannaphum not found — "
+                    + "using backup face " + backup.getFontName() + ".");
+            khmerBase = backup;
+            return khmerBase;
+        }
+
+        Font system = findSystemKhmerFont();
+        if (system != null) {
+            System.out.println("[FontManager] No bundled Khmer font — "
+                    + "using system face " + system.getFontName() + ".");
+            khmerBase = system;
+            return khmerBase;
+        }
+
+        System.out.println("[FontManager] No Khmer font available. Add "
+                + SUWANNAPHUM_PATH + " (and optionally " + KAMTUMRUY_PATH
+                + ") under src/main/resources to enable Khmer. "
+                + "English play is unaffected.");
+        return null;
+    }
+
+    /** Tries each classpath location in order, returning the first that loads. */
+    private static Font loadFirstAvailable(String[] paths) {
+        for (String path : paths) {
+            Font font = loadResourceFont(path);
+            if (font != null) {
+                loadedFrom = path;
+                System.out.println("[FontManager] Loaded " + font.getFontName()
+                        + " from " + path);
+                return font;
+            }
+        }
+        return null;
+    }
+
+    private static Font loadResourceFont(String path) {
+        try (InputStream in = FontManager.class.getResourceAsStream(path)) {
             if (in == null) {
-                System.out.println("[FontManager] " + KHMER_FONT_PATH
-                        + " not found — Khmer text will not render until it is added.");
                 return null;
             }
             Font font = Font.createFont(Font.TRUETYPE_FONT, in);
             GraphicsEnvironment.getLocalGraphicsEnvironment().registerFont(font);
-            khmerBase = font;
-            System.out.println("[FontManager] Loaded " + font.getFontName());
+            return font;
         } catch (IOException | FontFormatException e) {
-            System.err.println("[FontManager] Could not load Khmer font ("
-                    + e.getMessage() + ") — falling back to the default sans-serif.");
+            // A corrupt or wrong-format file must not stop the chain — fall
+            // through so the backup still gets its turn.
+            System.err.println("[FontManager] " + path + " could not be read ("
+                    + e.getMessage() + ") — trying the next candidate.");
+            return null;
         }
-        return khmerBase;
+    }
+
+    /** Looks for a Khmer face the operating system already has registered. */
+    private static Font findSystemKhmerFont() {
+        try {
+            List<String> installed = new ArrayList<>(List.of(
+                    GraphicsEnvironment.getLocalGraphicsEnvironment()
+                            .getAvailableFontFamilyNames()));
+
+            for (String wanted : SYSTEM_FALLBACKS) {
+                for (String available : installed) {
+                    if (available.equalsIgnoreCase(wanted)) {
+                        return new Font(available, Font.PLAIN, 12);
+                    }
+                }
+            }
+        } catch (RuntimeException e) {
+            // Headless environments can refuse to enumerate fonts.
+            return null;
+        }
+        return null;
     }
 
     /**
@@ -76,5 +189,21 @@ public final class FontManager {
     /** True when Khmer glyphs can actually be drawn right now. */
     public static boolean isKhmerAvailable() {
         return khmerBase() != null;
+    }
+
+    /**
+     * Which resource the Khmer face came from, or null if none was bundled.
+     * Useful in a startup log line when diagnosing a team member's setup.
+     */
+    public static synchronized String loadedFrom() {
+        khmerBase();
+        return loadedFrom;
+    }
+
+    /** Test seam: forces the next call to re-resolve the chain. */
+    static synchronized void resetForTesting() {
+        khmerBase = null;
+        loadedFrom = null;
+        loadAttempted = false;
     }
 }

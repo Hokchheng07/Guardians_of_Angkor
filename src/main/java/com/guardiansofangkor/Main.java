@@ -114,12 +114,18 @@ public final class Main {
             panel.repaint();
         });
 
+        // Pausing skips the simulation rather than stopping the loop, so the
+        // renderer keeps running and can draw the overlay. Typing is disabled
+        // while paused so keystrokes cannot leak through to the resolver.
         keys.setOnPauseToggle(() -> {
-            if (loop.isRunning()) {
-                loop.stop();
-            } else {
-                loop.start();
+            boolean nowPaused = state.togglePause();
+            if (!state.isGameOver()) {
+                input.setEnabled(!nowPaused);
+                if (!nowPaused) {
+                    input.requestFocusInWindow();
+                }
             }
+            panel.repaint();
         });
 
         JFrame frame = new JFrame("Guardians of Angkor — Word Defense");

@@ -24,7 +24,7 @@ public enum EnemyType {
     BEISACH("Beisach", "បិសាច", "Common",
             "beisach_transparent.png", GroundBehavior.GROUNDED,
             115, 0, 3, 5,
-            1.0, 0.075, 2.1, 0),
+            1.0, 0.075, 2.1, 0, 1),
 
     /**
      * Grunt. The big ogre — deliberately the largest non-boss on screen, and the
@@ -33,37 +33,37 @@ public enum EnemyType {
     YEAK("Yeak", "យក្ស", "Grunt",
             "yeak_transparent.png", GroundBehavior.GROUNDED,
             215, 0, 5, 7,
-            0.85, 0.035, 1.4, 330),
+            0.85, 0.035, 1.4, 330, 1),
 
     /** Swarm. Short words, fast, spawns in groups. Flies. Gets frantic fast. */
     AHP("Ahp", "អាប", "Swarm",
             "ahp_transparent.png", GroundBehavior.FLOATING,
             105, 155, 2, 4,
-            1.7, 0.11, 3.2, 0),
+            1.7, 0.11, 3.2, 0, 1),
 
     /** Heavy. Long words, slow approach. Barely speeds up. Art pending. */
     PRET("Pret", "ប្រេត", "Heavy",
             "pret_transparent.png", GroundBehavior.GROUNDED,
             185, 0, 8, 12,
-            0.65, 0.018, 1.0, 0),
+            0.65, 0.018, 1.0, 0, 1),
 
     /** Mimic. Its word shifts mid-type (Phase 10 behaviour). Floats. Art pending. */
     STEC_KANTOAB("Stec Kantoab", "សើចកន្តួប", "Mimic",
             "stec_kantoab_transparent.png", GroundBehavior.FLOATING,
             130, 120, 4, 6,
-            1.0, 0.06, 2.0, 0),
+            1.0, 0.06, 2.0, 0, 1),
 
     /** Mini-boss. Chains 2-3 words before dying. Coiled on the ground. */
     NAGA("Naga", "នាគ", "Mini-boss",
             "Naga.png", GroundBehavior.GROUNDED,
             240, 0, 5, 8,
-            0.6, 0.02, 1.0, 0),
+            0.6, 0.02, 1.0, 0, 3),
 
     /** Final boss. Full-phrase typing. */
     KRONG_REAP("Krong Reap", "ក្រុងរាព", "Final boss",
             "krong_reap_transparent.png", GroundBehavior.GROUNDED,
             330, 0, 10, 24,
-            0.5, 0.015, 0.9, 0);
+            0.5, 0.015, 0.9, 0, 1);
 
     private final String displayName;
     private final String khmerName;
@@ -78,13 +78,14 @@ public enum EnemyType {
     private final double levelSpeedGain;
     private final double maxSpeedMultiplier;
     private final int throwIntervalTicks;
+    private final int maxChainLength;
 
     EnemyType(String displayName, String khmerName, String tier,
               String spriteFile, GroundBehavior groundBehavior,
               int targetHeight, int hoverHeight,
               int minWordLength, int maxWordLength,
               double speedMultiplier, double levelSpeedGain, double maxSpeedMultiplier,
-              int throwIntervalTicks) {
+              int throwIntervalTicks, int maxChainLength) {
         this.displayName = displayName;
         this.khmerName = khmerName;
         this.tier = tier;
@@ -98,6 +99,7 @@ public enum EnemyType {
         this.levelSpeedGain = levelSpeedGain;
         this.maxSpeedMultiplier = maxSpeedMultiplier;
         this.throwIntervalTicks = throwIntervalTicks;
+        this.maxChainLength = maxChainLength;
     }
 
     public String getDisplayName() {
@@ -185,6 +187,21 @@ public enum EnemyType {
     /** True when this type can hurl projectiles at the temple. */
     public boolean canThrow() {
         return throwIntervalTicks > 0;
+    }
+
+    /**
+     * Most words this type can demand before it dies.
+     *
+     * <p>One for ordinary enemies. Mini-bosses carry more, and the spawner
+     * randomises within the range so two encounters are not identical.
+     */
+    public int getMaxChainLength() {
+        return maxChainLength;
+    }
+
+    /** True when this type takes several words to kill. */
+    public boolean isChainedType() {
+        return maxChainLength > 1;
     }
 
     /**

@@ -52,27 +52,42 @@ materialising rather than popping in. Preah Ream stands at
 TEMPLE_CENTER_X in the foreground, back to the viewer.
 
 ## Approach routes
-ApproachPath gives each enemy one of two shapes, picked from the family
-matching its GroundBehavior:
-- FLANK: purely horizontal, spawns level with its target, always drawn
-  at full size (it enters on the near plane).
-- DIAGONAL: exact 45 degrees, spawns back up the causeway, scales up
-  with depth.
-Ground types get GROUND_FLANK / GROUND_DIAGONAL, flyers get the AIR_
-variants at hover altitude. Never give a flyer a ground route or the
-hover height is ignored.
+ApproachPath describes routes as a horizontal RUN plus a vertical RISE,
+not as an angle. This is not incidental — walkers and flyers genuinely
+cannot share one geometry:
 
-Depth scaling runs from DEPTH_SCALE_MIN to full size at
-DEPTH_FULL_SIZE_AT. Full size is reached BEFORE the breach point on
-purpose — scaling to 1.0 only at the temple centre would mean monsters
-got culled before ever being drawn at 100%.
+- The walkable plaza starts at PLAZA_TOP_Y (585, measured off the
+  background art) and the ground line is 640, so there are only ~55px of
+  usable depth. A true 45-degree walk needs equal run and rise, which
+  over 55px means spawning basically on top of the breach point.
+  Anything longer puts a GROUNDED enemy's feet in the sky above the
+  temple. This was a real bug — Yeak was the most visible because he is
+  the tallest.
+- So GROUND_DIAGONAL is a SHALLOW drift (~5-6 degrees): long horizontal
+  run, rise capped at GROUND_RISE_MAX. AIR_DIAGONAL keeps the true 45
+  degrees, because flyers legitimately belong in the sky.
+- FLANK routes have zero rise and stay at full size the whole way; they
+  enter on the near plane.
 
-Diagonal spawn runs are capped per-type by
-ApproachPath.maxRunFor(targetY, headroom): a tall monster or a
-high-hovering flyer on a long run would otherwise spawn with its word
-plate behind the HUD bar, making it unreadable and untypeable. The run is
-shortened rather than the position clamped, so the 45 degrees survives.
-There is a test asserting every spawn clears HUD_BAR_HEIGHT.
+Use path.isFortyFiveDegrees() when you mean "the airborne descent", not
+isDescending() — the ground drift descends too.
+
+Depth scaling floor is PER ROUTE (ApproachPath.depthScaleMin), not
+global: GROUND_DEPTH_SCALE_MIN 0.82 vs DEPTH_SCALE_MIN 0.55. A walker
+that shrinks to 55% while descending only fifty pixels reads as
+deflating, not as perspective. Full size is reached at
+DEPTH_FULL_SIZE_AT, before the breach point — scaling to 1.0 only at the
+temple centre would mean monsters got culled before ever being drawn at
+100%.
+
+Airborne spawn runs are capped by ApproachPath.maxRunFor(targetY,
+headroom): a tall monster or high-hovering flyer would otherwise spawn
+with its word plate behind the HUD bar, unreadable and untypeable. The
+RUN is shortened rather than the position clamped, so 45 degrees
+survives. HUD_SAFETY_MARGIN exists because without it the cap is exact —
+the plate lands ON the bar and a pixel of rounding decides readability.
+There are tests asserting every spawn clears HUD_BAR_HEIGHT and that no
+grounded enemy ever leaves the plaza.
 
 ## Difficulty
 All level scaling lives in engine/DifficultyCurve. Every curve is
@@ -105,12 +120,31 @@ art, so dropping a PNG into resources/images needs no code change.
 ## Attack animation
 Yeak is the only type that throws (throwIntervalTicks > 0; others are 0
 and enable with a one-number change). The throw is a phase machine —
-WINDUP / RELEASE / RECOVER in AttackPhase — and the renderer maps each
-phase to a lean angle and lunge offset applied around the FEET. This
-builds a convincing throw from a single static image via anticipation
-and follow-through. When real pose art arrives, the sprite swap plugs
-into the same phases and the timing does not change. Enemies stop
-walking while an attack phase is active, or the throw reads as a stumble.
+WINDUP / RELEASE / RECOVER in AttackPhase.
+
+GamePanel.drawThrowingSprite builds the pose from ONE static image by
+cutting the sprite at WAIST_RATIO and drawing the halves with different
+transforms: legs planted with a slight brace, torso pivoting about the
+waist. Each half is isolated by clipping AFTER its transform is applied,
+so the clip travels with the pixels it selects; the torso clip runs
+SEAM_OVERLAP past the cut so rotation cannot open a gap. A whole-body
+rotation was tried first and reads as toppling, not winding up — that
+version survives only as the placeholder fallback when there is no
+sprite to cut. Enemies stop walking while an attack phase is active.
+
+## Mini-boss word chains
+Enemy carries a LIST of words, not one. Ordinary types have a list of
+one; NAGA has 2-3 (randomised per spawn from getMaxChainLength). The
+chain lives in Enemy rather than a Naga subclass so update, render and
+matching all stay on one path.
+
+Clearing a non-final word calls advanceChain(), which sets a stagger:
+the enemy holds position so the player gets a beat to read the next
+word. It scores but does NOT increment enemiesDefeated or
+resolvedThisLevel, because it has not actually been resolved.
+
+WaveManager dedupes against getAllWords(), not getWord() — otherwise a
+Naga's unrevealed second word can collide with a live enemy's.
 
 ## One-shot flags
 Projectile.hasJustLanded() and Enemy.isProjectileDue() are true for
@@ -120,11 +154,32 @@ of the fade-out and drains a whole run from a single missed bolt.
 
 ## Controls
 Type to attack. Tab arms restart and Enter within RESTART_ARMED_TICKS
-confirms (so one stray Tab cannot wipe a run). Escape quits. Ctrl+P
-pauses — pause cannot use a bare letter key, since the typing field
-consumes those. TypingInputField must keep
-setFocusTraversalKeysEnabled(false) or Tab moves focus instead of
-reaching the key binding.
+confirms (so one stray Tab cannot wipe a run). Escape quits. Cmd+P on
+macOS / Ctrl+P elsewhere pauses — pause cannot use a bare letter key,
+since the typing field legitimately consumes every letter.
+TypingInputField must keep setFocusTraversalKeysEnabled(false) or Tab
+moves focus instead of reaching the key binding.
+
+util/Platform holds the modifier detection. It is in util, not input,
+because HUDRenderer also needs it to label the pause overlay — putting
+it in input would make renderer depend on input while input already
+depends on renderer for Palette, creating a package cycle.
+
+## Pausing
+Pause SKIPS the simulation (GameState.paused short-circuits update); it
+does NOT stop the GameLoop. The loop must keep ticking so the renderer
+still paints the overlay — stopping the timer freezes the last frame
+with no explanation, which is indistinguishable from a hang. A finished
+run refuses to pause, since the overlay would cover the restart prompt.
+
+## Khmer fonts
+FontManager walks a chain: Suwannaphum (primary) then Kantumruy Pro
+(backup) then any system Khmer face then sans-serif. Font files are NOT
+committed — see resources/fonts/README.md. Swing does not substitute
+fonts for missing glyphs the way a browser does, so the face must be
+loaded with Font.createFont and registerFont or Khmer draws as tofu.
+Several alternative filenames are accepted so nobody has to rename a
+download.
 
 ## Input field
 TypingInputField is custom-painted (setOpaque(false), paintComponent

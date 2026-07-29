@@ -41,6 +41,17 @@ public class GameState {
     private boolean running = true;
     private boolean gameOver;
 
+    /**
+     * True while the player has paused.
+     *
+     * <p>Kept separate from {@link #running} and handled by skipping the
+     * simulation rather than by stopping the game loop. The loop still ticks, so
+     * the renderer keeps painting and can show the pause overlay — stopping the
+     * timer outright would freeze the last frame with no indication that
+     * anything had happened, which reads as a crash.
+     */
+    private boolean paused;
+
     private int charactersTyped;
     private int enemiesDefeated;
     private int projectilesIntercepted;
@@ -80,7 +91,7 @@ public class GameState {
     public void update() {
         levelJustCleared = false;
 
-        if (!running || gameOver) {
+        if (paused || !running || gameOver) {
             return;
         }
         elapsedTicks++;
@@ -192,7 +203,7 @@ public class GameState {
      * @return the resolution snapshot, so the caller can drive feedback
      */
     public ResolveResult handleInput(String typedSoFar) {
-        if (gameOver) {
+        if (gameOver || paused) {
             return ResolveResult.EMPTY_RESULT;
         }
 
@@ -213,11 +224,20 @@ public class GameState {
 
     private void handleCompleted(WordTarget target) {
         if (target instanceof Enemy enemy) {
-            enemy.defeat();
-            enemiesDefeated++;
-            resolvedThisLevel++;
             charactersTyped += GraphemeCounter.count(enemy.getWord());
             score += scoreForEnemy(enemy);
+
+            if (enemy.hasMoreWords()) {
+                // A mini-boss: this word only staggers it. It stays on the
+                // field, and progress does not advance, because it has not
+                // actually been resolved yet.
+                enemy.advanceChain();
+                enemy.flashHit(GameConfig.HIT_FLASH_TICKS * 2);
+            } else {
+                enemy.defeat();
+                enemiesDefeated++;
+                resolvedThisLevel++;
+            }
         } else if (target instanceof Projectile projectile) {
             projectile.intercept();
             projectilesIntercepted++;
@@ -463,6 +483,25 @@ public class GameState {
 
     public void setRunning(boolean running) {
         this.running = running;
+    }
+
+    public boolean isPaused() {
+        return paused;
+    }
+
+    /**
+     * Flips the pause state and reports the result.
+     *
+     * <p>Refuses to pause a finished run — there is nothing to come back to, and
+     * a pause overlay stacked on the game-over screen would hide the restart
+     * prompt.
+     */
+    public boolean togglePause() {
+        if (gameOver) {
+            return false;
+        }
+        paused = !paused;
+        return paused;
     }
 
     // ---- persistence -------------------------------------------------------

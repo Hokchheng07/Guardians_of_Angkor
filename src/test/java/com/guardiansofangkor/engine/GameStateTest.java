@@ -11,6 +11,8 @@ import com.guardiansofangkor.util.GameConfig;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -224,6 +226,104 @@ class GameStateTest {
 
         assertEquals(0, state.getResolvedThisLevel());
         assertEquals(0.0, state.getLevelProgress(), 0.0001);
+    }
+
+    @Test
+    @DisplayName("a mini-boss survives its first word and dies to its last")
+    void miniBossTakesTheWholeChain() {
+        GameState state = new GameState(Language.ENGLISH);
+        Enemy naga = new Enemy(EnemyType.NAGA, ApproachPath.GROUND_FLANK,
+                List.of("alpha", "bravo"), GameConfig.FLANK_RUN_MIN, 1, 0.0);
+        state.addEnemy(naga);
+
+        state.handleInput("alpha");
+        assertTrue(naga.isActive(), "the first word must not kill a mini-boss");
+        assertEquals(0, state.getEnemiesDefeated());
+        assertEquals("bravo", naga.getWord(), "it should reveal the next word");
+
+        state.handleInput("bravo");
+        assertFalse(naga.isActive(), "the last word should finish it");
+        assertEquals(1, state.getEnemiesDefeated());
+    }
+
+    @Test
+    @DisplayName("mid-chain hits score but do not advance level progress")
+    void midChainHitScoresWithoutResolving() {
+        GameState state = new GameState(Language.ENGLISH);
+        for (int tick = 0; tick < 400 && state.getLevel() < 1; tick++) {
+            state.update();
+        }
+        Enemy naga = new Enemy(EnemyType.NAGA, ApproachPath.GROUND_FLANK,
+                List.of("alpha", "bravo"), GameConfig.FLANK_RUN_MIN, 1, 0.0);
+        state.addEnemy(naga);
+
+        int resolvedBefore = state.getResolvedThisLevel();
+        state.handleInput("alpha");
+
+        assertTrue(state.getScore() > 0, "a mid-chain hit should still score");
+        assertEquals(resolvedBefore, state.getResolvedThisLevel(),
+                "the enemy is still alive, so the level is no further along");
+    }
+
+    // ---- pause -------------------------------------------------------------
+
+    @Test
+    @DisplayName("pausing freezes the simulation")
+    void pauseFreezesSimulation() {
+        GameState state = new GameState(Language.ENGLISH);
+        for (int tick = 0; tick < 60; tick++) {
+            state.update();
+        }
+
+        assertTrue(state.togglePause());
+        assertTrue(state.isPaused());
+
+        long ticksAtPause = state.getElapsedTicks();
+        for (int tick = 0; tick < 120; tick++) {
+            state.update();
+        }
+        assertEquals(ticksAtPause, state.getElapsedTicks(),
+                "no game time should pass while paused");
+    }
+
+    @Test
+    @DisplayName("typing is inert while paused")
+    void typingIsInertWhilePaused() {
+        GameState state = new GameState(Language.ENGLISH);
+        Enemy enemy = safeEnemy(state, "zzq");
+        state.togglePause();
+
+        assertEquals(MatchStatus.EMPTY, state.handleInput("zzq").status());
+        assertTrue(enemy.isActive(), "a paused game must not accept keystrokes");
+    }
+
+    @Test
+    @DisplayName("unpausing resumes the simulation")
+    void unpauseResumes() {
+        GameState state = new GameState(Language.ENGLISH);
+        state.togglePause();
+        state.update();
+
+        assertFalse(state.togglePause(), "toggling again should unpause");
+        assertFalse(state.isPaused());
+
+        long before = state.getElapsedTicks();
+        state.update();
+        assertTrue(state.getElapsedTicks() > before, "time should flow again");
+    }
+
+    @Test
+    @DisplayName("a finished run cannot be paused")
+    void gameOverCannotBePaused() {
+        GameState state = new GameState(Language.ENGLISH);
+        for (int i = 0; i < GameConfig.STARTING_LIVES; i++) {
+            state.loseLife();
+        }
+        assertTrue(state.isGameOver());
+
+        assertFalse(state.togglePause(),
+                "a pause overlay would hide the restart prompt");
+        assertFalse(state.isPaused());
     }
 
     @Test
