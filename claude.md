@@ -111,6 +111,25 @@ Krong Reap under 4%), so untrimmed scaling both mis-sizes monsters and
 floats grounded ones above the plaza. EnemyType specifies targetHeight
 only; width is derived from the trimmed aspect ratio.
 
+## Failure containment
+Anything Swing calls repeatedly is wrapped in util/CrashGuard. This is
+not defensive noise — it fixes a specific, very bad failure mode: an
+exception escaping a Swing Timer tick or a paintComponent is logged and
+then the callback FIRES AGAIN, so one bad frame becomes sixty stack
+traces a second while the window sits there open and frozen, telling the
+player nothing.
+
+CrashGuard catches Throwable (not just Exception), logs the first 3 with
+traces then goes quiet, and counts CONSECUTIVE failures so a transient
+glitch is absorbed but a persistent one is reported as hopeless.
+
+Guarded entry points: GameLoop.tick, GamePanel.paintComponent,
+GamePanel.tick, TypingInputField.paintComponent, the buffer-changed
+callback, and every KeyboardHandler action. GameLoop stops itself after
+HOPELESS_AFTER_TICKS consecutive failures, fires onFatalError ONCE
+(fatalReported guards re-entry), and Main saves progress then shows a
+dialog. Do not "simplify" these away.
+
 ## Missing assets are not errors
 SpriteCache, WordBank and FontManager all fall back gracefully when a
 resource is absent (placeholder shape, built-in word list, default font)

@@ -1,6 +1,7 @@
 package com.guardiansofangkor.input;
 
 import com.guardiansofangkor.renderer.Palette;
+import com.guardiansofangkor.util.CrashGuard;
 
 import javax.swing.BorderFactory;
 import javax.swing.JComponent;
@@ -68,6 +69,10 @@ public class TypingInputField extends JTextField {
     /** Slow pulse so the plate feels alive rather than static. */
     private double glowPhase;
 
+    /** Absorbs painting failures so a bad frame cannot become a repaint flood. */
+    private final CrashGuard paintGuard =
+            new CrashGuard("typing field", Integer.MAX_VALUE);
+
     private String hintText = "type to strike";
 
     public TypingInputField() {
@@ -110,6 +115,17 @@ public class TypingInputField extends JTextField {
 
     @Override
     protected void paintComponent(Graphics g) {
+        // Guarded for the same reason as the game panel: a throwing paint gets
+        // retried forever. Falling back to a plain bar keeps the field usable.
+        if (!paintGuard.run(() -> paintPlate(g))) {
+            g.setColor(Palette.HUD_BG);
+            g.fillRect(0, 0, getWidth(), getHeight());
+        }
+        // Text and caret last, on top of the glass.
+        super.paintComponent(g);
+    }
+
+    private void paintPlate(Graphics g) {
         Graphics2D g2 = (Graphics2D) g.create();
         try {
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
@@ -143,9 +159,6 @@ public class TypingInputField extends JTextField {
         } finally {
             g2.dispose();
         }
-
-        // Text and caret last, on top of the glass.
-        super.paintComponent(g);
     }
 
     /** Soft halo behind the plate — the thing that reads as "lit glass". */

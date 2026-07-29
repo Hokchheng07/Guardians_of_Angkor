@@ -56,6 +56,8 @@ public class SpriteCache {
 
     private BufferedImage playerGlowIdle;
     private BufferedImage playerGlowAction;
+    private boolean glowIdleAttempted;
+    private boolean glowActionAttempted;
     private int glowBuiltForHeight = -1;
 
     /**
@@ -77,7 +79,17 @@ public class SpriteCache {
                     + " (" + type.getSpritePath() + ") — drawing a placeholder.");
             return null;
         }
-        BufferedImage trimmed = trim(raw);
+
+        BufferedImage trimmed;
+        try {
+            trimmed = trim(raw);
+        } catch (RuntimeException e) {
+            // An unusual raster or colour model can throw during the scan. Use
+            // the untrimmed image rather than losing the monster entirely.
+            System.err.println("[SpriteCache] Could not trim "
+                    + type.getDisplayName() + " (" + e + ") — using it untrimmed.");
+            trimmed = raw;
+        }
         sprites.put(type, trimmed);
         return trimmed;
     }
@@ -109,8 +121,8 @@ public class SpriteCache {
             playerAttempted = true;
             BufferedImage idle = read(PLAYER_IDLE_PATH);
             BufferedImage action = read(PLAYER_ACTION_PATH);
-            playerIdle = idle == null ? null : trim(idle);
-            playerAction = action == null ? null : trim(action);
+            playerIdle = safeTrim(idle);
+            playerAction = safeTrim(action);
 
             if (playerIdle == null && playerAction == null) {
                 System.out.println("[SpriteCache] No Preah Ream art found — "
@@ -155,12 +167,20 @@ public class SpriteCache {
             // Display size changed, so the cached halos are the wrong scale.
             playerGlowIdle = null;
             playerGlowAction = null;
+            glowIdleAttempted = false;
+            glowActionAttempted = false;
             glowBuiltForHeight = height;
         }
 
-        BufferedImage cached = firing ? playerGlowAction : playerGlowIdle;
-        if (cached != null) {
-            return cached;
+        // Tracked with a flag rather than a null check, so a failed build is not
+        // retried on every single frame.
+        if (firing ? glowActionAttempted : glowIdleAttempted) {
+            return firing ? playerGlowAction : playerGlowIdle;
+        }
+        if (firing) {
+            glowActionAttempted = true;
+        } else {
+            glowIdleAttempted = true;
         }
 
         BufferedImage source = player(firing);
@@ -168,8 +188,17 @@ public class SpriteCache {
             return null;
         }
 
-        int width = playerWidth(firing, height);
-        BufferedImage built = buildGlow(source, width, height);
+        BufferedImage built;
+        try {
+            built = buildGlow(source, playerWidth(firing, height), height);
+        } catch (RuntimeException | OutOfMemoryError e) {
+            // Building the halo allocates a padded canvas and runs two convolve
+            // passes. If either fails, the hero simply draws without a rim
+            // light — a cosmetic loss, not a reason to lose the frame.
+            System.err.println("[SpriteCache] Could not build the hero glow ("
+                    + e + ") — drawing without a rim light.");
+            built = null;
+        }
 
         if (firing) {
             playerGlowAction = built;
@@ -298,6 +327,20 @@ public class SpriteCache {
             System.err.println("[SpriteCache] Could not read " + path
                     + " (" + e.getMessage() + ").");
             return null;
+        }
+    }
+
+    /** {@link #trim} that degrades to the untrimmed image instead of throwing. */
+    private static BufferedImage safeTrim(BufferedImage source) {
+        if (source == null) {
+            return null;
+        }
+        try {
+            return trim(source);
+        } catch (RuntimeException e) {
+            System.err.println("[SpriteCache] Could not trim an image ("
+                    + e + ") — using it untrimmed.");
+            return source;
         }
     }
 

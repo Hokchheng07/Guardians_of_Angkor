@@ -10,6 +10,7 @@ import com.guardiansofangkor.entities.VisualEffect;
 import com.guardiansofangkor.i18n.FontManager;
 import com.guardiansofangkor.i18n.Language;
 import com.guardiansofangkor.matching.WordTarget;
+import com.guardiansofangkor.util.CrashGuard;
 import com.guardiansofangkor.util.GameConfig;
 
 import javax.swing.JPanel;
@@ -120,6 +121,16 @@ public class GamePanel extends JPanel {
     private float lockChipAlpha;
 
     /**
+     * Absorbs painting failures. Never declared hopeless — unlike the game loop
+     * there is nothing to stop, and a panel that refuses to paint is worse than
+     * one that keeps trying.
+     */
+    private final CrashGuard paintGuard = new CrashGuard("renderer", Integer.MAX_VALUE);
+
+    /** Absorbs failures in the per-tick animation easing. */
+    private final CrashGuard tickGuard = new CrashGuard("panel tick", Integer.MAX_VALUE);
+
+    /**
      * The last target seen locked. Held after the lock clears so the chip has
      * something to draw while it fades out.
      */
@@ -148,21 +159,48 @@ public class GamePanel extends JPanel {
      * paint, so the fade runs at a fixed rate and pauses when the game does.
      */
     public void tick() {
-        WordTarget locked = state.getResolver().getLockedTarget();
-        if (locked != null) {
-            lastLockedTarget = locked;
-            lockChipAlpha = Math.min(1f, lockChipAlpha + LOCK_FADE_STEP);
-        } else {
-            lockChipAlpha = Math.max(0f, lockChipAlpha - LOCK_FADE_STEP);
-            if (lockChipAlpha <= 0f) {
-                lastLockedTarget = null;
+        tickGuard.run(() -> {
+            WordTarget locked = state.getResolver().getLockedTarget();
+            if (locked != null) {
+                lastLockedTarget = locked;
+                lockChipAlpha = Math.min(1f, lockChipAlpha + LOCK_FADE_STEP);
+            } else {
+                lockChipAlpha = Math.max(0f, lockChipAlpha - LOCK_FADE_STEP);
+                if (lockChipAlpha <= 0f) {
+                    lastLockedTarget = null;
+                }
             }
-        }
+        });
     }
 
     @Override
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
+
+        // Painting is the other sixty-times-a-second entry point. An unguarded
+        // exception here repaints, throws again, and floods — so a bad frame is
+        // absorbed and the player gets a legible message instead of a window
+        // that is open but wrong.
+        if (!paintGuard.run(() -> paintScene(g))) {
+            paintFallback(g);
+        }
+    }
+
+    /** Last-resort frame drawn when the real one could not be painted. */
+    private void paintFallback(Graphics g) {
+        try {
+            g.setColor(COLOR_SKY_TOP);
+            g.fillRect(0, 0, getWidth(), getHeight());
+            g.setColor(Palette.HUD_TEXT_DIM);
+            g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 16));
+            g.drawString("Rendering error — see console for details.", 24, 36);
+        } catch (RuntimeException ignored) {
+            // If even this fails the surface is unusable; there is nothing
+            // further to try, and throwing would restart the flood.
+        }
+    }
+
+    private void paintScene(Graphics g) {
         Graphics2D g2 = (Graphics2D) g.create();
         try {
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,

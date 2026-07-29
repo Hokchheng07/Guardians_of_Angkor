@@ -143,6 +143,12 @@ public final class FontManager {
             System.err.println("[FontManager] " + path + " could not be read ("
                     + e.getMessage() + ") — trying the next candidate.");
             return null;
+        } catch (RuntimeException e) {
+            // registerFont and the headless environment can both throw beyond
+            // the checked types. A missing font must never be fatal.
+            System.err.println("[FontManager] " + path + " could not be registered ("
+                    + e + ") — trying the next candidate.");
+            return null;
         }
     }
 
