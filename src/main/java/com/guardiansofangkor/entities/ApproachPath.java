@@ -96,7 +96,9 @@ public enum ApproachPath {
         if (airborne) {
             return run;
         }
-        double proportional = run * 0.11;
+        // Tuned so a long run uses most of the plaza's depth without a short one
+        // spawning right on top of the breach point.
+        double proportional = run * 0.18;
         return Math.max(GameConfig.GROUND_RISE_MIN,
                 Math.min(GameConfig.GROUND_RISE_MAX, proportional));
     }

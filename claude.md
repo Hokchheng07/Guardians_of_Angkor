@@ -56,16 +56,21 @@ ApproachPath describes routes as a horizontal RUN plus a vertical RISE,
 not as an angle. This is not incidental — walkers and flyers genuinely
 cannot share one geometry:
 
-- The walkable plaza starts at PLAZA_TOP_Y (585, measured off the
-  background art) and the ground line is 640, so there are only ~55px of
-  usable depth. A true 45-degree walk needs equal run and rise, which
-  over 55px means spawning basically on top of the breach point.
-  Anything longer puts a GROUNDED enemy's feet in the sky above the
-  temple. This was a real bug — Yeak was the most visible because he is
-  the tallest.
-- So GROUND_DIAGONAL is a SHALLOW drift (~5-6 degrees): long horizontal
+- The walkable plaza starts at PLAZA_TOP_Y (540, MEASURED off the
+  background art where the flagstones begin) and the ground line is 640,
+  so there are only ~100px of usable depth. A true 45-degree walk needs
+  equal run and rise, which over 100px means spawning basically on top of
+  the breach point. Anything longer puts a GROUNDED enemy's feet in the
+  sky above the temple. This was a real bug — Yeak was the most visible
+  because he is the tallest.
+- So GROUND_DIAGONAL is a SHALLOW drift (~9-10 degrees): long horizontal
   run, rise capped at GROUND_RISE_MAX. AIR_DIAGONAL keeps the true 45
   degrees, because flyers legitimately belong in the sky.
+
+PLAZA_TOP_Y DOES NOT SURVIVE AN ART CHANGE. If the background is
+replaced, re-measure where the paving starts and update it, or walkers
+will float. It has already moved once (585 -> 540) when the background
+was swapped.
 - FLANK routes have zero rise and stay at full size the whole way; they
   enter on the near plane.
 
@@ -233,6 +238,40 @@ its remaining letters. This exists because prefix matching is ambiguous
 by design: several enemies light up at once and the moment the target
 narrows to one is otherwise invisible. GamePanel.tick() eases its fade
 and must be called from the game loop, not from paintComponent.
+
+## Front end
+Two screens share one window via CardLayout in Main: MenuPanel and the
+game. Only one animates at a time — MenuPanel has its own Timer, the
+game has GameLoop, and switching stops the other.
+
+MenuState is pure logic (no Swing) so the whole flow is unit-testable.
+It returns an Outcome the caller acts on rather than calling back into
+the UI itself.
+
+KeyboardHandler bindings are WHEN_IN_FOCUSED_WINDOW, which fire even
+when their component is not showing. keys.setActiveWhen(gameRoot::
+isShowing) is what stops Escape quitting the game from inside the menu.
+Do not remove that gate.
+
+MenuPanel uses its own focusable KeyListener rather than window
+bindings, for the same reason in reverse.
+
+Locked entries (Options, Bestiary, and every difficulty except Easy)
+stay REACHABLE by the highlight instead of being skipped. A cursor that
+jumps past items the player can see reads as broken; landing on one and
+being told it is not ready does not.
+
+## Difficulty tiers
+Difficulty has four entries but only EASY.isImplemented(). MenuState
+refuses to return START_RUN for the others, so Main needs no branching
+yet. Implementing one means flipping the flag and consuming its
+speedScale / spawnIntervalScale in DifficultyCurve — the multipliers are
+already recorded so the intended balance is not lost.
+
+## Shared ornament
+renderer/Ornament holds the lotus-bud prang path used BOTH as HUD life
+pips and as the menu's title divider. It was duplicated once; keep it in
+one place or the two silhouettes drift apart.
 
 ## Build phases
 Phases 1-6 are implemented (engine, prefix matching, input, waves, HUD,

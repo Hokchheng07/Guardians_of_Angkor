@@ -272,9 +272,13 @@ public class HUDRenderer {
      * player reads "three slots, one spent" without counting gaps.
      */
     private void drawLotusBud(Graphics2D g2, int x, int y, int size, boolean lit) {
-        Path2D bud = budPath(x + size / 2.0, y + size * 0.94, size * 0.52, size * 0.80);
-        Path2D left = budPath(x + size * 0.20, y + size * 0.96, size * 0.30, size * 0.48);
-        Path2D right = budPath(x + size * 0.80, y + size * 0.96, size * 0.30, size * 0.48);
+        // Shared with the menu's title divider, so the two never drift apart.
+        Path2D bud = Ornament.budPath(
+                x + size / 2.0, y + size * 0.94, size * 0.52, size * 0.80);
+        Path2D left = Ornament.budPath(
+                x + size * 0.20, y + size * 0.96, size * 0.30, size * 0.48);
+        Path2D right = Ornament.budPath(
+                x + size * 0.80, y + size * 0.96, size * 0.30, size * 0.48);
 
         if (lit) {
             g2.setColor(Palette.LIFE_FILLED);
@@ -294,27 +298,6 @@ public class HUDRenderer {
             g2.drawLine((int) (x + size * 0.10), (int) (y + size * 0.94),
                     (int) (x + size * 0.90), (int) (y + size * 0.94));
         }
-    }
-
-    /** One lotus-bud tower: pointed apex, swelling body, narrow waist. */
-    private static Path2D budPath(double cx, double baseY, double width, double height) {
-        double halfW = width / 2.0;
-        double apexY = baseY - height;
-
-        Path2D path = new Path2D.Double();
-        path.moveTo(cx - halfW * 0.55, baseY);
-        // Left flank: waist in, belly out, taper to the point.
-        path.curveTo(
-                cx - halfW * 1.0, baseY - height * 0.34,
-                cx - halfW * 0.86, baseY - height * 0.70,
-                cx, apexY);
-        // Right flank, mirrored.
-        path.curveTo(
-                cx + halfW * 0.86, baseY - height * 0.70,
-                cx + halfW * 1.0, baseY - height * 0.34,
-                cx + halfW * 0.55, baseY);
-        path.closePath();
-        return path;
     }
 
     // ---- banners -----------------------------------------------------------

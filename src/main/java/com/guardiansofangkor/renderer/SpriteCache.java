@@ -40,6 +40,7 @@ public class SpriteCache {
     public static final int GLOW_RADIUS = 14;
 
     private static final String BACKGROUND_PATH = "/images/Background.png";
+    private static final String MENU_BACKGROUND_PATH = "/images/Main-Menu-Background.png";
     private static final String PLAYER_IDLE_PATH = "/images/Prea_Ream(idle).png";
     private static final String PLAYER_ACTION_PATH = "/images/Preas_Ream(Action).png";
 
@@ -49,6 +50,9 @@ public class SpriteCache {
 
     private BufferedImage background;
     private boolean backgroundAttempted;
+
+    private BufferedImage menuBackground;
+    private boolean menuBackgroundAttempted;
 
     private BufferedImage playerIdle;
     private BufferedImage playerAction;
@@ -106,6 +110,26 @@ public class SpriteCache {
                     + " — falling back to a painted gradient.");
         }
         return background;
+    }
+
+    /**
+     * The title-screen painting, or null when it is missing.
+     *
+     * <p>A separate image from the in-game backdrop: it includes Preah Ream
+     * drawn into the scene, which would double up with the live player sprite
+     * during play.
+     */
+    public BufferedImage menuBackground() {
+        if (menuBackgroundAttempted) {
+            return menuBackground;
+        }
+        menuBackgroundAttempted = true;
+        menuBackground = read(MENU_BACKGROUND_PATH);
+        if (menuBackground == null) {
+            System.out.println("[SpriteCache] No menu art at " + MENU_BACKGROUND_PATH
+                    + " — falling back to a painted gradient.");
+        }
+        return menuBackground;
     }
 
     /**

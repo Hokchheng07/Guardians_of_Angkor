@@ -72,12 +72,15 @@ public final class GameConfig {
     /**
      * Top of the walkable plaza, measured from the background art.
      *
-     * <p>Everything above this line is temple masonry and sky. A grounded enemy
-     * whose feet go above it is standing on nothing — this is the constraint
-     * that makes a true 45-degree walk impossible, since it leaves only
-     * {@code GROUND_LINE_Y - PLAZA_TOP_Y} pixels of usable depth.
+     * <p>Everything above this line is temple terracing and sky. A grounded
+     * enemy whose feet go above it is standing on masonry or thin air.
+     *
+     * <p>Measured at screen y 540 on the current background, where the open
+     * flagstone paving begins below the lowest terrace. Re-measure this if the
+     * background is ever replaced — it is the single number that keeps walkers
+     * on the ground, and it does not survive an art change.
      */
-    public static final int PLAZA_TOP_Y = 585;
+    public static final int PLAZA_TOP_Y = 540;
 
     /**
      * Largest descent a grounded enemy may make on its approach, kept inside
@@ -138,13 +141,13 @@ public final class GameConfig {
     public static final double DEPTH_SCALE_MIN = 0.55;
 
     /**
-     * Depth shrink for a grounded enemy on its shallow plaza drift.
+     * Depth shrink for a grounded enemy on its plaza drift.
      *
-     * <p>Much milder than the airborne figure on purpose: a walker only
-     * descends around fifty pixels, and shrinking it to 55% over that distance
+     * <p>Milder than the airborne figure on purpose: a walker descends around a
+     * hundred pixels, not three hundred, and shrinking it as hard as a flyer
      * would read as the monster deflating rather than as perspective.
      */
-    public static final double GROUND_DEPTH_SCALE_MIN = 0.82;
+    public static final double GROUND_DEPTH_SCALE_MIN = 0.78;
 
     /**
      * Fraction of the approach after which an enemy is drawn at full size.

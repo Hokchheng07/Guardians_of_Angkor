@@ -2,12 +2,15 @@ package com.guardiansofangkor;
 
 import com.guardiansofangkor.engine.GameLoop;
 import com.guardiansofangkor.engine.GameState;
+import com.guardiansofangkor.engine.MenuState;
 import com.guardiansofangkor.i18n.FontManager;
 import com.guardiansofangkor.i18n.Language;
 import com.guardiansofangkor.input.KeyboardHandler;
 import com.guardiansofangkor.input.TypingInputField;
 import com.guardiansofangkor.matching.ResolveResult;
 import com.guardiansofangkor.renderer.GamePanel;
+import com.guardiansofangkor.renderer.MenuPanel;
+import com.guardiansofangkor.renderer.SpriteCache;
 import com.guardiansofangkor.save.AutosaveHook;
 import com.guardiansofangkor.save.SaveData;
 import com.guardiansofangkor.save.SaveManager;
@@ -20,22 +23,29 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
 import java.awt.BorderLayout;
+import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Font;
 
 /**
- * Entry point. Assembles the window, wires input to the game state, restores any
- * saved progress and starts the loop.
+ * Entry point. Assembles the window, wires the front end to the game, restores
+ * any saved progress and starts the loop.
  *
- * <p>Controls: type to attack, Tab then Enter to restart, Escape to quit,
- * Cmd+P (macOS) or Ctrl+P to pause.
+ * <p>Two screens live in one window, swapped with a {@link CardLayout}: the menu
+ * and the game. Only one is animating at a time — the menu's timer stops when
+ * play begins, and the game loop stops when the menu returns.
  *
- * <p>Failure policy: every callback that Swing invokes is wrapped, because an
+ * <p>Controls in game: type to attack, Tab then Enter to restart, Escape to
+ * quit, Cmd+P (macOS) or Ctrl+P to pause.
+ *
+ * <p>Failure policy: every callback Swing invokes is wrapped, because an
  * exception escaping into Swing is logged and then <em>ignored</em> — leaving a
- * window that looks alive but is not. Anything unrecoverable ends with a dialog
- * that says so, and progress is saved first.
+ * window that looks alive but is not.
  */
 public final class Main {
+
+    private static final String CARD_MENU = "menu";
+    private static final String CARD_GAME = "game";
 
     public static void main(String[] args) {
         installGlobalHandler();
@@ -71,10 +81,12 @@ public final class Main {
         SaveData saved = saveManager.load();
 
         GameState state = new GameState(language);
-        state.restoreFrom(saved);
-
         AutosaveHook autosave = new AutosaveHook(saveManager, state::toSaveData);
         autosave.register();
+
+        SpriteCache sprites = new SpriteCache();
+
+        // ---- game screen ---------------------------------------------------
 
         GamePanel panel = new GamePanel(state);
         TypingInputField input = new TypingInputField();
@@ -82,10 +94,37 @@ public final class Main {
 
         input.setTypingFont(FontManager.wordFont(language, 22, Font.BOLD));
 
+        JPanel gameRoot = new JPanel(new BorderLayout());
+        gameRoot.setBackground(Color.BLACK);
+        gameRoot.add(panel, BorderLayout.CENTER);
+        gameRoot.add(input, BorderLayout.SOUTH);
+        gameRoot.setBorder(BorderFactory.createEmptyBorder());
+
+        // ---- front end -----------------------------------------------------
+
+        MenuState menuState = new MenuState(saved.hasResumableRun());
+        MenuPanel menuPanel = new MenuPanel(menuState, sprites);
+
+        JPanel root = new JPanel(new CardLayout());
+        root.add(menuPanel, CARD_MENU);
+        root.add(gameRoot, CARD_GAME);
+
+        // The game's shortcuts are window-scoped, so they must be muted while
+        // the menu is showing or Escape would quit from inside the menu.
+        keys.setActiveWhen(gameRoot::isShowing);
+
+        JFrame frame = new JFrame("Guardians of Angkor — Word Defense");
+        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        frame.setContentPane(root);
+        frame.setResizable(false);
+
+        CrashGuard inputGuard = new CrashGuard("input handling", Integer.MAX_VALUE);
+        CrashGuard controlGuard = new CrashGuard("controls", Integer.MAX_VALUE);
+        CrashGuard menuGuard = new CrashGuard("menu actions", Integer.MAX_VALUE);
+
         // Typing is a Swing document callback, so a throw here would be
         // swallowed by the toolkit and the player would just see keystrokes
         // stop working, with no clue why.
-        CrashGuard inputGuard = new CrashGuard("input handling", Integer.MAX_VALUE);
         input.setOnBufferChanged(text -> inputGuard.run(() -> {
             ResolveResult result = state.handleInput(text);
             switch (result.status()) {
@@ -100,36 +139,6 @@ public final class Main {
             }
             panel.repaint();
         }));
-
-        JPanel root = new JPanel(new BorderLayout());
-        root.setBackground(Color.BLACK);
-        root.add(panel, BorderLayout.CENTER);
-        root.add(input, BorderLayout.SOUTH);
-        root.setBorder(BorderFactory.createEmptyBorder());
-
-        JFrame frame = new JFrame("Guardians of Angkor — Word Defense");
-        frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        frame.setContentPane(root);
-        frame.setResizable(false);
-
-        CrashGuard controlGuard = new CrashGuard("controls", Integer.MAX_VALUE);
-
-        keys.setOnClearBuffer(() -> controlGuard.run(input::clearBuffer));
-
-        keys.setOnQuit(() -> controlGuard.run(() -> {
-            autosave.saveQuietly();
-            System.exit(0);
-        }));
-
-        keys.setOnRestart(() -> controlGuard.run(() -> {
-            state.restart();
-            input.resetForNewRun();
-            input.requestFocusInWindow();
-            autosave.saveQuietly();
-            panel.repaint();
-        }));
-
-        keys.install(root);
 
         GameLoop loop = new GameLoop(state, () -> {
             input.tick();
@@ -151,6 +160,60 @@ public final class Main {
             panel.repaint();
         });
 
+        Runnable showGame = () -> {
+            menuPanel.deactivateScreen();
+            ((CardLayout) root.getLayout()).show(root, CARD_GAME);
+            input.resetForNewRun();
+            input.requestFocusInWindow();
+            loop.clearFailures();
+            loop.start();
+            panel.repaint();
+        };
+
+        Runnable showMenu = () -> {
+            loop.stop();
+            ((CardLayout) root.getLayout()).show(root, CARD_MENU);
+            menuState.setContinueAvailable(state.getLevel() > 0 && !state.isGameOver());
+            menuPanel.activateScreen();
+        };
+
+        // ---- menu actions --------------------------------------------------
+
+        menuPanel.setOnStartRun(() -> menuGuard.run(() -> {
+            // Only Easy is implemented, and MenuState refuses to hand back
+            // START_RUN for any other tier, so a fresh run needs no branching yet.
+            state.restart();
+            autosave.saveQuietly();
+            showGame.run();
+        }));
+
+        menuPanel.setOnResumeRun(() -> menuGuard.run(() -> {
+            state.restoreFrom(saveManager.load());
+            showGame.run();
+        }));
+
+        menuPanel.setOnExit(() -> menuGuard.run(() -> {
+            autosave.saveQuietly();
+            System.exit(0);
+        }));
+
+        // ---- game controls -------------------------------------------------
+
+        keys.setOnClearBuffer(() -> controlGuard.run(input::clearBuffer));
+
+        keys.setOnQuit(() -> controlGuard.run(() -> {
+            autosave.saveQuietly();
+            showMenu.run();
+        }));
+
+        keys.setOnRestart(() -> controlGuard.run(() -> {
+            state.restart();
+            input.resetForNewRun();
+            input.requestFocusInWindow();
+            autosave.saveQuietly();
+            panel.repaint();
+        }));
+
         // Pausing skips the simulation rather than stopping the loop, so the
         // renderer keeps running and can draw the overlay. Typing is disabled
         // while paused so keystrokes cannot leak through to the resolver.
@@ -164,6 +227,8 @@ public final class Main {
             }
             panel.repaint();
         }));
+
+        keys.install(gameRoot);
 
         // The loop stops itself if ticks keep failing. Save what we have, then
         // tell the player rather than leaving a dead window on screen.
@@ -180,8 +245,8 @@ public final class Main {
         frame.setLocationRelativeTo(null);
         frame.setVisible(true);
 
-        input.requestFocusInWindow();
-        loop.start();
+        ((CardLayout) root.getLayout()).show(root, CARD_MENU);
+        menuPanel.activateScreen();
     }
 
     /** Shows an error the player can actually read, falling back to the console. */
