@@ -4,6 +4,7 @@ import com.guardiansofangkor.util.GameConfig;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -427,8 +428,29 @@ class EnemyTest {
         assertThrows(IllegalArgumentException.class,
                 () -> new Enemy(EnemyType.BEISACH, null, "word", 100, 1, 1.0));
         assertThrows(IllegalArgumentException.class,
-                () -> new Enemy(EnemyType.BEISACH, ApproachPath.GROUND_FLANK, null, 100, 1, 1.0));
+                () -> new Enemy(EnemyType.BEISACH, ApproachPath.GROUND_FLANK,
+                        (String) null, 100, 1, 1.0));
         assertThrows(IllegalArgumentException.class,
                 () -> new Enemy(EnemyType.BEISACH, ApproachPath.GROUND_FLANK, "", 100, 1, 1.0));
+    }
+
+    @Test
+    @DisplayName("the chain constructor rejects an empty or holey word list")
+    void chainConstructorValidates() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new Enemy(EnemyType.NAGA, ApproachPath.GROUND_FLANK,
+                        (List<String>) null, 100, 1, 1.0));
+        assertThrows(IllegalArgumentException.class,
+                () -> new Enemy(EnemyType.NAGA, ApproachPath.GROUND_FLANK,
+                        List.of(), 100, 1, 1.0));
+
+        // A null inside the list would only blow up later, when that word was
+        // finally revealed — catch it at construction instead.
+        List<String> holey = new ArrayList<>();
+        holey.add("alpha");
+        holey.add(null);
+        assertThrows(IllegalArgumentException.class,
+                () -> new Enemy(EnemyType.NAGA, ApproachPath.GROUND_FLANK,
+                        holey, 100, 1, 1.0));
     }
 }
