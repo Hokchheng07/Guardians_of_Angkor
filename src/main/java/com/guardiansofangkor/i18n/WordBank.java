@@ -34,16 +34,41 @@ public class WordBank {
 
     /** Used whenever the word list resource is missing or unreadable. */
     private static final List<String> FALLBACK_WORDS = List.of(
-            // short (Ahp / swarm)
-            "sun", "sky", "owl", "ash", "mist", "moon", "fang", "claw", "dusk", "veil",
-            // medium (Beisach / Stec Kantoab)
-            "stone", "spire", "shade", "curse", "flame", "night", "ghost", "wraith",
-            "temple", "shadow", "spirit", "hollow",
-            // longer (Yeak / Naga)
-            "lantern", "monsoon", "obsidian", "sandstone", "moonlight", "guardian",
-            // long (Pret / boss)
-            "monument", "sanctuary", "incantation", "reliquary", "procession",
-            "labyrinthine", "invocation", "apparition");
+            // short (Ahp / swarm) — 100 words
+            "bone", "gold", "iron", "leaf", "palm", "reed", "root", "rope", "rust", "salt",
+            "sand", "silk", "silt", "soil", "star", "wind", "rain", "fire", "frog", "toad",
+            "newt", "worm", "wolf", "bear", "deer", "hawk", "wren", "lark", "dove", "hare",
+            "mole", "rice", "corn", "bean", "herb", "seed", "husk", "jade", "ruby", "coal",
+            "clay", "rock", "cave", "pond", "lake", "peak", "hill", "dale", "glen", "path",
+            "road", "gate", "wall", "roof", "door", "lamp", "monk", "idol", "lore", "rune",
+            "omen", "doom", "pyre", "vale", "tomb", "sage", "moss", "vine", "bark", "bird",
+            "crow", "wasp", "moth", "oak", "elm", "fern", "ice", "fog", "mud", "webs",
+            "cat", "pig", "cow", "hen", "egg", "ink", "rat", "orb", "urn", "key","sun",
+            "sky", "owl", "ash", "mist", "moon", "fang", "claw", "dusk", "veil",
+
+            // medium (Beisach / Stec Kantoab) — 70 words
+
+            "altar", "amber", "ashes", "blade", "chant", "chime", "cloak", "crown", "crypt", "demon",
+            "draft", "dream", "ember", "faith", "feast", "flare", "flock", "frost", "glyph", "grave",
+            "groan", "grove", "haunt", "karma", "magic", "mango", "marsh", "mirth", "nectar", "omens",
+            "orbit", "plume", "prayer", "quest", "raven", "realm", "relic", "ritual", "sacred", "scroll",
+            "shrine", "sigil", "skull", "smoke", "sound", "spell", "spore", "stalk", "storm", "swamp",
+            "sword", "totem", "trance", "valor", "venom", "vigil", "wisdom", "wrath","stone", "spire",
+            "shade", "curse", "flame", "night", "ghost", "wraith", "temple", "shadow", "spirit", "hollow",
+
+            // longer (Yeak / Naga) — 40 words
+            "amethyst", "ancestor", "blossoms", "cinnamon", "crescent", "darkness", "doorways", "dreamers",
+            "elephant", "festival", "footpath", "fountain", "fragment", "gargoyle", "gateways", "graveyard",
+            "hallways", "harvests", "highland", "ironwood", "jungles", "lakeside", "labyrinth", "marigold",
+            "medicine", "midnight", "monolith", "mountains", "mudbrick", "mythical", "nightfall", "obelisks",
+            "outpost", "pagodas",  "lantern", "monsoon", "obsidian", "sandstone", "moonlight", "guardian",
+
+            // long (Pret / boss) — 30 words
+            "monastery", "catacombs", "excavation", "expedition", "foundation", "hieroglyph",
+            "inheritance", "inscription", "lamentation", "malediction", "manuscript", "mausoleum",
+            "necropolis", "overgrowth", "pilgrimage", "possession", "premonition", "resurrection",
+            "sarcophagus", "stronghold", "subterranean", "wilderness", "monument", "sanctuary",
+            "incantation", "reliquary", "procession","labyrinthine", "invocation", "apparition");
 
     private final Language language;
     private final List<String> words;
