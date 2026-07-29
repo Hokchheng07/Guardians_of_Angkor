@@ -1,6 +1,5 @@
 package com.guardiansofangkor.util;
 
-import java.awt.HeadlessException;
 import java.awt.Toolkit;
 import java.awt.event.KeyEvent;
 
@@ -28,8 +27,9 @@ public final class Platform {
     public static int commandModifier() {
         try {
             return Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
-        } catch (HeadlessException | UnsupportedOperationException e) {
-            // Headless test runs have no toolkit; Control is the safe default.
+        } catch (UnsupportedOperationException e) {
+            // Covers HeadlessException, which extends it — a headless test run
+            // has no toolkit to ask. Control is the safe default.
             return KeyEvent.CTRL_DOWN_MASK;
         }
     }
