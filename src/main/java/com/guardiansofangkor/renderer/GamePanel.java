@@ -44,17 +44,17 @@ import java.util.List;
  */
 public class GamePanel extends JPanel {
 
-    private static final Color COLOR_SKY_TOP = new Color(0x1A, 0x12, 0x2E);
+    private static final Color COLOR_SKY_TOP = new Color(0x1E, 0x19, 0x14);
     private static final Color COLOR_SKY_BOTTOM = new Color(0x6B, 0x3A, 0x2A);
     private static final Color COLOR_GROUND = new Color(0x22, 0x22, 0x17);
-    private static final Color COLOR_PLACEHOLDER = new Color(0x4C, 0x3A, 0x63);
-    private static final Color COLOR_PLACEHOLDER_EDGE = new Color(0x7A, 0x5F, 0x9B);
-    private static final Color COLOR_TEXT = new Color(0xF3, 0xEE, 0xFA);
-    private static final Color COLOR_TYPED = new Color(0xE8, 0xB9, 0x3B);
-    private static final Color COLOR_LOCKED_GLOW = new Color(0xFF, 0xD9, 0x6B);
-    private static final Color COLOR_WORD_BG = new Color(0x0D, 0x09, 0x14, 195);
+    private static final Color COLOR_PLACEHOLDER = new Color(0x4A, 0x3E, 0x2E);
+    private static final Color COLOR_PLACEHOLDER_EDGE = new Color(0x7A, 0x66, 0x48);
+    private static final Color COLOR_TEXT = Palette.HUD_TEXT_WHITE;
+    private static final Color COLOR_TYPED = Palette.HUD_DIVIDER;
+    private static final Color COLOR_LOCKED_GLOW = Palette.HUD_TEXT_GOLD;
+    private static final Color COLOR_WORD_BG = new Color(0x1E, 0x19, 0x14, 205);
     private static final Color COLOR_SHADOW = new Color(0x00, 0x00, 0x00, 110);
-    private static final Color COLOR_POOF = new Color(0xCE, 0xC2, 0xD8);
+    private static final Color COLOR_POOF = new Color(0xD2, 0xC6, 0xB0);
     private static final Color COLOR_BOLT_CORE = new Color(0xFF, 0xE7, 0xA8);
     private static final Color COLOR_BOLT_EDGE = new Color(0xD9, 0x5B, 0x3C);
     private static final Color COLOR_BOLT_WORD = new Color(0xFF, 0xC9, 0x5C);
@@ -73,15 +73,37 @@ public class GamePanel extends JPanel {
     /** How far it snaps forward on release. */
     private static final double RELEASE_LEAN = Math.toRadians(-15);
 
+    /** Strength of the halo behind Preah Ream. Subtle by design. */
+    private static final float RIM_LIGHT_ALPHA = 0.18f;
+
+    private static final int LOCK_CHIP_HEIGHT = 48;
+    private static final int LOCK_CHIP_MIN_WIDTH = 180;
+
+    /** Gap between the lock chip and the bottom of the play area. */
+    private static final int LOCK_CHIP_MARGIN = 10;
+
+    /** How fast the lock chip fades in and out, per tick. */
+    private static final float LOCK_FADE_STEP = 0.14f;
+
     private final GameState state;
     private final SpriteCache sprites = new SpriteCache();
     private final HUDRenderer hud;
 
     private final Font wordFont;
     private final Font boltFont;
+    private final Font lockFont;
 
     /** Set by Main each tick so the HUD can show the restart prompt. */
     private boolean restartArmed;
+
+    /** Eased 0-1 visibility of the lock chip. */
+    private float lockChipAlpha;
+
+    /**
+     * The last target seen locked. Held after the lock clears so the chip has
+     * something to draw while it fades out.
+     */
+    private WordTarget lastLockedTarget;
 
     public GamePanel(GameState state) {
         this.state = state;
@@ -89,6 +111,7 @@ public class GamePanel extends JPanel {
         this.hud = new HUDRenderer(language);
         this.wordFont = FontManager.wordFont(language, 20, Font.BOLD);
         this.boltFont = FontManager.wordFont(language, 17, Font.BOLD);
+        this.lockFont = FontManager.wordFont(language, 26, Font.BOLD);
 
         setPreferredSize(new Dimension(GameConfig.SCREEN_WIDTH, GameConfig.SCREEN_HEIGHT));
         setBackground(COLOR_SKY_TOP);
@@ -98,6 +121,23 @@ public class GamePanel extends JPanel {
 
     public void setRestartArmed(boolean restartArmed) {
         this.restartArmed = restartArmed;
+    }
+
+    /**
+     * Advances render-only animation. Called once per game tick rather than per
+     * paint, so the fade runs at a fixed rate and pauses when the game does.
+     */
+    public void tick() {
+        WordTarget locked = state.getResolver().getLockedTarget();
+        if (locked != null) {
+            lastLockedTarget = locked;
+            lockChipAlpha = Math.min(1f, lockChipAlpha + LOCK_FADE_STEP);
+        } else {
+            lockChipAlpha = Math.max(0f, lockChipAlpha - LOCK_FADE_STEP);
+            if (lockChipAlpha <= 0f) {
+                lastLockedTarget = null;
+            }
+        }
     }
 
     @Override
@@ -139,6 +179,10 @@ public class GamePanel extends JPanel {
 
             drawEffects(g2, VisualEffect.Kind.ARROW);
             drawEffects(g2, VisualEffect.Kind.IMPACT);
+
+            if (!state.isGameOver()) {
+                drawLockChip(g2);
+            }
 
             hud.draw(g2, state, restartArmed);
         } finally {
@@ -376,6 +420,8 @@ public class GamePanel extends JPanel {
         g2.fill(new Ellipse2D.Double(
                 cx - width * 0.3, feetY - 9, width * 0.6, width * 0.16));
 
+        drawPlayerRimLight(g2, firing, cx, topY, width, height);
+
         if (sprite != null) {
             g2.drawImage(sprite, cx - width / 2, topY, width, height, null);
         } else {
@@ -387,6 +433,117 @@ public class GamePanel extends JPanel {
             g2.draw(new RoundRectangle2D.Double(
                     cx - width / 2.0, topY, width, height, 20, 20));
         }
+    }
+
+    /**
+     * Soft warm halo behind the hero.
+     *
+     * <p>Purely for separation — Preah Ream's dark red robe sits against a dark
+     * temple silhouette and without this he merges into it. Kept low-alpha on
+     * purpose: this is a rim light, not a spotlight, and pushing it further
+     * makes him look like he is on fire rather than lit from behind.
+     */
+    private void drawPlayerRimLight(Graphics2D g2, boolean firing,
+                                    int cx, int topY, int width, int height) {
+        BufferedImage glow = sprites.playerGlow(firing, height);
+        if (glow == null) {
+            return;
+        }
+        int pad = SpriteCache.GLOW_RADIUS * 3;
+
+        Graphics2D rim = (Graphics2D) g2.create();
+        try {
+            rim.setComposite(AlphaComposite.getInstance(
+                    AlphaComposite.SRC_OVER, RIM_LIGHT_ALPHA));
+            rim.drawImage(glow, cx - width / 2 - pad, topY - pad, null);
+        } finally {
+            rim.dispose();
+        }
+    }
+
+    // ---- target lock -------------------------------------------------------
+
+    /**
+     * Confirms which enemy the prefix matcher has locked onto, and what is left
+     * to type.
+     *
+     * <p>This exists because prefix matching is ambiguous by design: in a
+     * crowded level several enemies light up at once and the moment the target
+     * narrows to one is otherwise invisible. Without this chip the player has to
+     * infer the lock from the highlight, which is unreliable when monsters
+     * overlap.
+     */
+    private void drawLockChip(Graphics2D g2) {
+        if (lockChipAlpha <= 0.01f) {
+            return;
+        }
+        WordTarget locked = lastLockedTarget;
+        if (locked == null) {
+            return;
+        }
+
+        String word = locked.getWord();
+        String typed = state.getResolver().getValidBuffer();
+        String remaining = (typed != null && word.startsWith(typed))
+                ? word.substring(typed.length())
+                : word;
+
+        Graphics2D cg = (Graphics2D) g2.create();
+        try {
+            cg.setComposite(AlphaComposite.getInstance(
+                    AlphaComposite.SRC_OVER, lockChipAlpha));
+
+            cg.setFont(lockFont);
+            FontMetrics fm = cg.getFontMetrics();
+            int textWidth = fm.stringWidth(remaining);
+
+            int iconSize = LOCK_CHIP_HEIGHT - 16;
+            int chipWidth = Math.max(LOCK_CHIP_MIN_WIDTH,
+                    iconSize + 14 + textWidth + 36);
+            int chipX = (GameConfig.SCREEN_WIDTH - chipWidth) / 2;
+            int chipY = GameConfig.SCREEN_HEIGHT - LOCK_CHIP_HEIGHT - LOCK_CHIP_MARGIN;
+
+            RoundRectangle2D chip = new RoundRectangle2D.Double(
+                    chipX, chipY, chipWidth, LOCK_CHIP_HEIGHT, 12, 12);
+            cg.setColor(Palette.HUD_BG);
+            cg.fill(chip);
+            cg.setColor(Palette.HUD_DIVIDER);
+            cg.setStroke(new BasicStroke(1.4f));
+            cg.draw(chip);
+
+            drawLockIcon(cg, locked, chipX + 12, chipY + 8, iconSize);
+
+            cg.setFont(lockFont);
+            cg.setColor(Palette.HUD_TEXT_GOLD);
+            cg.drawString(remaining,
+                    chipX + 12 + iconSize + 14,
+                    chipY + LOCK_CHIP_HEIGHT / 2 + fm.getAscent() / 2 - 2);
+        } finally {
+            cg.dispose();
+        }
+    }
+
+    /** Mini portrait of the locked target, so the chip identifies <em>which</em>. */
+    private void drawLockIcon(Graphics2D g2, WordTarget locked, int x, int y, int size) {
+        if (locked instanceof Enemy enemy) {
+            BufferedImage sprite = sprites.sprite(enemy.getType());
+            if (sprite != null) {
+                double aspect = sprite.getWidth() / (double) sprite.getHeight();
+                int w = (int) Math.round(size * aspect);
+                g2.drawImage(sprite, x + (size - w) / 2, y, w, size, null);
+                return;
+            }
+            g2.setColor(COLOR_PLACEHOLDER_EDGE);
+            g2.fill(new RoundRectangle2D.Double(x, y, size, size, 6, 6));
+            return;
+        }
+        // Projectiles get the bolt glyph rather than a monster portrait.
+        g2.setColor(COLOR_BOLT_EDGE);
+        g2.fill(new Ellipse2D.Double(x + size * 0.1, y + size * 0.1,
+                size * 0.8, size * 0.8));
+        g2.setColor(COLOR_BOLT_CORE);
+        g2.fill(new Ellipse2D.Double(x + size * 0.3, y + size * 0.3,
+                size * 0.4, size * 0.4));
     }
 
     // ---- projectiles -------------------------------------------------------

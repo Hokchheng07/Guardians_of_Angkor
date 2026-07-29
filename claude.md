@@ -128,10 +128,37 @@ reaching the key binding.
 
 ## Input field
 TypingInputField is custom-painted (setOpaque(false), paintComponent
-draws the glass plate then calls super for the text). It is not a plain
-JTextField — do not set a background colour on it, tint the glass
-gradient instead. Its tick() drives both the typo flash decay and the
-idle glow pulse, so the loop must keep calling it.
+draws the stone frame and glass plate, then calls super for the text). It
+is not a plain JTextField — do not set a background colour on it, tint
+the glass gradient instead. Its tick() drives both the typo flash decay
+and the idle glow pulse, so the loop must keep calling it.
+
+## UI colour
+All chrome colour lives in renderer/Palette — stone-dark (#1E1914) and
+temple gold (#D4AF37 / #F7D16E). The top HUD bar and the bottom typing
+bar both source from it deliberately: they are one frame around the play
+area, and if their colours drift the screen stops reading as a single
+interface. Do not hardcode chrome colours in HUDRenderer, GamePanel or
+TypingInputField.
+
+Stat hierarchy on the HUD bar is intentional, not decorative. LEVEL and
+SCORE share the display font in gold; WPM/ACCURACY/SLAIN/BEST drop a
+full size tier to off-white with labels at 70% alpha. They are not five
+equal peers — only two things on that bar are meant to be read rather
+than glanced at.
+
+## Level progress bar
+GameState.getLevelProgress() counts enemies RESOLVED this level —
+defeated OR leaked — over DifficultyCurve.enemyCount(level). Counting
+only kills would leave the bar permanently short of full after any
+breach, which reads as a bug rather than as feedback.
+
+## Target lock chip
+GamePanel draws a chip above the typing bar showing the locked enemy and
+its remaining letters. This exists because prefix matching is ambiguous
+by design: several enemies light up at once and the moment the target
+narrows to one is otherwise invisible. GamePanel.tick() eases its fade
+and must be called from the game loop, not from paintComponent.
 
 ## Build phases
 Phases 1-6 are implemented (engine, prefix matching, input, waves, HUD,

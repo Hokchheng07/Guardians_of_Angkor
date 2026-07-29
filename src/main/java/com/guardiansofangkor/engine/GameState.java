@@ -45,6 +45,20 @@ public class GameState {
     private int enemiesDefeated;
     private int projectilesIntercepted;
 
+    /**
+     * Enemies dealt with in the current level, whether killed or lost to a
+     * breach.
+     *
+     * <p>Counting breaches as well as kills is deliberate: the progress bar
+     * reports how far through the level you are, not how well you are doing. If
+     * it only counted kills, a single leaked enemy would leave the bar stuck
+     * short of full for the rest of the level, which reads as a bug.
+     */
+    private int resolvedThisLevel;
+
+    /** Tracks level changes so {@link #resolvedThisLevel} can be reset. */
+    private int lastLevelSeen;
+
     private int bestScore;
     private int bestLevel;
 
@@ -79,6 +93,11 @@ public class GameState {
         if (!gameOver) {
             spawnFromWaveManager();
         }
+
+        if (waveManager.getLevel() != lastLevelSeen) {
+            lastLevelSeen = waveManager.getLevel();
+            resolvedThisLevel = 0;
+        }
     }
 
     private void updateEffects() {
@@ -104,6 +123,7 @@ public class GameState {
         }
         for (Enemy enemy : breached) {
             enemies.remove(enemy);
+            resolvedThisLevel++;
             if (resolver.getLockedTarget() == enemy) {
                 resolver.reset();
             }
@@ -195,6 +215,7 @@ public class GameState {
         if (target instanceof Enemy enemy) {
             enemy.defeat();
             enemiesDefeated++;
+            resolvedThisLevel++;
             charactersTyped += GraphemeCounter.count(enemy.getWord());
             score += scoreForEnemy(enemy);
         } else if (target instanceof Projectile projectile) {
@@ -296,6 +317,8 @@ public class GameState {
         charactersTyped = 0;
         enemiesDefeated = 0;
         projectilesIntercepted = 0;
+        resolvedThisLevel = 0;
+        lastLevelSeen = 0;
         gameOver = false;
         running = true;
         levelJustCleared = false;
@@ -403,6 +426,31 @@ public class GameState {
 
     public int getEnemiesDefeated() {
         return enemiesDefeated;
+    }
+
+    /** Enemies dealt with so far in the current level, killed or leaked. */
+    public int getResolvedThisLevel() {
+        return resolvedThisLevel;
+    }
+
+    /** Total enemies the current level will send. */
+    public int getEnemiesInLevel() {
+        return DifficultyCurve.enemyCount(getLevel());
+    }
+
+    /**
+     * How far through the current level the player is, 0 to 1. Drives the HUD
+     * progress bar.
+     */
+    public double getLevelProgress() {
+        if (getLevel() < 1) {
+            return 0;
+        }
+        int total = getEnemiesInLevel();
+        if (total <= 0) {
+            return 0;
+        }
+        return Math.max(0.0, Math.min(1.0, resolvedThisLevel / (double) total));
     }
 
     public int getProjectilesIntercepted() {

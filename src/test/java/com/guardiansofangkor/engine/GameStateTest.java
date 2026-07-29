@@ -159,6 +159,74 @@ class GameStateTest {
     }
 
     @Test
+    @DisplayName("level progress starts empty and advances with each kill")
+    void progressAdvancesWithKills() {
+        GameState state = new GameState(Language.ENGLISH);
+
+        // Get a level running so getEnemiesInLevel() is meaningful.
+        for (int tick = 0; tick < 400 && state.getLevel() < 1; tick++) {
+            state.update();
+        }
+        assertTrue(state.getLevel() >= 1);
+
+        double before = state.getLevelProgress();
+        safeEnemy(state, "zzq");
+        state.handleInput("zzq");
+
+        assertTrue(state.getLevelProgress() > before,
+                "killing an enemy should advance level progress");
+    }
+
+    @Test
+    @DisplayName("a leaked enemy still advances progress, so the bar can fill")
+    void breachAlsoAdvancesProgress() {
+        GameState state = new GameState(Language.ENGLISH);
+        for (int tick = 0; tick < 400 && state.getLevel() < 1; tick++) {
+            state.update();
+        }
+
+        int before = state.getResolvedThisLevel();
+        enemyAt(state, "zzq", 0);
+        state.update();
+
+        assertTrue(state.getResolvedThisLevel() > before,
+                "counting only kills would leave the bar stuck short for the "
+                        + "rest of the level, which reads as a bug");
+    }
+
+    @Test
+    @DisplayName("level progress is always a sane fraction")
+    void progressStaysInRange() {
+        GameState state = new GameState(Language.ENGLISH);
+        assertEquals(0.0, state.getLevelProgress(), 0.0001,
+                "before level one there is nothing to report");
+
+        for (int tick = 0; tick < 3000; tick++) {
+            state.update();
+            double progress = state.getLevelProgress();
+            assertTrue(progress >= 0.0 && progress <= 1.0,
+                    "progress escaped 0..1 at tick " + tick + ": " + progress);
+        }
+    }
+
+    @Test
+    @DisplayName("restart clears level progress")
+    void restartClearsProgress() {
+        GameState state = new GameState(Language.ENGLISH);
+        for (int tick = 0; tick < 400 && state.getLevel() < 1; tick++) {
+            state.update();
+        }
+        safeEnemy(state, "zzq");
+        state.handleInput("zzq");
+        assertTrue(state.getResolvedThisLevel() > 0);
+
+        state.restart();
+
+        assertEquals(0, state.getResolvedThisLevel());
+        assertEquals(0.0, state.getLevelProgress(), 0.0001);
+    }
+
+    @Test
     @DisplayName("save data round-trips the level and bests")
     void saveDataCarriesProgress() {
         GameState state = new GameState(Language.ENGLISH);

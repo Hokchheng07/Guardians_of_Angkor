@@ -97,6 +97,7 @@ public final class Main {
         GameLoop loop = new GameLoop(state, () -> {
             input.tick();
             keys.tick();
+            panel.tick();
 
             if (state.isLevelJustCleared()) {
                 autosave.saveQuietly();

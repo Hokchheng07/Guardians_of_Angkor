@@ -1,5 +1,7 @@
 package com.guardiansofangkor.input;
 
+import com.guardiansofangkor.renderer.Palette;
+
 import javax.swing.BorderFactory;
 import javax.swing.JComponent;
 import javax.swing.JTextField;
@@ -35,18 +37,21 @@ import java.util.function.Consumer;
  */
 public class TypingInputField extends JTextField {
 
-    private static final Color COLOR_FG = new Color(0xF6, 0xF2, 0xFC);
-    private static final Color COLOR_CARET = new Color(0xE8, 0xB9, 0x3B);
-    private static final Color COLOR_HINT = new Color(0x7E, 0x6E, 0x96);
+    // Stone-dark and gold, matching the top HUD bar. The two frames are one
+    // system; if they drift apart the screen stops reading as a single
+    // interface. Palette is the single source of truth for both.
+    private static final Color COLOR_FG = Palette.HUD_TEXT_WHITE;
+    private static final Color COLOR_CARET = Palette.HUD_TEXT_GOLD;
+    private static final Color COLOR_HINT = Palette.alpha(Palette.HUD_TEXT_DIM, 0.65);
 
-    private static final Color GLASS_TOP = new Color(0x6E, 0x59, 0x8F, 78);
-    private static final Color GLASS_BOTTOM = new Color(0x1A, 0x11, 0x2A, 150);
-    private static final Color GLASS_TOP_ERROR = new Color(0xA8, 0x3C, 0x46, 120);
-    private static final Color GLASS_BOTTOM_ERROR = new Color(0x3A, 0x10, 0x18, 175);
+    private static final Color GLASS_TOP = new Color(0x3A, 0x31, 0x26, 150);
+    private static final Color GLASS_BOTTOM = new Color(0x1E, 0x19, 0x14, 226);
+    private static final Color GLASS_TOP_ERROR = new Color(0x6B, 0x2E, 0x28, 165);
+    private static final Color GLASS_BOTTOM_ERROR = new Color(0x2B, 0x14, 0x11, 232);
 
-    private static final Color BORDER_OUTER = new Color(0xE8, 0xB9, 0x3B, 130);
-    private static final Color BORDER_OUTER_ERROR = new Color(0xE6, 0x6A, 0x5A, 190);
-    private static final Color SHEEN = new Color(0xFF, 0xFF, 0xFF, 46);
+    private static final Color BORDER_OUTER = Palette.alpha(Palette.HUD_DIVIDER, 0.62);
+    private static final Color BORDER_OUTER_ERROR = Palette.alpha(Palette.DANGER, 0.85);
+    private static final Color SHEEN = new Color(0xF7, 0xD1, 0x6E, 30);
 
     private static final int PLATE_HEIGHT = 62;
     private static final int PLATE_MAX_WIDTH = 780;
@@ -110,11 +115,20 @@ public class TypingInputField extends JTextField {
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
                     RenderingHints.VALUE_ANTIALIAS_ON);
 
+            boolean error = errorFlashTicks > 0;
+
+            // Outer frame: the same stone bar and gold hairline as the HUD, so
+            // the top and bottom of the screen read as one chrome system rather
+            // than a game window with a text box stuck underneath.
+            g2.setColor(Palette.HUD_BG);
+            g2.fillRect(0, 0, getWidth(), getHeight());
+            g2.setColor(Palette.HUD_DIVIDER);
+            g2.setStroke(new BasicStroke(1.5f));
+            g2.drawLine(0, 0, getWidth(), 0);
+
             int plateWidth = Math.min(PLATE_MAX_WIDTH, getWidth() - 60);
             int x = (getWidth() - plateWidth) / 2;
             int y = (getHeight() - PLATE_HEIGHT) / 2;
-
-            boolean error = errorFlashTicks > 0;
             RoundRectangle2D plate =
                     new RoundRectangle2D.Double(x, y, plateWidth, PLATE_HEIGHT, ARC, ARC);
 
@@ -178,7 +192,7 @@ public class TypingInputField extends JTextField {
             sheen.setClip(clip);
             sheen.setPaint(new GradientPaint(
                     x, y, SHEEN,
-                    x, y + PLATE_HEIGHT * 0.45f, new Color(255, 255, 255, 0)));
+                    x, y + PLATE_HEIGHT * 0.45f, Palette.alpha(SHEEN, 0)));
             sheen.fillRect(x, y, width, PLATE_HEIGHT);
         } finally {
             sheen.dispose();
@@ -191,7 +205,7 @@ public class TypingInputField extends JTextField {
         g2.draw(plate);
 
         // Inner hairline, inset by a pixel, for glass thickness.
-        g2.setColor(new Color(255, 255, 255, error ? 40 : 30));
+        g2.setColor(Palette.alpha(Palette.HUD_TEXT_GOLD, error ? 0.20 : 0.14));
         g2.setStroke(new BasicStroke(1f));
         g2.draw(new RoundRectangle2D.Double(
                 plate.getX() + 2, plate.getY() + 2,

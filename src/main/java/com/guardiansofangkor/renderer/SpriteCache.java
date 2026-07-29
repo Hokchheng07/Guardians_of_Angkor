@@ -3,7 +3,11 @@ package com.guardiansofangkor.renderer;
 import com.guardiansofangkor.entities.EnemyType;
 
 import javax.imageio.ImageIO;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
+import java.awt.image.ConvolveOp;
+import java.awt.image.Kernel;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.EnumMap;
@@ -32,6 +36,9 @@ public class SpriteCache {
     /** Alpha at or below this counts as empty when trimming. */
     private static final int ALPHA_THRESHOLD = 32;
 
+    /** How far the hero's halo bleeds past his silhouette. */
+    public static final int GLOW_RADIUS = 14;
+
     private static final String BACKGROUND_PATH = "/images/Background.png";
     private static final String PLAYER_IDLE_PATH = "/images/Prea_Ream(idle).png";
     private static final String PLAYER_ACTION_PATH = "/images/Preas_Ream(Action).png";
@@ -46,6 +53,10 @@ public class SpriteCache {
     private BufferedImage playerIdle;
     private BufferedImage playerAction;
     private boolean playerAttempted;
+
+    private BufferedImage playerGlowIdle;
+    private BufferedImage playerGlowAction;
+    private int glowBuiltForHeight = -1;
 
     /**
      * The trimmed sprite for {@code type}, or null when its art has not been
@@ -123,6 +134,105 @@ public class SpriteCache {
         }
         return Math.max(1,
                 (int) Math.round(height * (image.getWidth() / (double) image.getHeight())));
+    }
+
+    /**
+     * A soft gold halo matching Preah Ream's silhouette, drawn behind him so he
+     * separates from the temple behind.
+     *
+     * <p>Built by scaling his silhouette to display size, padding it, and
+     * running a separable Gaussian blur. Done at <em>display</em> size rather
+     * than source size and cached per pose — blurring the full 896x1200 source
+     * every frame would cost hundreds of millions of operations and stall the
+     * loop.
+     *
+     * @param firing which pose to build the halo for
+     * @param height the on-screen height he is drawn at
+     * @return the halo, or null when there is no art to derive one from
+     */
+    public BufferedImage playerGlow(boolean firing, int height) {
+        if (glowBuiltForHeight != height) {
+            // Display size changed, so the cached halos are the wrong scale.
+            playerGlowIdle = null;
+            playerGlowAction = null;
+            glowBuiltForHeight = height;
+        }
+
+        BufferedImage cached = firing ? playerGlowAction : playerGlowIdle;
+        if (cached != null) {
+            return cached;
+        }
+
+        BufferedImage source = player(firing);
+        if (source == null) {
+            return null;
+        }
+
+        int width = playerWidth(firing, height);
+        BufferedImage built = buildGlow(source, width, height);
+
+        if (firing) {
+            playerGlowAction = built;
+        } else {
+            playerGlowIdle = built;
+        }
+        return built;
+    }
+
+    /** Scales, tints gold, pads and blurs a sprite into a halo. */
+    private BufferedImage buildGlow(BufferedImage source, int width, int height) {
+        int pad = GLOW_RADIUS * 3;
+        BufferedImage canvas = new BufferedImage(
+                width + pad * 2, height + pad * 2, BufferedImage.TYPE_INT_ARGB);
+
+        Graphics2D g = canvas.createGraphics();
+        try {
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                    RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g.drawImage(source, pad, pad, width, height, null);
+        } finally {
+            g.dispose();
+        }
+
+        // Flatten to a solid gold silhouette, keeping alpha, before blurring.
+        int gold = Palette.GLOW.getRGB() & 0x00FFFFFF;
+        for (int y = 0; y < canvas.getHeight(); y++) {
+            for (int x = 0; x < canvas.getWidth(); x++) {
+                int argb = canvas.getRGB(x, y);
+                canvas.setRGB(x, y, (argb & 0xFF000000) | gold);
+            }
+        }
+
+        // Separable blur: two 1-D passes instead of one 2-D kernel. For radius
+        // 14 that is 58 taps per pixel rather than 841.
+        BufferedImage blurred = convolve(canvas, gaussianKernel(GLOW_RADIUS, true));
+        return convolve(blurred, gaussianKernel(GLOW_RADIUS, false));
+    }
+
+    private static Kernel gaussianKernel(int radius, boolean horizontal) {
+        int size = radius * 2 + 1;
+        float[] data = new float[size];
+        double sigma = radius / 2.4;
+        double twoSigmaSq = 2 * sigma * sigma;
+        double total = 0;
+
+        for (int i = -radius; i <= radius; i++) {
+            double value = Math.exp(-(i * i) / twoSigmaSq);
+            data[i + radius] = (float) value;
+            total += value;
+        }
+        for (int i = 0; i < data.length; i++) {
+            data[i] /= (float) total;
+        }
+        return horizontal ? new Kernel(size, 1, data) : new Kernel(1, size, data);
+    }
+
+    private static BufferedImage convolve(BufferedImage source, Kernel kernel) {
+        ConvolveOp op = new ConvolveOp(kernel, ConvolveOp.EDGE_ZERO_FILL, null);
+        BufferedImage out = new BufferedImage(
+                source.getWidth(), source.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        op.filter(source, out);
+        return out;
     }
 
     /** True when this type has real art, as opposed to a placeholder. */
