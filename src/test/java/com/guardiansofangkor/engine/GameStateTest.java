@@ -361,22 +361,67 @@ class GameStateTest {
         }
     }
 
-    @Test
-    @DisplayName("clearing the tier's last level wins the run")
-    void clearingTheFinalLevelWins() {
-        GameState state = playing();
+    /**
+     * Plays a run from the last wave through to the end of the boss fight.
+     *
+     * <p>Enemies are swept as they arrive and the paragraph is typed out
+     * verbatim, so what is being tested is the shape of the ending rather than
+     * anyone's typing.
+     */
+    private static void winTheRun(GameState state) {
         state.getWaveManager().resumeAtLevel(state.getFinalLevel() - 1);
 
-        // Nothing is typed, so the only way this ends is by the level being
-        // cleared — enemies are removed as fast as they arrive.
-        for (int tick = 0; tick < 60_000 && !state.isGameOver(); tick++) {
+        for (int tick = 0; tick < 60_000 && !state.isBossActive(); tick++) {
+            state.update();
+            clearTheField(state);
+        }
+        assertTrue(state.isBossActive(), "the finale never arrived");
+
+        for (int tick = 0; tick <= BossFight.ARRIVAL_TICKS; tick++) {
             state.update();
             clearTheField(state);
         }
 
+        BossFight boss = state.getBoss();
+        for (int verse = 0; verse < boss.getStageCount(); verse++) {
+            String text = boss.currentSentence();
+            for (int i = 1; i <= text.length(); i++) {
+                state.handleInput(text.substring(0, i));
+            }
+        }
+
+        for (int tick = 0; tick <= BossFight.DEATH_TICKS + 2; tick++) {
+            state.update();
+        }
+    }
+
+    @Test
+    @DisplayName("beating the finale wins the run")
+    void beatingTheBossWins() {
+        GameState state = playing();
+
+        winTheRun(state);
+
         assertTrue(state.isVictory(), "the run should have been won, not lost");
         assertTrue(state.isGameOver(), "a won run is still a finished one");
         assertEquals(state.getFinalLevel(), state.getLevel());
+    }
+
+    @Test
+    @DisplayName("clearing the last wave is not yet a win")
+    void theLastWaveIsNotTheEnd() {
+        GameState state = playing();
+        state.getWaveManager().resumeAtLevel(state.getFinalLevel() - 1);
+
+        for (int tick = 0; tick < 60_000 && !state.isBossActive(); tick++) {
+            state.update();
+            clearTheField(state);
+        }
+
+        assertTrue(state.isBossActive());
+        assertFalse(state.isVictory(),
+                "the run is won by beating the boss, not by outliving the wave");
+        assertFalse(state.isGameOver());
     }
 
     @Test
@@ -397,17 +442,14 @@ class GameStateTest {
     @DisplayName("a restart clears the victory flag")
     void restartClearsVictory() {
         GameState state = playing();
-        state.getWaveManager().resumeAtLevel(state.getFinalLevel() - 1);
-        for (int tick = 0; tick < 60_000 && !state.isGameOver(); tick++) {
-            state.update();
-            clearTheField(state);
-        }
+        winTheRun(state);
         assertTrue(state.isVictory());
 
         state.restart();
 
         assertFalse(state.isVictory());
         assertFalse(state.isGameOver());
+        assertFalse(state.isBossActive());
     }
 
     @Test

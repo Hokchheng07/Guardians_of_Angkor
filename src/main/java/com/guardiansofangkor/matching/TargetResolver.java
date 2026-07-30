@@ -182,6 +182,24 @@ public class TargetResolver {
         return typoPolicy;
     }
 
+    /**
+     * Records a keystroke resolved somewhere other than here.
+     *
+     * <p>The final boss is typed against a paragraph rather than against a
+     * prefix-matched target, so it bypasses {@link #submit}. Without this the
+     * HUD's accuracy readout would freeze for the whole fight, which reads as a
+     * broken stat rather than as a different mechanic.
+     *
+     * @param correct true for an accepted keystroke, false for a mistype
+     */
+    public void noteExternalInput(boolean correct) {
+        if (correct) {
+            correctInputs++;
+        } else {
+            typoCount++;
+        }
+    }
+
     public int getCorrectInputs() {
         return correctInputs;
     }

@@ -64,6 +64,27 @@ public final class Palette {
     /** Success accent — a won run, a claimed boon. */
     public static final Color BOON = new Color(0x8F, 0xD6, 0xA6);
 
+    // ---- the finale --------------------------------------------------------
+
+    /**
+     * Boss venom, outer.
+     *
+     * <p>Purple because nothing else on screen is. The play area is sandstone
+     * and gold and the cursed bolts are ember orange; a venom bolt has to be
+     * distinguishable at a glance from a bolt the player could have typed away,
+     * since mistaking one for the other wastes the only seconds they have.
+     */
+    public static final Color VENOM_EDGE = new Color(0x7B, 0x3F, 0xA8);
+
+    /** Boss venom, inner. */
+    public static final Color VENOM_CORE = new Color(0xC9, 0x8C, 0xF0);
+
+    /** The boss health bar's fill. */
+    public static final Color BOSS_HEALTH = new Color(0xB4, 0x4A, 0x4A);
+
+    /** Backing panel for the paragraph the finale asks for. */
+    public static final Color BOSS_PANEL = new Color(0x14, 0x10, 0x0C, 232);
+
     // ---- power-ups ---------------------------------------------------------
 
     /**

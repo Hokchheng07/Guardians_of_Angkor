@@ -287,6 +287,33 @@ public final class Json {
         return value instanceof Number n ? n.intValue() : fallback;
     }
 
+    /**
+     * Every array-of-strings inside the array at {@code key}.
+     *
+     * <p>For the boss paragraphs, which are a list of paragraphs where each
+     * paragraph is a list of sentences. Entries that are not arrays are skipped
+     * rather than throwing, like every other helper here.
+     */
+    @SuppressWarnings("unchecked")
+    public static List<List<String>> stringListsAt(Map<String, Object> parent, String key) {
+        List<List<String>> result = new ArrayList<>();
+        for (Object item : arrayAt(parent, key)) {
+            if (!(item instanceof List)) {
+                continue;
+            }
+            List<String> inner = new ArrayList<>();
+            for (Object value : (List<Object>) item) {
+                if (value instanceof String s && !s.isBlank()) {
+                    inner.add(s.trim());
+                }
+            }
+            if (!inner.isEmpty()) {
+                result.add(Collections.unmodifiableList(inner));
+            }
+        }
+        return result;
+    }
+
     /** Every object in the array at {@code key}, skipping non-object entries. */
     @SuppressWarnings("unchecked")
     public static List<Map<String, Object>> objectsAt(Map<String, Object> parent, String key) {

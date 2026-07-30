@@ -66,8 +66,18 @@ public final class GameConfig {
     /**
      * How close to {@link #TEMPLE_CENTER_X} an enemy must get to count as having
      * breached the temple.
+     *
+     * <p>Deliberately tight. At 105 this was wider than Preah Ream is drawn, so
+     * enemies died to the hitbox while still visibly a stride away from him and
+     * the life felt stolen rather than lost. At 58 the sprites have to actually
+     * reach him, which is both fairer and more legible — the player can see the
+     * moment coming.
+     *
+     * <p>Cannot be raised without re-checking {@link #DEPTH_FULL_SIZE_AT}: the
+     * breach must happen after enemies reach full size, or monsters are culled
+     * mid-growth. Lowering it is always safe on that count.
      */
-    public static final int BREACH_RADIUS = 105;
+    public static final int BREACH_RADIUS = 58;
 
     /**
      * Top of the walkable plaza, measured from the background art.
@@ -213,6 +223,22 @@ public final class GameConfig {
 
     /** How long the screen flashes when an instant power-up fires. */
     public static final int POWERUP_FLASH_TICKS = 22;
+
+    // ---- Final boss --------------------------------------------------------
+
+    /**
+     * On-screen height of the boss.
+     *
+     * <p>Far larger than anything in the roster, and that is the whole point:
+     * the finale has to announce itself before a single word is read.
+     */
+    public static final int BOSS_HEIGHT = 420;
+
+    /** How long a venom bolt takes to cross the plaza at the reference tuning. */
+    public static final int VENOM_FLIGHT_TICKS = 130;
+
+    /** Height of the boss health bar under the HUD. */
+    public static final int BOSS_BAR_HEIGHT = 14;
 
     // ---- Restart chord -----------------------------------------------------
 

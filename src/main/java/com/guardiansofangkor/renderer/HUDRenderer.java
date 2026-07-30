@@ -539,6 +539,13 @@ public class HUDRenderer {
         if (!waves.isIntermission() || state.isGameOver()) {
             return;
         }
+        // The last wave leaves the manager permanently in intermission — there
+        // is no level 16 to count down to. Without this the banner would sit
+        // over the finale for its whole length promising a level that is never
+        // coming.
+        if (state.isBossActive()) {
+            return;
+        }
         int next = waves.getLevel() + 1;
 
         String text = waves.getLevel() == 0

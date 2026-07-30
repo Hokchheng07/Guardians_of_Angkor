@@ -42,7 +42,7 @@ class WordBankTest {
     void everyPoolIsPopulated() {
         WordBank bank = bank(2);
 
-        for (String pool : List.of("tiny", "short", "medium", "long", "epic")) {
+        for (String pool : List.of("tiny", "short", "medium", "long", "epic", "tricky")) {
             assertFalse(bank.getPool(pool).isEmpty(), "pool '" + pool + "' is empty");
         }
         for (String rank : List.of("novice", "adept", "master", "legend")) {
@@ -84,6 +84,99 @@ class WordBankTest {
             for (String word : bank.getBossPool(rank)) {
                 assertFalse(bank.getWords().contains(word),
                         "'" + word + "' is both a boss word and an ordinary one");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("the tricky pool is graded by typing difficulty, not by length")
+    void trickyPoolIsItsOwnThing() {
+        WordBank bank = bank(6);
+        List<String> tricky = bank.getPool("tricky");
+
+        assertFalse(tricky.isEmpty());
+        // It deliberately overlaps the length pools — the point is that a short
+        // word can still be hard. Assert only that it is not secretly one of
+        // them by another name.
+        assertTrue(tricky.stream().anyMatch(w -> GraphemeCounter.count(w) <= 6),
+                "the pool should contain genuinely short words");
+        assertTrue(tricky.contains("rhythm") && tricky.contains("sphinx"),
+                "the canonical awkward words should be in it");
+    }
+
+    // ---- flavour -----------------------------------------------------------
+
+    @Test
+    @DisplayName("the vocabulary is about Angkor, not generic fantasy")
+    void vocabularyIsAngkorFlavoured() {
+        // The game is called Guardians of Angkor. The words the player types for
+        // an hour are the loudest place it can keep saying so.
+        WordBank bank = bank(8);
+        List<String> all = bank.getWords();
+
+        for (String term : List.of("angkor", "apsara", "prasat", "devata", "garuda",
+                "laterite", "sandstone", "baray", "bayon", "banteay", "stupa",
+                "bodhi", "lintel", "naga", "khmer", "gopura", "kulen", "mekong")) {
+            assertTrue(all.contains(term),
+                    "'" + term + "' should be somewhere in the word bank");
+        }
+    }
+
+    @Test
+    @DisplayName("uncommon, memorable words are in there to be met once")
+    void rareWordsExist() {
+        WordBank bank = bank(9);
+        List<String> all = bank.getWords();
+
+        for (String term : List.of("petrichor", "cenotaph", "oubliette",
+                "palanquin", "reliquary", "censer", "verdigris")) {
+            assertTrue(all.contains(term), "'" + term + "' is missing");
+        }
+    }
+
+    @Test
+    @DisplayName("no lecture-hall vocabulary")
+    void modernWordsAreGone() {
+        // Technically fine English, but it belongs to a seminar rather than to a
+        // temple swallowed by jungle.
+        WordBank bank = bank(10);
+        List<String> all = bank.getWords();
+
+        for (String term : List.of("examination", "observation", "translation",
+                "understanding", "civilization", "archaeology", "scaffolding")) {
+            assertFalse(all.contains(term),
+                    "'" + term + "' does not belong in this game");
+        }
+    }
+
+    @Test
+    @DisplayName("no word appears in both singular and plural")
+    void noPluralDuplicates() {
+        WordBank bank = bank(12);
+        List<String> all = bank.getWords();
+
+        for (String word : all) {
+            if (word.endsWith("ss") || !word.endsWith("s")) {
+                continue;
+            }
+            assertFalse(all.contains(word.substring(0, word.length() - 1)),
+                    "'" + word + "' duplicates its own singular");
+        }
+    }
+
+    @Test
+    @DisplayName("nothing carries punctuation, spaces or capitals")
+    void everyWordIsTypeable() {
+        // The typing field is fed one plain word at a time; anything else means
+        // a key the player cannot reach or a character they cannot see.
+        WordBank bank = bank(14);
+
+        for (String word : bank.getWords()) {
+            assertTrue(word.matches("[a-z]+"), "'" + word + "' is not plainly typeable");
+        }
+        for (String rank : List.of("novice", "adept", "master", "legend")) {
+            for (String word : bank.getBossPool(rank)) {
+                assertTrue(word.matches("[a-z]+"), "'" + word + "' is not plainly typeable");
             }
         }
     }

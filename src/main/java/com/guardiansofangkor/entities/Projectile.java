@@ -15,7 +15,29 @@ import com.guardiansofangkor.matching.WordTarget;
  */
 public class Projectile implements WordTarget {
 
+    /** What threw this, which decides whether it can be typed away at all. */
+    public enum Kind {
+        /**
+         * A Yeak's cursed bolt. Carries a short word and is cleared by typing
+         * it, preempting whatever the player was already part-way through.
+         */
+        CURSED_BOLT,
+
+        /**
+         * Boss venom. Deliberately NOT typeable.
+         *
+         * <p>During the finale the player is typing a paragraph, and there is no
+         * way for a keystroke to mean both "the next letter of the sentence" and
+         * "intercept that bolt" at once. Making venom a pure hazard resolves the
+         * ambiguity in the only direction that keeps the fight readable: the
+         * defence against venom is finishing the sentence, which fires a
+         * counter-volley and sweeps the sky.
+         */
+        VENOM
+    }
+
     private final String word;
+    private final Kind kind;
 
     private final double startX;
     private final double startY;
@@ -47,14 +69,25 @@ public class Projectile implements WordTarget {
     private int hitFlashTicks;
     private int defeatTicks;
 
+    /** A typeable cursed bolt. */
     public Projectile(String word,
                       double startX, double startY,
                       double targetX, double targetY,
                       int flightTicks) {
-        if (word == null || word.isEmpty()) {
-            throw new IllegalArgumentException("word must not be null or empty");
+        this(word, startX, startY, targetX, targetY, flightTicks, Kind.CURSED_BOLT);
+    }
+
+    public Projectile(String word,
+                      double startX, double startY,
+                      double targetX, double targetY,
+                      int flightTicks, Kind kind) {
+        this.kind = kind == null ? Kind.CURSED_BOLT : kind;
+        // Venom has nothing to type, so it is the one case where an empty word
+        // is meaningful rather than a bug.
+        if (this.kind == Kind.CURSED_BOLT && (word == null || word.isEmpty())) {
+            throw new IllegalArgumentException("a cursed bolt must carry a word");
         }
-        this.word = word;
+        this.word = word == null ? "" : word;
         this.startX = startX;
         this.startY = startY;
         this.targetX = targetX;
@@ -152,6 +185,15 @@ public class Projectile implements WordTarget {
     @Override
     public boolean isActive() {
         return alive;
+    }
+
+    public Kind getKind() {
+        return kind;
+    }
+
+    /** True when typing this bolt's word clears it. False for boss venom. */
+    public boolean isTypeable() {
+        return kind == Kind.CURSED_BOLT;
     }
 
     public int getHitFlashTicks() {

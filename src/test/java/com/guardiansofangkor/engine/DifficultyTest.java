@@ -179,10 +179,9 @@ class DifficultyTest {
     }
 
     @Test
-    @DisplayName("Easy ends with a three-word Naga")
+    @DisplayName("Easy ends with the Naga")
     void easyBossIsTheNaga() {
         assertEquals(EnemyType.NAGA, Difficulty.EASY.getFinalBossType());
-        assertEquals(3, Difficulty.EASY.getFinalBossChainLength());
         assertTrue(Difficulty.EASY.hasFinalBoss());
     }
 
@@ -219,28 +218,30 @@ class DifficultyTest {
     }
 
     @Test
-    @DisplayName("the Easy boss really spawns as a chained Naga at level 15")
-    void easyBossSpawnsAtTheFinale() {
+    @DisplayName("the final wave holds no boss — the finale comes after it")
+    void theLastWaveIsOrdinary() {
+        // The boss used to be the last enemy of level 15. It is now a phase of
+        // its own that begins when that wave is finished, so nothing in the
+        // wave itself should be a Naga or a Krong Reap.
         WaveManager waves = new WaveManager(
                 new WordBank(Language.ENGLISH, new Random(11)),
                 Difficulty.EASY, new Random(11));
         waves.resumeAtLevel(14);
 
         List<Enemy> field = new ArrayList<>();
-        boolean sawBoss = false;
+        int spawned = 0;
 
-        for (int tick = 0; tick < 30_000 && waves.getLevel() <= 15; tick++) {
+        for (int tick = 0; tick < 30_000 && !waves.isRunComplete(); tick++) {
             for (Enemy enemy : waves.update(field)) {
-                if (waves.getLevel() == 15 && enemy.getType() == EnemyType.NAGA
-                        && enemy.getChainLength() == 3) {
-                    sawBoss = true;
-                }
+                spawned++;
+                assertTrue(enemy.getType() != EnemyType.KRONG_REAP,
+                        "the finale should not be inside the wave");
             }
             field.clear();
         }
 
-        assertTrue(sawBoss,
-                "Easy should present a three-word Naga as its finale on level 15");
+        assertTrue(spawned > 0, "level 15 should still send a wave");
+        assertTrue(waves.isRunComplete(), "and that wave should finish");
     }
 
     // ---- power-up generosity -----------------------------------------------

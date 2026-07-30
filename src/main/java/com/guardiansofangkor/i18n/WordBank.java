@@ -100,6 +100,31 @@ public class WordBank {
             List.of("ka", "om", "ra", "ox", "urn", "orb", "axe", "sun", "ivy", "hex");
 
     /**
+     * One paragraph per tier for the finale, used when the resource is missing.
+     *
+     * <p>Short on purpose. The point of the fallback is that the last fight
+     * still happens and can still be won, not that it is as good as the real
+     * thing.
+     */
+    private static final Map<String, List<List<String>>> FALLBACK_PARAGRAPHS = Map.of(
+            "easy", List.of(List.of(
+                    "the naga rises from the flooded baray",
+                    "seven stone heads turn toward the causeway",
+                    "hold the terrace until the venom runs dry")),
+            "medium", List.of(List.of(
+                    "krong reap walks the causeway of the dead",
+                    "the laterite splits beneath every step he takes",
+                    "hold the last terrace and do not falter")),
+            "hard", List.of(List.of(
+                    "the sarcophagus in the sanctum has been opened",
+                    "every lintel of the temple bleeds verdigris and ash",
+                    "there is no ward left but the words you carry")),
+            "endless", List.of(List.of(
+                    "the serpent is older than the stone it guards",
+                    "it has swallowed every name ever carved here",
+                    "it will swallow yours and keep on going")));
+
+    /**
      * Band tables for the built-in fallback, mirroring the real file's shape so
      * a missing resource still produces gentle early levels rather than a flat
      * pool where level one can serve an eleven-letter word.
@@ -132,7 +157,8 @@ public class WordBank {
                     "epic", FALLBACK_EPIC),
             new LinkedHashMap<>(FALLBACK_BOSS_POOLS),
             FALLBACK_PROJECTILE,
-            new LinkedHashMap<>(FALLBACK_BANDS));
+            new LinkedHashMap<>(FALLBACK_BANDS),
+            new LinkedHashMap<>(FALLBACK_PARAGRAPHS));
 
     // ---- repeat-cap tuning --------------------------------------------------
 
@@ -155,6 +181,7 @@ public class WordBank {
     private final Map<String, List<String>> bossPools;
     private final List<String> projectileWords;
     private final Map<String, List<Band>> bands;
+    private final Map<String, List<List<String>>> bossParagraphs;
 
     /** Union of every regular pool — the unrestricted spawn vocabulary. */
     private final List<String> words;
@@ -177,6 +204,7 @@ public class WordBank {
         this.bossPools = data.bossPools();
         this.projectileWords = data.projectileWords();
         this.bands = data.bands();
+        this.bossParagraphs = data.bossParagraphs();
 
         // Deduped so a word listed in two pools cannot be twice as likely.
         LinkedHashSet<String> combined = new LinkedHashSet<>();
@@ -568,6 +596,38 @@ public class WordBank {
         return projectileWord(exclude);
     }
 
+    // ---- boss paragraphs ---------------------------------------------------
+
+    /**
+     * The paragraph the finale asks the player to type, as its sentences.
+     *
+     * <p>Several are written per tier and one is drawn per run, so beating the
+     * game twice is not the same fight twice. Never empty: an unknown tier or a
+     * word bank with no paragraphs falls back to the built-in one, because a
+     * boss with nothing to type would be an unwinnable run.
+     *
+     * @param tierKey lower-case difficulty name, e.g. {@code "easy"}
+     */
+    public List<String> bossParagraph(String tierKey, Random picker) {
+        List<List<String>> options = tierKey == null
+                ? null
+                : bossParagraphs.get(tierKey.toLowerCase(java.util.Locale.ROOT));
+
+        if (options == null || options.isEmpty()) {
+            options = FALLBACK_PARAGRAPHS.get("easy");
+        }
+        Random source = picker == null ? random : picker;
+        return options.get(source.nextInt(options.size()));
+    }
+
+    /** How many paragraphs a tier has to choose between. Zero if none. */
+    public int bossParagraphCount(String tierKey) {
+        List<List<String>> options = tierKey == null
+                ? null
+                : bossParagraphs.get(tierKey.toLowerCase(java.util.Locale.ROOT));
+        return options == null ? 0 : options.size();
+    }
+
     // ---- accessors ---------------------------------------------------------
 
     public Language getLanguage() {
@@ -617,7 +677,8 @@ public class WordBank {
     private record WordData(Map<String, List<String>> pools,
                             Map<String, List<String>> bossPools,
                             List<String> projectileWords,
-                            Map<String, List<Band>> bands) {
+                            Map<String, List<Band>> bands,
+                            Map<String, List<List<String>>> bossParagraphs) {
 
         /** True when no regular pool loaded anything usable. */
         boolean isEmpty() {
@@ -691,8 +752,18 @@ public class WordBank {
             }
         }
 
+        Map<String, List<List<String>>> paragraphs = new LinkedHashMap<>();
+        Map<String, Object> paragraphSource = Json.objectAt(root, "bossParagraphs");
+        for (String tierKey : paragraphSource.keySet()) {
+            List<List<String>> forTier = Json.stringListsAt(paragraphSource, tierKey);
+            if (!forTier.isEmpty()) {
+                paragraphs.put(tierKey.toLowerCase(java.util.Locale.ROOT), forTier);
+            }
+        }
+
         return new WordData(pools, bossPools,
-                projectile.isEmpty() ? FALLBACK_PROJECTILE : projectile, bands);
+                projectile.isEmpty() ? FALLBACK_PROJECTILE : projectile, bands,
+                paragraphs.isEmpty() ? new LinkedHashMap<>(FALLBACK_PARAGRAPHS) : paragraphs);
     }
 
     /** Reads every {@code "name": ["a","b"]} entry of an object into a map. */

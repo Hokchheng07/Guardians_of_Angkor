@@ -36,26 +36,26 @@ public enum Difficulty {
      */
     EASY("Easy", "A steady tide. Shorter names, more time.", true,
             0.58, 1.50, -1, -2,
-            EnemyType.NAGA, 15, 3,
-            0.34, 1.25, 0.65),
+            EnemyType.NAGA, 15,
+            0.16, 1.25, 0.65),
 
     /** The reference tuning. Everything DifficultyCurve is written against. */
     MEDIUM("Medium", "The temple as it was meant to be defended.", true,
             1.0, 1.0, 0, 0,
-            EnemyType.KRONG_REAP, 15, 2,
-            0.18, 1.0, 1.0),
+            EnemyType.KRONG_REAP, 15,
+            0.10, 1.0, 1.0),
 
     /** Longer words and heavier pressure. Not yet playable. */
     HARD("Hard", "Longer names. The temple gets no rest.", false,
             1.28, 0.82, 1, 1,
-            EnemyType.KRONG_REAP, 15, 3,
-            0.10, 0.8, 1.15),
+            EnemyType.KRONG_REAP, 15,
+            0.06, 0.8, 1.15),
 
     /** No final boss; escalates until the temple falls. Not yet playable. */
     ENDLESS("Endless", "No last level. It ends when you do.", false,
             1.1, 0.9, 0, 0,
-            null, Integer.MAX_VALUE, 3,
-            0.14, 0.9, 1.05);
+            null, Integer.MAX_VALUE,
+            0.08, 0.9, 1.05);
 
     private final String displayName;
     private final String tagline;
@@ -66,7 +66,6 @@ public enum Difficulty {
     private final int wordMaxShift;
     private final EnemyType finalBossType;
     private final int finalBossLevel;
-    private final int finalBossChainLength;
     private final double powerUpDropChance;
     private final double powerUpDurationScale;
     private final double enemyCountScale;
@@ -74,7 +73,7 @@ public enum Difficulty {
     Difficulty(String displayName, String tagline, boolean implemented,
                double speedScale, double spawnIntervalScale,
                int wordMinShift, int wordMaxShift,
-               EnemyType finalBossType, int finalBossLevel, int finalBossChainLength,
+               EnemyType finalBossType, int finalBossLevel,
                double powerUpDropChance, double powerUpDurationScale,
                double enemyCountScale) {
         this.displayName = displayName;
@@ -86,7 +85,6 @@ public enum Difficulty {
         this.wordMaxShift = wordMaxShift;
         this.finalBossType = finalBossType;
         this.finalBossLevel = finalBossLevel;
-        this.finalBossChainLength = finalBossChainLength;
         this.powerUpDropChance = powerUpDropChance;
         this.powerUpDurationScale = powerUpDurationScale;
         this.enemyCountScale = enemyCountScale;
@@ -164,17 +162,24 @@ public enum Difficulty {
         return finalBossLevel;
     }
 
-    /** Words the final boss takes to kill. */
-    public int getFinalBossChainLength() {
-        return finalBossChainLength;
-    }
-
+    /**
+     * How many sentences the finale asks for.
+     *
+     * <p>Not a number kept here: it is however many sentences the tier's
+     * paragraph has in {@code words_en.json}. Keeping a second copy in Java
+     * would let the two disagree, and the paragraph is the one that is right.
+     */
     /**
      * Chance that defeating an ordinary enemy leaves a power-up behind.
      *
      * <p>Steepest on Easy on purpose. Power-ups are the difficulty valve that
      * does not require retuning any curve: a struggling player sees more of
      * them, and the tier's identity survives intact.
+     *
+     * <p>Deliberately low. At the first pass Easy dropped a boon from a third
+     * of all kills, which made them ordinary — a reward the player stops
+     * noticing has stopped being a reward. The mercy curve in
+     * {@link PowerUpDrops} still lifts these when a run is going badly.
      */
     public double getPowerUpDropChance() {
         return powerUpDropChance;

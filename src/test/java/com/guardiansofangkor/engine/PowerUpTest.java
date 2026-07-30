@@ -328,6 +328,18 @@ class PowerUpTest {
     }
 
     @Test
+    @DisplayName("boons are uncommon enough to still feel like a find")
+    void dropsAreRare() {
+        // At a third of all kills they were ordinary, and a reward the player
+        // stops noticing has stopped being a reward.
+        for (Difficulty tier : Difficulty.values()) {
+            assertTrue(tier.getPowerUpDropChance() <= 0.20,
+                    tier + " drops a boon from " 
+                            + Math.round(tier.getPowerUpDropChance() * 100) + "% of kills");
+        }
+    }
+
+    @Test
     @DisplayName("drops get more generous as lives run out")
     void mercyRises() {
         double healthy = PowerUpDrops.chanceFor(Difficulty.EASY, 5, GameConfig.STARTING_LIVES);
@@ -343,7 +355,7 @@ class PowerUpTest {
         for (Difficulty tier : Difficulty.values()) {
             for (int lives = 0; lives <= GameConfig.STARTING_LIVES; lives++) {
                 double chance = PowerUpDrops.chanceFor(tier, 40, lives);
-                assertTrue(chance <= 0.55 + 0.0001,
+                assertTrue(chance <= 0.30 + 0.0001,
                         tier + " at " + lives + " lives rolled " + chance);
             }
         }

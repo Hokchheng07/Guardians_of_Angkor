@@ -29,6 +29,24 @@ medium 6-7, long 8-10, epic 11+) and `bossPools` (novice 5-7, adept
 8-10, master 11-13, legend 14+), plus a curated `projectile` pool of
 2-3 letter words shared with power-up pickups.
 
+`tricky` is the one pool NOT graded by length. It holds words that are
+awkward to type regardless of size — repeated letters, uncommon
+digraphs, long finger travel (rhythm, sphinx, glyph, quartz, syzygy) —
+and deliberately overlaps the length pools. Later level bands opt into
+it. Do not "fix" it to fit a length band; length is not what it is for.
+
+VOCABULARY IS ANGKOR-FLAVOURED ON PURPOSE and there are tests asserting
+it. Temple and Khmer terms (apsara, prasat, devata, garuda, laterite,
+bayon, gopura, bodhisattva), jungle and ruin words, and a seam of rare
+evocative ones (petrichor, cenotaph, oubliette, palanquin). Clinical
+modern vocabulary — examination, observation, translation — was removed
+and is asserted absent. Singular/plural pairs are deduped: keep one.
+
+`bossParagraphs` holds the finale, per tier, as several three-to-five
+sentence paragraphs. One is drawn per run so a rerun is not the same
+fight. Lower case, letters and spaces only — the finale must not be the
+one place in the game that needs a shift key or a comma.
+
 `difficulties` is the tuning table, NOT more word lists: per tier, a
 list of level bands saying which pools that stretch of the run may draw
 from and which boss rank its bosses use. Bands match by `throughLevel`
@@ -91,7 +109,10 @@ Time Freeze looks like a hang rather than like enemies stopping.
 Enemy's attack timers are DOUBLE, not int, or a 0.45 scale rounds to
 0 or 1 and a slowed Yeak throws at full speed.
 
-Drop rate rises as lives run out (PowerUpDrops), capped. That mercy
+Drop rate is LOW (6-16% per kill by tier, ceiling 30%). The first pass
+dropped a boon from a third of Easy's kills, which made them ordinary —
+a reward the player stops noticing has stopped being one. It rises as
+lives run out (PowerUpDrops), capped. That mercy
 curve is the difficulty valve that needs no curve retuning: a run going
 badly quietly gets more to reach for, a run going well never notices.
 Mend is withheld at full health and the ward at full charges rather
@@ -130,7 +151,12 @@ sprites pop out mid-fade or linger invisible.
 
 ## Play field layout
 Enemies materialise in a smoke puff and converge on TEMPLE_CENTER_X /
-GROUND_LINE_Y. Reaching BREACH_RADIUS of that point costs a life. Spawns
+GROUND_LINE_Y. Reaching BREACH_RADIUS of that point costs a life.
+BREACH_RADIUS is 58 and was 105 — at 105 the box was wider than Preah
+Ream is drawn, so lives were lost while the monster was visibly still a
+stride away and it felt stolen. It can be lowered freely but NOT raised
+without re-checking DEPTH_FULL_SIZE_AT: the breach has to happen after
+enemies reach full size or they are culled mid-growth. Spawns
 are deliberately ON-SCREEN — the poof is what makes that read as
 materialising rather than popping in. Preah Ream stands at
 TEMPLE_CENTER_X in the foreground, back to the viewer.
@@ -377,14 +403,42 @@ getFinalLevel() and getFinalBossLevel() are the same number today and
 are separate methods anyway, because they answer different questions:
 when the boss arrives, and when the game stops.
 
-## Winning
-Clearing the final level ends the run as a VICTORY. GameState.victory
-is tracked separately from gameOver rather than inferred from "finished
-with lives left" — they are different events with different screens,
-and the inference breaks the moment anything else can end a run.
-HUDRenderer checks isVictory() FIRST; congratulating a player in the
-defeat colour is the one mistake on that screen nobody would forgive.
-WaveManager.isRunComplete() stops it rolling into level 16.
+## The finale
+Clearing level 15's wave does NOT win the run — it summons the boss.
+BossFight is a phase, not an Enemy: it stands at TEMPLE_CENTER_X, never
+moves, cannot be reached, and is beaten by typing a paragraph. Forcing
+that into Enemy would mean an enemy ignoring its own movement, hitbox
+and word, which is not an enemy any more.
+
+The paragraph arrives ONE SENTENCE AT A TIME. Thirty words at once
+reads as a punishment; a verse at a time has a rhythm and each cleared
+one is a visible beat. A mistype RESETS THE CURRENT VERSE only —
+harsher than the rest of the game on purpose, since the finale is where
+accuracy is meant to matter, but never touching a verse already
+cleared.
+
+While it fights it spits VENOM (Projectile.Kind.VENOM, purple). Venom
+is deliberately NOT typeable: one keystroke cannot mean both "next
+letter of the sentence" and "intercept that bolt". The defence is
+finishing the verse, which fires a counter-volley that clears the sky.
+Without that the fight would be pure endurance with the player
+powerless over the thing killing them.
+
+BossFight implements WordTarget so GameState can answer in an ordinary
+ResolveResult — that is what makes the input field's typo flash and
+clear-on-complete work for a target the matcher never sees. It is why
+ResolveResult.typo/locked/completed are public.
+
+Power-ups: arriving CLEARS every drop on the ground and suppresses new
+ones for the fight. Boons already running are left alone — those were
+earned, and cancelling them at the door would feel like a cheat.
+
+GameState.victory is tracked separately from gameOver rather than
+inferred from "finished with lives left" — different events, different
+screens, and the inference breaks the moment anything else can end a
+run. HUDRenderer checks isVictory() FIRST. Victory waits for the death
+animation; cutting it off to show a scoreboard throws away the moment
+the whole run was for.
 
 ## Level hints
 LevelPreview derives everything — the finale from Difficulty, arrivals

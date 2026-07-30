@@ -77,9 +77,9 @@ public class WaveManager {
         List<Enemy> spawned = new ArrayList<>();
 
         if (!levelInProgress) {
-            // The tier's last level has been cleared. Stop here rather than
-            // rolling into level 16 — a finite tier that keeps spawning after
-            // its boss dies has no ending, which is the one thing it is for.
+            // The tier's last wave has been cleared. Stop here rather than
+            // rolling into level 16 — the finale takes over from this point, and
+            // a finite tier that kept spawning would have no ending at all.
             if (isRunComplete()) {
                 return spawned;
             }
@@ -120,7 +120,6 @@ public class WaveManager {
 
     private Enemy spawnOne(List<Enemy> activeEnemies) {
         EnemyType type = chooseType();
-        boolean isFinalBoss = isFinalBossSpawn();
 
         // Collect every word already promised to the field, including words
         // later in a mini-boss chain that have not been revealed yet — otherwise
@@ -135,9 +134,9 @@ public class WaveManager {
         WordPolicy policy = currentPolicy();
 
         List<String> words = new ArrayList<>();
-        int chainLength = chainLengthFor(type, isFinalBoss);
+        int chainLength = chainLengthFor(type);
         for (int i = 0; i < chainLength; i++) {
-            String word = wordFor(type, isFinalBoss, inPlay, policy);
+            String word = wordFor(type, inPlay, policy);
             words.add(word);
             inPlay.add(word);
         }
@@ -175,18 +174,14 @@ public class WaveManager {
     /**
      * Picks one word for a spawn.
      *
-     * <p>Bosses come from their own ranked pools rather than from the regular
-     * vocabulary with a length bonus bolted on. Two reasons: a boss word can then
-     * never have already turned up on an ordinary enemy earlier in the run, and
-     * the rank climbs with both the tier and the level band, so an Easy Naga and
-     * a Hard Naga are genuinely different fights rather than the same fight with
-     * two more letters.
+     * <p>Mini-bosses come from their own ranked pools rather than from the
+     * regular vocabulary with a length bonus bolted on. Two reasons: a boss word
+     * can then never have already turned up on an ordinary enemy earlier in the
+     * run, and the rank climbs with both the tier and the level band, so an Easy
+     * Naga and a Hard Naga are genuinely different fights rather than the same
+     * fight with two more letters.
      */
-    private String wordFor(EnemyType type, boolean isFinalBoss,
-                           List<String> inPlay, WordPolicy policy) {
-        if (isFinalBoss) {
-            return wordBank.finalBossWord(inPlay, policy);
-        }
+    private String wordFor(EnemyType type, List<String> inPlay, WordPolicy policy) {
         if (type.isChainedType()) {
             return wordBank.bossWord(inPlay, policy);
         }
@@ -197,14 +192,12 @@ public class WaveManager {
     /**
      * How many words this spawn must take to kill.
      *
-     * <p>The final boss uses the tier's fixed chain length so the climactic
-     * fight is predictable. Ordinary mini-bosses get a randomised chain within
-     * their configured range, so two Naga encounters do not feel identical.
+     * <p>Mini-bosses get a randomised chain within their configured range, so
+     * two Naga encounters do not feel identical. The <em>final</em> boss is not
+     * here at all — see {@link BossFight}; it is a paragraph, not a chain, and
+     * it arrives after the last wave rather than inside it.
      */
-    private int chainLengthFor(EnemyType type, boolean isFinalBoss) {
-        if (isFinalBoss) {
-            return Math.max(1, difficulty.getFinalBossChainLength());
-        }
+    private int chainLengthFor(EnemyType type) {
         int max = type.getMaxChainLength();
         if (max <= 1) {
             return 1;
@@ -213,17 +206,7 @@ public class WaveManager {
         return min + random.nextInt(max - min + 1);
     }
 
-    /** True when the spawn about to happen is this tier's final boss. */
-    private boolean isFinalBossSpawn() {
-        return difficulty.hasFinalBoss()
-                && level == difficulty.getFinalBossLevel()
-                && remainingToSpawn == 1;
-    }
-
     private EnemyType chooseType() {
-        if (isFinalBossSpawn()) {
-            return difficulty.getFinalBossType();
-        }
         if (level % MINI_BOSS_INTERVAL == 0 && remainingToSpawn == 1) {
             return EnemyType.NAGA;
         }
@@ -231,11 +214,12 @@ public class WaveManager {
     }
 
     /**
-     * True once the tier's last level has been cleared — the run is won.
+     * True once the tier's last wave has been cleared.
      *
-     * <p>Asked after a level finishes, not during it. A tier with no final boss
-     * (Endless) never returns true here, which is the whole of what "endless"
-     * means mechanically.
+     * <p>Not the same as winning any more: this is the cue for the final boss to
+     * arrive, and the run is only won once that fight is over. A tier with no
+     * final boss (Endless) never returns true here, which is the whole of what
+     * "endless" means mechanically.
      */
     public boolean isRunComplete() {
         return difficulty.isWinnable()

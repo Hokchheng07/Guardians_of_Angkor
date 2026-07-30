@@ -42,6 +42,12 @@ public class GameState {
     /** Timed boons and banked shield charges. */
     private final PowerUpState powerUpState = new PowerUpState();
 
+    /**
+     * The finale, once the last wave has been cleared. Null for the whole rest
+     * of a run, and on tiers that never end.
+     */
+    private BossFight boss;
+
     /** Drives drop rolls. Seedable so wave-and-drop composition is reproducible. */
     private final Random random;
 
@@ -166,6 +172,7 @@ public class GameState {
         updatePowerUps();
         updateEnemies(timeScale);
         updateProjectiles(timeScale);
+        updateBoss(timeScale);
 
         if (!gameOver && !victory) {
             spawnFromWaveManager();
@@ -236,6 +243,118 @@ public class GameState {
         powerUps.removeIf(p -> p.isExpired(GameConfig.DEFEAT_ANIMATION_TICKS));
     }
 
+    // ---- the finale --------------------------------------------------------
+
+    private void updateBoss(double timeScale) {
+        if (boss == null) {
+            return;
+        }
+        boss.update(timeScale);
+
+        if (boss.isVenomDue()) {
+            spitVenom();
+        }
+        if (boss.isFinished()) {
+            declareVictory();
+        }
+    }
+
+    /**
+     * Brings the finale on.
+     *
+     * <p>Everything on the ground goes with it. Leaving uncollected boons lying
+     * around through a fight that cannot drop any more would be a strange
+     * half-state — and a Purge or a Mend banked from the last wave and cashed in
+     * mid-paragraph would undercut the one fight in the run that is supposed to
+     * be only about typing. Boons already <em>running</em> are left alone: those
+     * were earned and spent, and cancelling them at the door would feel like a
+     * cheat.
+     */
+    private void beginBossFight() {
+        if (boss != null) {
+            return;
+        }
+        if (!difficulty.hasFinalBoss()) {
+            declareVictory();
+            return;
+        }
+
+        List<String> paragraph = wordBank.bossParagraph(difficulty.getWordBankKey(), random);
+        boss = new BossFight(difficulty.getFinalBossType(), paragraph, difficulty);
+
+        powerUps.clear();
+        resolver.reset();
+        effects.add(new VisualEffect(
+                VisualEffect.Kind.SPAWN_POOF,
+                GameConfig.TEMPLE_CENTER_X,
+                GameConfig.GROUND_LINE_Y - GameConfig.BOSS_HEIGHT * 0.4,
+                GameConfig.POOF_TICKS * 3, 3.0));
+    }
+
+    /** The boss spits. Venom is a hazard, not a target — see Projectile.Kind. */
+    private void spitVenom() {
+        projectiles.add(new Projectile(
+                "",
+                boss.getVenomOriginX(), boss.getVenomOriginY(),
+                player.getX(), GameConfig.PLAYER_FEET_Y - GameConfig.PLAYER_HEIGHT * 0.5,
+                DifficultyCurve.projectileFlightTicks(getLevel(), difficulty),
+                Projectile.Kind.VENOM));
+    }
+
+    /**
+     * Preah Ream's answer to a finished sentence: every bolt in the air is shot
+     * out of it.
+     *
+     * <p>This is what makes the paragraph a defence rather than just a score.
+     * Venom cannot be typed away individually, so without a way for progress to
+     * clear the sky the fight would be a pure endurance test with the player
+     * powerless over the thing actually killing them.
+     */
+    private void counterVolley() {
+        for (Projectile projectile : projectiles) {
+            if (!projectile.isActive()) {
+                continue;
+            }
+            projectile.intercept();
+            projectilesIntercepted++;
+            spawnArrowAt(projectile.getX(), projectile.getY());
+        }
+    }
+
+    private ResolveResult handleBossInput(String typedSoFar) {
+        String sentence = boss.currentSentence();
+        BossFight.Result result = boss.submit(typedSoFar);
+
+        if (result == BossFight.Result.TYPO) {
+            resolver.noteExternalInput(false);
+            // An empty valid buffer is how the input field is told to clear
+            // itself, which is exactly the sentence reset the finale wants.
+            return ResolveResult.typo("");
+        }
+        if (result == BossFight.Result.PROGRESS) {
+            resolver.noteExternalInput(true);
+            return ResolveResult.locked(boss, typedSoFar);
+        }
+        if (result == BossFight.Result.STAGE_CLEARED
+                || result == BossFight.Result.DEFEATED) {
+            resolver.noteExternalInput(true);
+            charactersTyped += GraphemeCounter.count(sentence);
+            score += scoreForSentence(sentence);
+
+            counterVolley();
+            player.tryFire();
+            spawnArrowAt(GameConfig.TEMPLE_CENTER_X, boss.getVenomOriginY());
+            return ResolveResult.completed(boss, typedSoFar);
+        }
+        return ResolveResult.EMPTY_RESULT;
+    }
+
+    /** A sentence is worth far more than a word, because it cost far more. */
+    private int scoreForSentence(String sentence) {
+        int base = GraphemeCounter.count(sentence) * 20;
+        return (int) Math.round(base * DifficultyCurve.scoreMultiplier(getLevel()));
+    }
+
     /**
      * Something reached the temple. Spends a Naga Shield if one is banked, and
      * only charges a life when none is.
@@ -254,11 +373,15 @@ public class GameState {
     }
 
     private void spawnFromWaveManager() {
-        // A finite tier stops once its last level is cleared. Checked before the
-        // wave manager ticks so victory lands on the frame the field empties,
-        // not an intermission later.
-        if (waveManager.isRunComplete() && enemies.isEmpty() && projectiles.isEmpty()) {
-            declareVictory();
+        // Once the finale is on the field it owns the game — no more waves.
+        if (boss != null) {
+            return;
+        }
+        // The tier's last wave is done. Checked before the wave manager ticks so
+        // the boss arrives on the frame the field empties, not an intermission
+        // later.
+        if (waveManager.isRunComplete() && enemies.isEmpty()) {
+            beginBossFight();
             return;
         }
 
@@ -288,13 +411,33 @@ public class GameState {
                 DifficultyCurve.projectileFlightTicks(getLevel(), difficulty)));
     }
 
+    /**
+     * The bolts the matcher is allowed to see.
+     *
+     * <p>Boss venom lives in the same list — it flies, it lands, it costs a life
+     * through the same path — but it carries no word and must never become a
+     * typing target. Filtering here rather than in the resolver keeps that a
+     * gameplay decision rather than a matching one.
+     */
+    private List<Projectile> typeableProjectiles() {
+        List<Projectile> typeable = new ArrayList<>(projectiles.size());
+        for (Projectile projectile : projectiles) {
+            if (projectile.isTypeable()) {
+                typeable.add(projectile);
+            }
+        }
+        return typeable;
+    }
+
     private List<String> collectWordsInPlay() {
         List<String> words = new ArrayList<>();
         for (Enemy enemy : enemies) {
             words.addAll(enemy.getAllWords());
         }
         for (Projectile projectile : projectiles) {
-            words.add(projectile.getWord());
+            if (projectile.isTypeable()) {
+                words.add(projectile.getWord());
+            }
         }
         for (PowerUp powerUp : powerUps) {
             words.add(powerUp.getWord());
@@ -313,10 +456,25 @@ public class GameState {
         if (gameOver || paused || isIntroActive()) {
             return ResolveResult.EMPTY_RESULT;
         }
+        // The boss has arrived but has not finished rising, or has already
+        // fallen. Nothing is typeable in either window.
+        if (boss != null && !boss.isFighting()) {
+            return ResolveResult.EMPTY_RESULT;
+        }
+
+        // The finale takes the keyboard entirely. There is no way for one
+        // keystroke to mean both "the next letter of the sentence" and "clear
+        // that bolt", so during the boss the paragraph is the only target.
+        if (boss != null && boss.isFighting()) {
+            ResolveResult bossResult = handleBossInput(typedSoFar);
+            lastResult = bossResult;
+            return bossResult;
+        }
 
         // Tiers are passed shortest-time-budget first: a bolt preempts a dropped
         // boon, which preempts an enemy. See TargetResolver.submit.
-        ResolveResult result = resolver.submit(typedSoFar, projectiles, powerUps, enemies);
+        ResolveResult result = resolver.submit(
+                typedSoFar, typeableProjectiles(), powerUps, enemies);
         lastResult = result;
 
         switch (result.status()) {
@@ -423,6 +581,11 @@ public class GameState {
      * would read as a bug.
      */
     private void maybeDropPowerUp(Enemy enemy) {
+        // The finale is a typing test and nothing else. Nothing drops during it,
+        // and beginBossFight has already swept whatever was lying around.
+        if (boss != null) {
+            return;
+        }
         if (!PowerUpDrops.shouldDrop(difficulty, getLevel(), lives, random)) {
             return;
         }
@@ -559,6 +722,7 @@ public class GameState {
         waveManager.reset();
         player.reset();
         powerUpState.reset();
+        boss = null;
         // Repeat tracking is per-run, so a fresh run gets the whole vocabulary
         // back rather than starting where the last one left off.
         wordBank.resetUsage();
@@ -608,6 +772,16 @@ public class GameState {
     /** Running boons and banked shield charges, for the HUD. */
     public PowerUpState getPowerUpState() {
         return powerUpState;
+    }
+
+    /** The finale, or null while the ordinary waves are still running. */
+    public BossFight getBoss() {
+        return boss;
+    }
+
+    /** True from the moment the boss rises until the run ends. */
+    public boolean isBossActive() {
+        return boss != null;
     }
 
     /** Drops a boon on the field directly. For tests and for scripted moments. */

@@ -28,8 +28,13 @@ final class PowerUpDrops {
     /** No drops at all until this level, so the opening minute stays legible. */
     private static final int FIRST_DROP_LEVEL = 2;
 
-    /** Hard ceiling, so a bad streak cannot turn into a shower of boons. */
-    private static final double MAX_CHANCE = 0.55;
+    /**
+     * Hard ceiling, so a bad streak cannot turn into a shower of boons.
+     *
+     * <p>Lowered alongside the base rates: even at the mercy curve's most
+     * generous, fewer than one kill in three should leave anything behind.
+     */
+    private static final double MAX_CHANCE = 0.30;
 
     private PowerUpDrops() {
         // Utility class — not instantiable.
