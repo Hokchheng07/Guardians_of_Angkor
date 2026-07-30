@@ -1,5 +1,6 @@
 package com.guardiansofangkor.engine;
 
+import com.guardiansofangkor.entities.EnemyType;
 import com.guardiansofangkor.entities.PowerUpType;
 import com.guardiansofangkor.util.GameConfig;
 
@@ -61,8 +62,19 @@ final class PowerUpDrops {
         return Math.min(MAX_CHANCE, base * mercy);
     }
 
-    /** Rolls whether this kill drops a boon. */
-    static boolean shouldDrop(Difficulty difficulty, int level, int lives, Random random) {
+    /**
+     * Rolls whether this kill drops a boon.
+     *
+     * <p>Only the types that {@link EnemyType#dropsBoons()} allows can drop at
+     * all — the grounded heavies and the mini-boss. Checking eligibility here
+     * rather than at the call site keeps every question about drops in this one
+     * table.
+     */
+    static boolean shouldDrop(EnemyType type, Difficulty difficulty, int level,
+                              int lives, Random random) {
+        if (type == null || !type.dropsBoons()) {
+            return false;
+        }
         double chance = chanceFor(difficulty, level, lives);
         return chance > 0 && random.nextDouble() < chance;
     }

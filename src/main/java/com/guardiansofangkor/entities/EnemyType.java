@@ -24,7 +24,7 @@ public enum EnemyType {
     BEISACH("Beisach", "បិសាច", "Common",
             "beisach_transparent.png", GroundBehavior.GROUNDED,
             115, 0, 3, 5,
-            1.0, 0.075, 2.1, 0, 1),
+            1.0, 0.075, 2.1, 0, 1, false),
 
     /**
      * Grunt. The big ogre — deliberately the largest non-boss on screen, and the
@@ -33,37 +33,37 @@ public enum EnemyType {
     YEAK("Yeak", "យក្ស", "Grunt",
             "yeak_transparent.png", GroundBehavior.GROUNDED,
             215, 0, 5, 7,
-            0.85, 0.035, 1.4, 330, 1),
+            0.85, 0.035, 1.4, 330, 1, true),
 
     /** Swarm. Short words, fast, spawns in groups. Flies. Gets frantic fast. */
     AHP("Ahp", "អាប", "Swarm",
             "ahp_transparent.png", GroundBehavior.FLOATING,
             105, 155, 2, 4,
-            1.7, 0.11, 3.2, 0, 1),
+            1.7, 0.11, 3.2, 0, 1, false),
 
     /** Heavy. Long words, slow approach. Barely speeds up. Art pending. */
     PRET("Pret", "ប្រេត", "Heavy",
             "pret_transparent.png", GroundBehavior.GROUNDED,
             185, 0, 8, 12,
-            0.65, 0.018, 1.0, 0, 1),
+            0.65, 0.018, 1.0, 0, 1, true),
 
     /** Mimic. Its word shifts mid-type (Phase 10 behaviour). Floats. Art pending. */
     STEC_KANTOAB("Stec Kantoab", "សើចកន្តួប", "Mimic",
             "stec_kantoab_transparent.png", GroundBehavior.FLOATING,
             130, 120, 4, 6,
-            1.0, 0.06, 2.0, 0, 1),
+            1.0, 0.06, 2.0, 0, 1, false),
 
     /** Mini-boss. Chains 2-3 words before dying. Coiled on the ground. */
     NAGA("Naga", "នាគ", "Mini-boss",
             "Naga.png", GroundBehavior.GROUNDED,
             240, 0, 5, 8,
-            0.6, 0.02, 1.0, 0, 3),
+            0.6, 0.02, 1.0, 0, 3, true),
 
     /** Final boss. Full-phrase typing. */
     KRONG_REAP("Krong Reap", "ក្រុងរាព", "Final boss",
             "krong_reap_transparent.png", GroundBehavior.GROUNDED,
             330, 0, 10, 24,
-            0.5, 0.015, 0.9, 0, 1);
+            0.5, 0.015, 0.9, 0, 1, true);
 
     private final String displayName;
     private final String khmerName;
@@ -79,13 +79,14 @@ public enum EnemyType {
     private final double maxSpeedMultiplier;
     private final int throwIntervalTicks;
     private final int maxChainLength;
+    private final boolean dropsBoons;
 
     EnemyType(String displayName, String khmerName, String tier,
               String spriteFile, GroundBehavior groundBehavior,
               int targetHeight, int hoverHeight,
               int minWordLength, int maxWordLength,
               double speedMultiplier, double levelSpeedGain, double maxSpeedMultiplier,
-              int throwIntervalTicks, int maxChainLength) {
+              int throwIntervalTicks, int maxChainLength, boolean dropsBoons) {
         this.displayName = displayName;
         this.khmerName = khmerName;
         this.tier = tier;
@@ -100,6 +101,7 @@ public enum EnemyType {
         this.maxSpeedMultiplier = maxSpeedMultiplier;
         this.throwIntervalTicks = throwIntervalTicks;
         this.maxChainLength = maxChainLength;
+        this.dropsBoons = dropsBoons;
     }
 
     public String getDisplayName() {
@@ -197,6 +199,35 @@ public enum EnemyType {
      */
     public int getMaxChainLength() {
         return maxChainLength;
+    }
+
+    /**
+     * True when killing this type can leave a power-up behind.
+     *
+     * <p>Only the grounded heavies and the mini-boss: Yeak, Pret and Naga. Two
+     * reasons. They are the slow, long-word, genuinely difficult kills, so a
+     * boon reads as payment for the effort rather than as loot that fell out of
+     * the trash mob. And they arrive one or two at a time rather than in
+     * swarms, so drops stay spaced out instead of arriving in clusters the
+     * player cannot collect anyway.
+     */
+    public boolean dropsBoons() {
+        return dropsBoons;
+    }
+
+    /**
+     * Half-hearts lost when one of these reaches the temple.
+     *
+     * <p>Flyers cost half. They are fast, short-worded and arrive several at
+     * once; charging a full life apiece would let one bad Ahp wave end a run,
+     * which is not the kind of pressure the swarm is for. Walkers cost the full
+     * heart, because reaching the temple means the player lost a word they had
+     * a long time to type.
+     */
+    public int breachDamage() {
+        return isGrounded()
+                ? GameConfig.DAMAGE_GROUNDED_BREACH
+                : GameConfig.DAMAGE_FLYING_BREACH;
     }
 
     /** True when this type takes several words to kill. */

@@ -24,14 +24,17 @@ public class Projectile implements WordTarget {
         CURSED_BOLT,
 
         /**
-         * Boss venom. Deliberately NOT typeable.
+         * Boss venom. Typeable, like everything else — deflected by typing the
+         * word it carries.
          *
-         * <p>During the finale the player is typing a paragraph, and there is no
-         * way for a keystroke to mean both "the next letter of the sentence" and
-         * "intercept that bolt" at once. Making venom a pure hazard resolves the
-         * ambiguity in the only direction that keeps the fight readable: the
-         * defence against venom is finishing the sentence, which fires a
-         * counter-volley and sweeps the sky.
+         * <p>It only works because the finale's verse is typed one word at a
+         * time: the buffer is always a partial word, so the prefix matcher can
+         * weigh a bolt and the verse's next word against the same keystrokes.
+         * The words are drawn to never collide with the verse's own.
+         *
+         * <p>Kept as a separate kind from a Yeak's bolt because it is drawn
+         * differently, flies far more slowly, and is spawned by a phase rather
+         * than by an enemy.
          */
         VENOM
     }
@@ -82,12 +85,10 @@ public class Projectile implements WordTarget {
                       double targetX, double targetY,
                       int flightTicks, Kind kind) {
         this.kind = kind == null ? Kind.CURSED_BOLT : kind;
-        // Venom has nothing to type, so it is the one case where an empty word
-        // is meaningful rather than a bug.
-        if (this.kind == Kind.CURSED_BOLT && (word == null || word.isEmpty())) {
-            throw new IllegalArgumentException("a cursed bolt must carry a word");
+        if (word == null || word.isEmpty()) {
+            throw new IllegalArgumentException("a projectile must carry a word");
         }
-        this.word = word == null ? "" : word;
+        this.word = word;
         this.startX = startX;
         this.startY = startY;
         this.targetX = targetX;
@@ -191,9 +192,9 @@ public class Projectile implements WordTarget {
         return kind;
     }
 
-    /** True when typing this bolt's word clears it. False for boss venom. */
-    public boolean isTypeable() {
-        return kind == Kind.CURSED_BOLT;
+    /** True when this is boss venom rather than a thrown bolt. */
+    public boolean isVenom() {
+        return kind == Kind.VENOM;
     }
 
     public int getHitFlashTicks() {

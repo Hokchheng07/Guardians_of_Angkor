@@ -37,25 +37,25 @@ public enum Difficulty {
     EASY("Easy", "A steady tide. Shorter names, more time.", true,
             0.58, 1.50, -1, -2,
             EnemyType.NAGA, 15,
-            0.16, 1.25, 0.65),
+            0.22, 1.25, 0.65),
 
     /** The reference tuning. Everything DifficultyCurve is written against. */
     MEDIUM("Medium", "The temple as it was meant to be defended.", true,
             1.0, 1.0, 0, 0,
             EnemyType.KRONG_REAP, 15,
-            0.10, 1.0, 1.0),
+            0.20, 1.0, 1.0),
 
     /** Longer words and heavier pressure. Not yet playable. */
     HARD("Hard", "Longer names. The temple gets no rest.", false,
             1.28, 0.82, 1, 1,
             EnemyType.KRONG_REAP, 15,
-            0.06, 0.8, 1.15),
+            0.12, 0.8, 1.15),
 
     /** No final boss; escalates until the temple falls. Not yet playable. */
     ENDLESS("Endless", "No last level. It ends when you do.", false,
             1.1, 0.9, 0, 0,
             null, Integer.MAX_VALUE,
-            0.08, 0.9, 1.05);
+            0.16, 0.9, 1.05);
 
     private final String displayName;
     private final String tagline;
@@ -176,10 +176,13 @@ public enum Difficulty {
      * does not require retuning any curve: a struggling player sees more of
      * them, and the tier's identity survives intact.
      *
-     * <p>Deliberately low. At the first pass Easy dropped a boon from a third
-     * of all kills, which made them ordinary — a reward the player stops
-     * noticing has stopped being a reward. The mercy curve in
-     * {@link PowerUpDrops} still lifts these when a run is going badly.
+     * <p>This is the chance per <em>eligible</em> kill, and only Yeak, Pret and
+     * Naga are eligible — roughly a third of what the player fights. So Easy's
+     * 0.22 is nearer one boon in thirteen kills overall, which is where a drop
+     * still reads as a find rather than as loot. It also leaves the mercy curve
+     * in {@link PowerUpDrops} real room to climb toward the 0.30 ceiling instead
+     * of already sitting on it — a base equal to the cap would mean a
+     * struggling player gets no more generous at all.
      */
     public double getPowerUpDropChance() {
         return powerUpDropChance;

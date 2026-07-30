@@ -67,7 +67,15 @@ public class GameState {
     private IntroSequence intro = new IntroSequence();
 
     private int score;
-    private int lives = GameConfig.STARTING_LIVES;
+
+    /**
+     * Lives, counted in halves.
+     *
+     * <p>An integer count of half-hearts rather than a fractional life, so a
+     * flyer's half-hit and a walker's full hit can never disagree by a rounding
+     * error about whether the run is over.
+     */
+    private int halfLives = GameConfig.STARTING_HALF_LIVES;
     private long elapsedTicks;
     private boolean running = true;
     private boolean gameOver;
@@ -121,6 +129,16 @@ public class GameState {
 
     private ResolveResult lastResult;
 
+    /**
+     * What the player has typed right now during the finale.
+     *
+     * <p>The boss bypasses {@link TargetResolver}, so the resolver's own buffer
+     * goes stale for the length of the fight. The renderer needs a live one to
+     * split words into typed and untyped, and asking the wrong source would
+     * leave every venom bolt looking untouched however much of it was typed.
+     */
+    private String bossBuffer = "";
+
     public GameState() {
         this(Language.ENGLISH, Difficulty.defaultChoice());
     }
@@ -159,7 +177,13 @@ public class GameState {
             return;
         }
 
-        elapsedTicks++;
+        // The boss's briefing is a held beat with nothing typeable on screen.
+        // Counting it would charge the player five seconds of words-per-minute
+        // for a screen that forbids typing — the same reason the opening
+        // countdown does not count against them either.
+        if (boss == null || !boss.isBriefing()) {
+            elapsedTicks++;
+        }
 
         // One scale for the whole tick, read once. Asking the power-up state
         // per entity would let a boon expire half way through a frame and
@@ -211,7 +235,8 @@ public class GameState {
             if (resolver.getLockedTarget() == enemy) {
                 resolver.reset();
             }
-            absorbOrLoseLife(enemy.getX(), enemy.getAnchorY());
+            absorbOrLoseLife(enemy.getX(), enemy.getAnchorY(),
+                    enemy.getType().breachDamage());
         }
 
         enemies.removeIf(e -> e.isExpired(GameConfig.DEFEAT_ANIMATION_TICKS));
@@ -224,7 +249,8 @@ public class GameState {
                 if (resolver.getLockedTarget() == projectile) {
                     resolver.reset();
                 }
-                absorbOrLoseLife(projectile.getX(), projectile.getY());
+                absorbOrLoseLife(projectile.getX(), projectile.getY(),
+                        GameConfig.DAMAGE_PROJECTILE);
             }
         }
         projectiles.removeIf(p -> p.isExpired(GameConfig.DEFEAT_ANIMATION_TICKS));
@@ -280,7 +306,7 @@ public class GameState {
         }
 
         List<String> paragraph = wordBank.bossParagraph(difficulty.getWordBankKey(), random);
-        boss = new BossFight(difficulty.getFinalBossType(), paragraph, difficulty);
+        boss = new BossFight(difficulty.getFinalBossType(), paragraph, difficulty, random);
 
         powerUps.clear();
         resolver.reset();
@@ -291,13 +317,26 @@ public class GameState {
                 GameConfig.POOF_TICKS * 3, 3.0));
     }
 
-    /** The boss spits. Venom is a hazard, not a target — see Projectile.Kind. */
+    /**
+     * The boss spits.
+     *
+     * <p>The word is drawn to avoid everything the verse still wants and every
+     * bolt already flying, so no two live targets can ever share a word. Flight
+     * is a fixed, slow constant rather than the level curve: the player is
+     * already holding a verse in their head, and a bolt they cannot read in
+     * time is a hazard rather than a decision.
+     */
     private void spitVenom() {
+        List<String> taken = new ArrayList<>(boss.remainingWords());
+        for (Projectile projectile : projectiles) {
+            taken.add(projectile.getWord());
+        }
+
         projectiles.add(new Projectile(
-                "",
+                wordBank.venomWord(taken),
                 boss.getVenomOriginX(), boss.getVenomOriginY(),
                 player.getX(), GameConfig.PLAYER_FEET_Y - GameConfig.PLAYER_HEIGHT * 0.5,
-                DifficultyCurve.projectileFlightTicks(getLevel(), difficulty),
+                boss.venomFlightTicks(),
                 Projectile.Kind.VENOM));
     }
 
@@ -321,37 +360,117 @@ public class GameState {
         }
     }
 
+    /**
+     * Typing during the finale.
+     *
+     * <p>The boss and the venom go through the ordinary prefix matcher together
+     * — the boss as a target whose word is the current word of the verse, the
+     * venom as the priority tier above it. That is only possible because the
+     * verse is typed a word at a time, and it is what lets one buffer serve both
+     * without a mode key: the same ambiguity rules that already govern two
+     * enemies sharing a prefix govern a bolt and a verse sharing one.
+     */
     private ResolveResult handleBossInput(String typedSoFar) {
-        String sentence = boss.currentSentence();
-        BossFight.Result result = boss.submit(typedSoFar);
+        String buffer = typedSoFar == null ? "" : typedSoFar;
+        bossBuffer = buffer;
+        if (buffer.isEmpty()) {
+            boss.clearTyping();
+            return ResolveResult.EMPTY_RESULT;
+        }
 
-        if (result == BossFight.Result.TYPO) {
+        List<Projectile> venom = projectilesOfKind(Projectile.Kind.VENOM);
+
+        // Completions are checked before prefixes, and bolts before the verse.
+        //
+        // Checking exact matches first is what stops a verse word that happens
+        // to be a prefix of a live bolt's word — "the" while "temple" is in the
+        // air — from being impossible to finish. It is the same rule the
+        // ordinary matcher already applies between two enemies whose words
+        // share a prefix; it just has to be applied across the two kinds here,
+        // because they are not in one list.
+        for (Projectile bolt : venom) {
+            if (bolt.isActive() && bolt.getWord().equals(buffer)) {
+                return deflectVenom(bolt, buffer);
+            }
+        }
+        // A word of the verse only confirms on the space after it, not the
+        // moment its last letter lands — see BossFight for why. A bolt's word
+        // never contains a space, so this can never collide with the check
+        // above.
+        if (buffer.equals(boss.currentWord() + " ")) {
+            return advanceVerse(buffer);
+        }
+
+        // Nothing finished. Whatever is still reachable stays lit.
+        List<WordTarget> alive = new ArrayList<>();
+        for (Projectile bolt : venom) {
+            if (bolt.isActive() && bolt.getWord().startsWith(buffer)) {
+                bolt.flashHit(GameConfig.HIT_FLASH_TICKS);
+                alive.add(bolt);
+            }
+        }
+        boolean matchesVerse = boss.currentWord().startsWith(buffer);
+        if (matchesVerse) {
+            alive.add(boss);
+        }
+
+        if (alive.isEmpty()) {
+            // A mistype during the finale throws the verse away, whether the
+            // player was aiming at the verse or at a bolt. The empty valid
+            // buffer is what tells the input field to clear itself.
             resolver.noteExternalInput(false);
-            // An empty valid buffer is how the input field is told to clear
-            // itself, which is exactly the sentence reset the finale wants.
+            boss.resetVerse();
+            bossBuffer = "";
             return ResolveResult.typo("");
         }
-        if (result == BossFight.Result.PROGRESS) {
-            resolver.noteExternalInput(true);
-            return ResolveResult.locked(boss, typedSoFar);
-        }
+
+        resolver.noteExternalInput(true);
+        boss.trackTyping(matchesVerse ? buffer : "");
+        return ResolveResult.locked(alive.get(0), buffer);
+    }
+
+    private ResolveResult deflectVenom(Projectile bolt, String typedSoFar) {
+        bossBuffer = "";
+        boss.clearTyping();
+        bolt.intercept();
+        projectilesIntercepted++;
+        charactersTyped += GraphemeCounter.count(bolt.getWord());
+        score += scoreForProjectile(bolt);
+
+        player.tryFire();
+        spawnArrowAt(bolt.getX(), bolt.getY());
+        resolver.reset();
+        return ResolveResult.completed(bolt, typedSoFar);
+    }
+
+    /** A word of the verse landed. Only a whole verse hurts the boss. */
+    private ResolveResult advanceVerse(String typedSoFar) {
+        String word = boss.currentWord();
+        BossFight.Result result = boss.submit(typedSoFar);
+
+        // The space is counted too — it is a keystroke the player actually
+        // made now, not one the game inserted for them.
+        charactersTyped += GraphemeCounter.count(word) + 1;
+        score += scoreForVerseWord(word);
+        bossBuffer = "";
+        resolver.reset();
+
         if (result == BossFight.Result.STAGE_CLEARED
                 || result == BossFight.Result.DEFEATED) {
-            resolver.noteExternalInput(true);
-            charactersTyped += GraphemeCounter.count(sentence);
-            score += scoreForSentence(sentence);
-
+            // A finished verse is the counter-attack: it sweeps every bolt in
+            // the air. Without that the paragraph would score but never defend,
+            // and the fight would be endurance with the player powerless over
+            // the thing killing them.
             counterVolley();
             player.tryFire();
             spawnArrowAt(GameConfig.TEMPLE_CENTER_X, boss.getVenomOriginY());
-            return ResolveResult.completed(boss, typedSoFar);
         }
-        return ResolveResult.EMPTY_RESULT;
+        return ResolveResult.completed(boss, typedSoFar);
     }
 
-    /** A sentence is worth far more than a word, because it cost far more. */
-    private int scoreForSentence(String sentence) {
-        int base = GraphemeCounter.count(sentence) * 20;
+    /** A verse word is worth more than an ordinary one — the finale is harder. */
+    private int scoreForVerseWord(String word) {
+        int base = GraphemeCounter.count(word) * 20;
         return (int) Math.round(base * DifficultyCurve.scoreMultiplier(getLevel()));
     }
 
@@ -362,14 +481,14 @@ public class GameState {
      * <p>Routed through one method so the shield can never be honoured for a
      * breach and forgotten for a bolt.
      */
-    private void absorbOrLoseLife(double x, double y) {
+    private void absorbOrLoseLife(double x, double y, int halves) {
         if (powerUpState.consumeShield()) {
             powerUpState.markFired(PowerUpType.NAGA_SHIELD);
             effects.add(new VisualEffect(
                     VisualEffect.Kind.WARD_BREAK, x, y, GameConfig.POWERUP_FLASH_TICKS, 1.0));
             return;
         }
-        loseLife();
+        damage(halves);
     }
 
     private void spawnFromWaveManager() {
@@ -412,21 +531,20 @@ public class GameState {
     }
 
     /**
-     * The bolts the matcher is allowed to see.
+     * Bolts still in the air, of one kind.
      *
-     * <p>Boss venom lives in the same list — it flies, it lands, it costs a life
-     * through the same path — but it carries no word and must never become a
-     * typing target. Filtering here rather than in the resolver keeps that a
-     * gameplay decision rather than a matching one.
+     * <p>Venom and thrown bolts share the projectile list — they fly, land and
+     * cost life through the same code — but they are never live at the same
+     * time, and each phase only ever offers its own.
      */
-    private List<Projectile> typeableProjectiles() {
-        List<Projectile> typeable = new ArrayList<>(projectiles.size());
+    private List<Projectile> projectilesOfKind(Projectile.Kind kind) {
+        List<Projectile> matching = new ArrayList<>(projectiles.size());
         for (Projectile projectile : projectiles) {
-            if (projectile.isTypeable()) {
-                typeable.add(projectile);
+            if (projectile.getKind() == kind) {
+                matching.add(projectile);
             }
         }
-        return typeable;
+        return matching;
     }
 
     private List<String> collectWordsInPlay() {
@@ -435,9 +553,7 @@ public class GameState {
             words.addAll(enemy.getAllWords());
         }
         for (Projectile projectile : projectiles) {
-            if (projectile.isTypeable()) {
-                words.add(projectile.getWord());
-            }
+            words.add(projectile.getWord());
         }
         for (PowerUp powerUp : powerUps) {
             words.add(powerUp.getWord());
@@ -473,8 +589,8 @@ public class GameState {
 
         // Tiers are passed shortest-time-budget first: a bolt preempts a dropped
         // boon, which preempts an enemy. See TargetResolver.submit.
-        ResolveResult result = resolver.submit(
-                typedSoFar, typeableProjectiles(), powerUps, enemies);
+        ResolveResult result = resolver.submit(typedSoFar,
+                projectilesOfKind(Projectile.Kind.CURSED_BOLT), powerUps, enemies);
         lastResult = result;
 
         switch (result.status()) {
@@ -586,12 +702,13 @@ public class GameState {
         if (boss != null) {
             return;
         }
-        if (!PowerUpDrops.shouldDrop(difficulty, getLevel(), lives, random)) {
+        if (!PowerUpDrops.shouldDrop(enemy.getType(), difficulty, getLevel(),
+                getLives(), random)) {
             return;
         }
         boolean shieldsFull =
                 powerUpState.getShieldCharges() >= GameConfig.MAX_SHIELD_CHARGES;
-        PowerUpType type = PowerUpDrops.roll(lives, shieldsFull, random);
+        PowerUpType type = PowerUpDrops.roll(getLives(), shieldsFull, random);
 
         String word = wordBank.pickupWord(collectWordsInPlay());
         double dropY = enemy.getAnchorY()
@@ -635,7 +752,8 @@ public class GameState {
                 powerUpState.markFired(type);
             }
             case MEND -> {
-                lives = Math.min(GameConfig.STARTING_LIVES, lives + 1);
+                halfLives = Math.min(GameConfig.STARTING_HALF_LIVES,
+                        halfLives + GameConfig.HALVES_PER_LIFE);
                 powerUpState.markFired(type);
             }
         }
@@ -723,12 +841,13 @@ public class GameState {
         player.reset();
         powerUpState.reset();
         boss = null;
+        bossBuffer = "";
         // Repeat tracking is per-run, so a fresh run gets the whole vocabulary
         // back rather than starting where the last one left off.
         wordBank.resetUsage();
 
         score = 0;
-        lives = GameConfig.STARTING_LIVES;
+        halfLives = GameConfig.STARTING_HALF_LIVES;
         elapsedTicks = 0;
         charactersTyped = 0;
         enemiesDefeated = 0;
@@ -819,6 +938,17 @@ public class GameState {
         return lastResult;
     }
 
+    /**
+     * What the player currently has typed, from whichever system owns the
+     * keyboard — the resolver normally, the boss during the finale.
+     */
+    public String getTypedBuffer() {
+        if (boss != null && boss.isFighting()) {
+            return bossBuffer;
+        }
+        return resolver.getValidBuffer();
+    }
+
     public int getScore() {
         return score;
     }
@@ -827,14 +957,41 @@ public class GameState {
         return waveManager.getLevel();
     }
 
+    /**
+     * Whole lotus buds still lit, rounding a half up.
+     *
+     * <p>Rounds up so a player on half a heart is shown as still having one —
+     * which is true, and which is what the last pip on the bar is for.
+     */
     public int getLives() {
-        return lives;
+        return (int) Math.ceil(halfLives / (double) GameConfig.HALVES_PER_LIFE);
     }
 
+    /** Lives in half-hearts, for the HUD's half-filled buds. */
+    public int getHalfLives() {
+        return halfLives;
+    }
+
+    /** Takes a full heart. */
     public void loseLife() {
-        lives--;
-        if (lives <= 0) {
-            lives = 0;
+        damage(GameConfig.HALVES_PER_LIFE);
+    }
+
+    /** Takes half a heart. */
+    public void loseHalfLife() {
+        damage(1);
+    }
+
+    /**
+     * Applies damage in half-hearts and ends the run at zero.
+     *
+     * <p>Every route to losing life goes through here, so nothing can take a
+     * half and forget to check whether that was the last one.
+     */
+    private void damage(int halves) {
+        halfLives -= Math.max(0, halves);
+        if (halfLives <= 0) {
+            halfLives = 0;
             gameOver = true;
         }
     }
@@ -996,7 +1153,7 @@ public class GameState {
 
     public SaveData toSaveData() {
         return new SaveData(
-                getLevel(), score, lives, language,
+                getLevel(), score, getLives(), language,
                 Math.max(bestScore, score),
                 Math.max(bestLevel, getLevel()));
     }
@@ -1011,7 +1168,7 @@ public class GameState {
 
         if (data.hasResumableRun()) {
             this.score = data.score();
-            this.lives = data.lives();
+            this.halfLives = Math.max(1, data.lives()) * GameConfig.HALVES_PER_LIFE;
             this.gameOver = false;
             enemies.clear();
             projectiles.clear();

@@ -93,15 +93,54 @@ class GameStateTest {
     }
 
     @Test
-    @DisplayName("a breaching enemy costs a life")
-    void breachCostsLife() {
+    @DisplayName("a walker reaching the temple costs a whole heart")
+    void groundedBreachCostsAWholeHeart() {
         GameState state = playing();
         enemyAt(state, "ash", 0);
 
-        int before = state.getLives();
+        int before = state.getHalfLives();
         state.update();
 
-        assertEquals(before - 1, state.getLives());
+        assertEquals(before - GameConfig.HALVES_PER_LIFE, state.getHalfLives());
+    }
+
+    @Test
+    @DisplayName("a flyer only costs half")
+    void flyingBreachCostsHalf() {
+        // The swarm types are fast, short-worded and arrive several at once.
+        // A full life apiece would let one bad Ahp wave end a run outright.
+        GameState state = playing();
+        state.addEnemy(new Enemy(EnemyType.AHP, ApproachPath.AIR_FLANK, "ash", 0, 1, 0.0));
+
+        int before = state.getHalfLives();
+        state.update();
+
+        assertEquals(before - 1, state.getHalfLives());
+    }
+
+    @Test
+    @DisplayName("half a heart still shows as a life on the bar")
+    void halfAHeartStillCounts() {
+        GameState state = playing();
+        state.loseHalfLife();
+
+        assertEquals(GameConfig.STARTING_HALF_LIVES - 1, state.getHalfLives());
+        assertEquals(GameConfig.STARTING_LIVES, state.getLives(),
+                "three and a half pips is still three lit buds");
+        assertFalse(state.isGameOver());
+    }
+
+    @Test
+    @DisplayName("the last half heart ends the run")
+    void theLastHalfEndsIt() {
+        GameState state = playing();
+        for (int i = 0; i < GameConfig.STARTING_HALF_LIVES; i++) {
+            assertFalse(state.isGameOver(), "ended early at half " + i);
+            state.loseHalfLife();
+        }
+
+        assertTrue(state.isGameOver());
+        assertEquals(0, state.getHalfLives());
     }
 
     @Test
@@ -114,7 +153,7 @@ class GameStateTest {
         }
 
         assertTrue(state.isGameOver());
-        assertEquals(0, state.getLives());
+        assertEquals(0, state.getHalfLives());
         assertEquals(MatchStatus.EMPTY, state.handleInput("ash").status(),
                 "input must be inert once the run is over");
     }
@@ -149,7 +188,8 @@ class GameStateTest {
         state.skipIntro();
 
         assertEquals(0, state.getScore(), "score should reset");
-        assertEquals(GameConfig.STARTING_LIVES, state.getLives(), "lives should reset");
+        assertEquals(GameConfig.STARTING_HALF_LIVES, state.getHalfLives(),
+                "lives should reset");
         assertEquals(0, state.getEnemiesDefeated());
         assertTrue(state.getEnemies().isEmpty());
         assertTrue(state.getProjectiles().isEmpty());
@@ -377,17 +417,23 @@ class GameStateTest {
         }
         assertTrue(state.isBossActive(), "the finale never arrived");
 
-        for (int tick = 0; tick <= BossFight.ARRIVAL_TICKS; tick++) {
+        // Past the rise AND the held briefing — nothing is typeable until both
+        // are done.
+        for (int tick = 0; tick <= BossFight.ARRIVAL_TICKS + BossFight.BRIEFING_TICKS;
+                tick++) {
             state.update();
             clearTheField(state);
         }
 
         BossFight boss = state.getBoss();
-        for (int verse = 0; verse < boss.getStageCount(); verse++) {
-            String text = boss.currentSentence();
-            for (int i = 1; i <= text.length(); i++) {
-                state.handleInput(text.substring(0, i));
+        // Word at a time, because that is how the finale is typed — and each
+        // word only advances on the confirming space that follows it.
+        for (int guard = 0; guard < 500 && boss.isFighting(); guard++) {
+            String word = boss.currentWord();
+            for (int i = 1; i <= word.length(); i++) {
+                state.handleInput(word.substring(0, i));
             }
+            state.handleInput(word + " ");
         }
 
         for (int tick = 0; tick <= BossFight.DEATH_TICKS + 2; tick++) {
@@ -405,6 +451,33 @@ class GameStateTest {
         assertTrue(state.isVictory(), "the run should have been won, not lost");
         assertTrue(state.isGameOver(), "a won run is still a finished one");
         assertEquals(state.getFinalLevel(), state.getLevel());
+    }
+
+    @Test
+    @DisplayName("the boss briefing is not charged against the player's clock")
+    void theBriefingDoesNotCostWpm() {
+        // Five seconds of a screen that forbids typing would otherwise show up
+        // as five seconds of nobody typing, which is a WPM penalty for reading
+        // the instructions.
+        GameState state = playing();
+        state.getWaveManager().resumeAtLevel(state.getFinalLevel() - 1);
+
+        for (int tick = 0; tick < 60_000 && !state.isBossActive(); tick++) {
+            state.update();
+            clearTheField(state);
+        }
+        for (int tick = 0; tick <= BossFight.ARRIVAL_TICKS; tick++) {
+            state.update();
+        }
+        assertTrue(state.getBoss().isBriefing(), "expected to be mid-briefing");
+
+        long before = state.getElapsedTicks();
+        for (int tick = 0; tick < BossFight.BRIEFING_TICKS / 2; tick++) {
+            state.update();
+        }
+
+        assertEquals(before, state.getElapsedTicks(),
+                "the held briefing should not advance the run clock");
     }
 
     @Test

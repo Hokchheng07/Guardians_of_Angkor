@@ -109,7 +109,7 @@ Time Freeze looks like a hang rather than like enemies stopping.
 Enemy's attack timers are DOUBLE, not int, or a 0.45 scale rounds to
 0 or 1 and a slowed Yeak throws at full speed.
 
-Drop rate is LOW (6-16% per kill by tier, ceiling 30%). The first pass
+Drop rate is LOW (12-30% per ELIGIBLE kill, ceiling 30%). The first pass
 dropped a boon from a third of Easy's kills, which made them ordinary —
 a reward the player stops noticing has stopped being one. It rises as
 lives run out (PowerUpDrops), capped. That mercy
@@ -119,9 +119,23 @@ Mend is withheld at full health and the ward at full charges rather
 than rolled and wasted — a drop that does nothing teaches the player to
 ignore drops.
 
+Only Yeak, Pret and Naga drop (EnemyType.dropsBoons). Flyers and the
+common Beisach never do, so a boon is payment for a slow, long-word kill
+rather than loot from the trash mob. Rates are per ELIGIBLE kill and
+about a third of spawns qualify — Easy's 0.30 is nearer one boon in ten
+kills overall.
+
 Breaches and landed bolts both route through
 GameState.absorbOrLoseLife, so a shield can never be honoured for one
 and forgotten for the other.
+
+## Damage
+Lives are counted in HALVES (GameState.halfLives), not as a fraction —
+an integer count means a flyer's half-hit and a walker's full hit can
+never disagree by a rounding error about whether the run is over.
+Grounded breach costs 2, flying breach 1, any landed projectile 1. The
+HUD keeps three lotus buds and clips the gold to the left half of one
+to show a half; six small pips would be exact but would need counting.
 
 ## Enemy roster (see bestiary for word-length tiers)
 Beisach, Yeak, Ahp, Pret, Stec Kantoab, Naga, Krong Reap
@@ -156,7 +170,14 @@ BREACH_RADIUS is 58 and was 105 — at 105 the box was wider than Preah
 Ream is drawn, so lives were lost while the monster was visibly still a
 stride away and it felt stolen. It can be lowered freely but NOT raised
 without re-checking DEPTH_FULL_SIZE_AT: the breach has to happen after
-enemies reach full size or they are culled mid-growth. Spawns
+enemies reach full size or they are culled mid-growth.
+
+The boss does NOT stand on GROUND_LINE_Y. BOSS_BASE_Y is 110px above it
+so the serpent rears up behind the temple rather than sharing the plaza
+with the hero — at ground level Preah Ream stood squarely in front of
+it. VERSE_PANEL_BOTTOM_Y is derived from the hero's height for the same
+reason: he is drawn in the foreground, and a panel reaching any lower
+put him in the middle of the sentence. Spawns
 are deliberately ON-SCREEN — the poof is what makes that read as
 materialising rather than popping in. Preah Ream stands at
 TEMPLE_CENTER_X in the foreground, back to the viewer.
@@ -315,6 +336,15 @@ loaded with Font.createFont and registerFont or Khmer draws as tofu.
 Several alternative filenames are accepted so nobody has to rename a
 download.
 
+## Menu wordmark font
+FontManager.displayFont walks a SEPARATE chain for the "ANGKOR" title:
+Cinzel Decorative (bundled), Cinzel (bundled), either already installed
+on the machine, then the plain bold serif the title always used. Same
+optional-asset treatment as Khmer, for the same reason — not committed,
+not required, logged once if missing (resources/fonts/README.md). Unlike
+Khmer this is a styling choice rather than a glyph-coverage one, so the
+uncovered fallback is not tofu, just a plainer title.
+
 ## Input field
 TypingInputField is custom-painted (setOpaque(false), paintComponent
 draws the stone frame and glass plate, then calls super for the text). It
@@ -417,17 +447,71 @@ harsher than the rest of the game on purpose, since the finale is where
 accuracy is meant to matter, but never touching a verse already
 cleared.
 
-While it fights it spits VENOM (Projectile.Kind.VENOM, purple). Venom
-is deliberately NOT typeable: one keystroke cannot mean both "next
-letter of the sentence" and "intercept that bolt". The defence is
-finishing the verse, which fires a counter-volley that clears the sky.
-Without that the fight would be pure endurance with the player
-powerless over the thing killing them.
+A verse is typed ONE WORD AT A TIME, buffer clearing between words like
+it does after a kill. That is load-bearing, not cosmetic: venom bolts
+carry words too, and a verse typed as one continuous string leaves no
+moment mid-verse at which a bolt's word could be started. Word-at-a-time
+keeps the buffer a partial word always, so both can be weighed against
+the same keystrokes.
 
-BossFight implements WordTarget so GameState can answer in an ordinary
-ResolveResult — that is what makes the input field's typo flash and
-clear-on-complete work for a target the matcher never sees. It is why
-ResolveResult.typo/locked/completed are public.
+A word only advances on an explicit SPACE, not the instant its last
+letter lands (BossFight.submit checks for `word + " "` before it checks
+completion). Auto-advancing on the last letter was tried first and it
+broke the player's own typing rhythm: prose is typed word-then-space, and
+a field that clears itself out from under the space the player was
+already about to type leaves that keystroke landing on an empty buffer
+instead, reading as a stray first letter rather than a confirmation.
+GameState.handleBossInput mirrors this: the verse only counts as
+COMPLETED on `currentWord() + " "`, never on the bare word, so a fully
+typed but unconfirmed word still shows as PROGRESS (want.startsWith(want)
+is trivially true) rather than jumping ahead on its own.
+
+Venom (Projectile.Kind.VENOM, purple) is deflected by typing its word.
+It flies SLOWLY (5.5s, scaled by the tier) and comes every 5-10 seconds
+at random — a fixed cadence becomes a rhythm players stop reacting to.
+Its words come from the medium pool and are excluded against
+BossFight.remainingWords(), so no live bolt can ever share a word with
+the verse. Finishing a verse still fires a counter-volley clearing the
+sky, which is what makes the paragraph a defence and not just a score.
+A venom word never contains a space, so the confirm-with-space check
+above can never collide with a bolt.
+
+BRIEFING is a PHASE, not a banner over a live fight. Between ARRIVING
+and FIGHTING the boss stands risen and the game is held for
+BRIEFING_TICKS (5s) while BossRenderer.drawBriefing puts the rules on
+screen. It has to be a phase because the overlay covers the verse
+panel: leaving the fight running underneath would ask the player to
+type a sentence they cannot see and spit at them for the privilege.
+Nothing is typeable (isActive() and isFighting() are both false, so the
+existing "boss is not fighting" gate in handleInput covers it) and no
+venom flies. Its phaseTicks are NOT scaled by timeScale — a Time Freeze
+carried through the boss door must not stretch it, and freezing an
+already-held screen reads as a hang.
+
+GameState does not advance elapsedTicks while isBriefing(), for the
+same reason IntroSequence does not: five seconds of a screen that
+forbids typing must not be charged against the player's WPM.
+
+It exists because the finale changes three rules at once — words
+confirm on space, orbs are answered by typing them, a slip costs the
+verse — and none are guessable. The arrival name card announces the
+boss's name, which is the one thing already visible. Without this the
+first mistake is the tutorial.
+
+The overlay text says the verse resets, NOT the paragraph, because that
+is what resetVerse() does and the banner has to be true.
+
+GameState.handleBossInput does NOT use TargetResolver — it checks exact
+matches first (bolts, then the verse word followed by a space), then
+prefixes. Checking completions before prefixes is what stops a verse
+word that is a strict prefix of a live bolt's word ("the" while "temple"
+is in the air) from being impossible to finish. Same rule the matcher
+already applies within a tier; it just has to be applied across two
+lists here.
+
+Because the resolver is bypassed, its buffer goes stale for the fight —
+GameState.getTypedBuffer() is what the renderer must read, not
+resolver.getValidBuffer().
 
 Power-ups: arriving CLEARS every drop on the ground and suppresses new
 ones for the fight. Boons already running are left alone — those were

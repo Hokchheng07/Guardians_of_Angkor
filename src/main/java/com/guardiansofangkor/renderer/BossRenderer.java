@@ -11,7 +11,11 @@ import java.awt.Color;
 import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.Shape;
 import java.awt.geom.Ellipse2D;
+import java.awt.geom.Line2D;
+import java.awt.geom.Path2D;
 import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
 import java.util.ArrayList;
@@ -31,9 +35,6 @@ import java.util.List;
  */
 public class BossRenderer {
 
-    /** Where the paragraph panel sits above the typing bar. */
-    private static final int PANEL_BOTTOM_MARGIN = 74;
-
     private static final int PANEL_SIDE_MARGIN = 90;
     private static final int PANEL_PADDING = 22;
     private static final int LINE_GAP = 8;
@@ -45,6 +46,7 @@ public class BossRenderer {
     private Font paragraphFont;
     private Font nameFont;
     private Font labelFont;
+    private Font warningFont;
 
     public BossRenderer(Language language) {
         setLanguage(language);
@@ -55,6 +57,7 @@ public class BossRenderer {
         this.paragraphFont = FontManager.wordFont(language, 26, Font.BOLD);
         this.nameFont = FontManager.uiFont(language, 40, Font.BOLD);
         this.labelFont = FontManager.uiFont(language, 13, Font.BOLD);
+        this.warningFont = FontManager.uiFont(language, 44, Font.BOLD);
     }
 
     /**
@@ -78,6 +81,12 @@ public class BossRenderer {
         }
         drawHealthBar(g2, boss);
         drawParagraphPanel(g2, boss);
+
+        // Last, so it sits over the verse rather than under it — the whole
+        // point of the held beat is that this is the only thing being read.
+        if (boss.isBriefing()) {
+            drawBriefing(g2, boss);
+        }
     }
 
     // ---- the monster -------------------------------------------------------
@@ -109,7 +118,7 @@ public class BossRenderer {
                 ? (int) Math.round(height * (sprite.getWidth() / (double) sprite.getHeight()))
                 : (int) Math.round(height * 0.8);
 
-        int topY = (int) Math.round(GameConfig.GROUND_LINE_Y - height + lift);
+        int topY = (int) Math.round(GameConfig.BOSS_BASE_Y - height + lift);
         int leftX = (int) Math.round(cx - width / 2.0 + sway);
 
         Graphics2D bg = (Graphics2D) g2.create();
@@ -217,6 +226,174 @@ public class BossRenderer {
         }
     }
 
+    // ---- the briefing --------------------------------------------------------
+
+    private static final int BRIEF_W = 700;
+    private static final int BRIEF_H = 210;
+
+    /** Size of the angled corner cut, which is what makes the frame read as HUD. */
+    private static final int BRIEF_CUT = 26;
+
+    /** How far the solid corner brackets run along each edge. */
+    private static final int BRACKET_RUN = 54;
+
+    private static final Color BRIEF_RED = new Color(0xE0, 0x2B, 0x20);
+    private static final Color BRIEF_RED_DEEP = new Color(0x8E, 0x12, 0x0C);
+    private static final Color BRIEF_FILL = new Color(0x2A, 0x0E, 0x0C, 238);
+
+    /**
+     * The rules of the finale, held on screen for {@link BossFight#BRIEFING_TICKS}.
+     *
+     * <p>Exists because the finale quietly changes three rules at once — words
+     * confirm on space, orbs are answered by typing them, a slip costs the
+     * verse — and none of them are guessable. The arrival card announces the
+     * boss's name, which is the one thing the player can already see. Without
+     * this, the first mistake is the tutorial.
+     */
+    private void drawBriefing(Graphics2D g2, BossFight boss) {
+        double t = boss.getBriefingProgress();
+        // Snap in, hold, ease out: roughly 0.4s in, 3.7s readable, 0.9s out.
+        // Weighted heavily toward the hold because the panel has three lines to
+        // read and a fade is dead time in a five-second budget.
+        float alpha = (float) Math.min(1.0, Math.min(t * 12.0, (1.0 - t) * 6.0));
+        if (alpha <= 0.01f) {
+            return;
+        }
+
+        Graphics2D bg = (Graphics2D) g2.create();
+        try {
+            bg.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                    RenderingHints.VALUE_ANTIALIAS_ON);
+
+            // Scrim first. The play field behind this is busy and red-on-busy
+            // is the one thing that would cost legibility in five seconds.
+            bg.setComposite(AlphaComposite.getInstance(
+                    AlphaComposite.SRC_OVER, alpha * 0.72f));
+            bg.setColor(new Color(0x08, 0x05, 0x04));
+            bg.fillRect(0, 0, GameConfig.SCREEN_WIDTH, GameConfig.SCREEN_HEIGHT);
+
+            bg.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
+
+            int x = GameConfig.TEMPLE_CENTER_X - BRIEF_W / 2;
+            int y = GameConfig.SCREEN_HEIGHT / 2 - BRIEF_H / 2 - 40;
+
+            Shape frame = cutCornerFrame(x, y, BRIEF_W, BRIEF_H, BRIEF_CUT);
+            bg.setColor(BRIEF_FILL);
+            bg.fill(frame);
+            bg.setColor(BRIEF_RED);
+            bg.setStroke(new BasicStroke(2.2f));
+            bg.draw(frame);
+
+            drawCornerBrackets(bg, x, y, BRIEF_W, BRIEF_H);
+            drawHazardBand(bg, x + 200, y + 34, BRIEF_W - 232, 12, alpha);
+            drawHazardBand(bg, x + 200, y + BRIEF_H - 46, BRIEF_W - 232, 12, alpha);
+            drawWarningTriangle(bg, x + 96, y + BRIEF_H / 2.0, 62);
+
+            bg.setFont(warningFont);
+            FontMetrics hfm = bg.getFontMetrics();
+            bg.setColor(BRIEF_RED);
+            bg.drawString("WARNING", x + 200, y + 34 + hfm.getAscent() + 18);
+
+            bg.setFont(labelFont);
+            FontMetrics fm = bg.getFontMetrics();
+            int lineY = y + 34 + hfm.getAscent() + 46;
+            for (String line : List.of(
+                    "TYPE A VERSE WORD, THEN SPACE TO CONFIRM IT",
+                    "TYPE AN ORB'S WORD TO DESTROY IT BEFORE IT LANDS",
+                    "A WRONG LETTER OR SPACE RESETS THE CURRENT VERSE")) {
+                bg.setColor(Palette.HUD_TEXT_WHITE);
+                bg.drawString(line, x + 200, lineY);
+                lineY += fm.getHeight() + 5;
+            }
+        } finally {
+            bg.dispose();
+        }
+    }
+
+    /** The panel outline: a rectangle with two opposite corners sliced off. */
+    private static Shape cutCornerFrame(int x, int y, int w, int h, int cut) {
+        Path2D.Double path = new Path2D.Double();
+        path.moveTo(x + cut, y);
+        path.lineTo(x + w, y);
+        path.lineTo(x + w, y + h - cut);
+        path.lineTo(x + w - cut, y + h);
+        path.lineTo(x, y + h);
+        path.lineTo(x, y + cut);
+        path.closePath();
+        return path;
+    }
+
+    /**
+     * Heavy solid corners, drawn over the thin outline.
+     *
+     * <p>This is the whole trick of the style: a uniform border reads as a
+     * dialog box, while a thin edge anchored by four heavy corners reads as an
+     * instrument panel.
+     */
+    private static void drawCornerBrackets(Graphics2D g2, int x, int y, int w, int h) {
+        g2.setColor(BRIEF_RED);
+        g2.setStroke(new BasicStroke(6f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER));
+
+        // Top-left and bottom-right are the square corners; the other two are
+        // cut, so their brackets start clear of the slice.
+        g2.drawLine(x + 3, y + BRIEF_CUT, x + 3, y + BRIEF_CUT + BRACKET_RUN);
+        g2.drawLine(x + BRIEF_CUT, y + 3, x + BRIEF_CUT + BRACKET_RUN, y + 3);
+
+        g2.drawLine(x + w - 3, y + 3, x + w - 3, y + BRACKET_RUN);
+        g2.drawLine(x + w - BRACKET_RUN, y + 3, x + w - 3, y + 3);
+
+        g2.drawLine(x + 3, y + h - 3, x + 3 + BRACKET_RUN, y + h - 3);
+        g2.drawLine(x + 3, y + h - BRACKET_RUN, x + 3, y + h - 3);
+
+        g2.drawLine(x + w - 3, y + h - BRIEF_CUT - BRACKET_RUN,
+                x + w - 3, y + h - BRIEF_CUT);
+        g2.drawLine(x + w - BRIEF_CUT - BRACKET_RUN, y + h - 3,
+                x + w - BRIEF_CUT, y + h - 3);
+    }
+
+    /** Diagonal hazard stripes, clipped to a thin band. */
+    private static void drawHazardBand(Graphics2D g2, int x, int y, int w, int h,
+                                       float alpha) {
+        Graphics2D hg = (Graphics2D) g2.create();
+        try {
+            hg.setComposite(AlphaComposite.getInstance(
+                    AlphaComposite.SRC_OVER, alpha * 0.85f));
+            hg.setClip(x, y, w, h);
+            hg.setColor(BRIEF_RED_DEEP);
+            hg.setStroke(new BasicStroke(5f));
+            // Start a full band-height to the left so the first stripe enters
+            // the clip already at its proper angle rather than as a stub.
+            for (int sx = x - h; sx < x + w + h; sx += 11) {
+                hg.drawLine(sx, y + h, sx + h, y);
+            }
+        } finally {
+            hg.dispose();
+        }
+    }
+
+    /** The bordered triangle and its exclamation mark. */
+    private static void drawWarningTriangle(Graphics2D g2, double cx, double cy,
+                                            double size) {
+        double half = size / 2.0;
+        Path2D.Double tri = new Path2D.Double();
+        tri.moveTo(cx, cy - half);
+        tri.lineTo(cx + half * 1.08, cy + half * 0.82);
+        tri.lineTo(cx - half * 1.08, cy + half * 0.82);
+        tri.closePath();
+
+        g2.setColor(BRIEF_RED);
+        g2.setStroke(new BasicStroke(3.4f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g2.draw(tri);
+
+        // Tapered bar and dot rather than a drawn glyph, so the mark keeps its
+        // weight independently of whatever font happens to be resolved.
+        double barTop = cy - half * 0.28;
+        double barBottom = cy + half * 0.22;
+        g2.setStroke(new BasicStroke(5f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g2.draw(new Line2D.Double(cx, barTop, cx, barBottom));
+        g2.fill(new Ellipse2D.Double(cx - 2.8, cy + half * 0.42, 5.6, 5.6));
+    }
+
     // ---- health ------------------------------------------------------------
 
     private void drawHealthBar(Graphics2D g2, BossFight boss) {
@@ -287,7 +464,6 @@ public class BossRenderer {
      */
     private void drawParagraphPanel(Graphics2D g2, BossFight boss) {
         String sentence = boss.currentSentence();
-        String typed = boss.getTyped();
 
         g2.setFont(paragraphFont);
         FontMetrics fm = g2.getFontMetrics();
@@ -299,7 +475,11 @@ public class BossRenderer {
         int panelHeight = PANEL_PADDING * 2 + lines.size() * lineHeight;
         int panelWidth = GameConfig.SCREEN_WIDTH - PANEL_SIDE_MARGIN * 2;
         int panelX = PANEL_SIDE_MARGIN;
-        int panelY = GameConfig.SCREEN_HEIGHT - PANEL_BOTTOM_MARGIN - panelHeight;
+        // Anchored to its BOTTOM edge, which is pinned just above the top of
+        // Preah Ream's head. He is drawn in the foreground, so a panel that
+        // reached any lower would have him standing in the middle of the
+        // sentence — which is exactly what it used to do.
+        int panelY = GameConfig.VERSE_PANEL_BOTTOM_Y - panelHeight;
 
         RoundRectangle2D panel = new RoundRectangle2D.Double(
                 panelX, panelY, panelWidth, panelHeight, 16, 16);
@@ -314,8 +494,11 @@ public class BossRenderer {
         g2.setStroke(new BasicStroke(scolding ? 2.4f : 1.4f));
         g2.draw(panel);
 
-        // Walk the wrapped lines against the typed prefix so the gold/white
-        // split lands mid-line correctly rather than per-line.
+        // Walk the wrapped lines against how much of the verse is behind the
+        // player, so the gold/white split lands mid-line correctly rather than
+        // per-line. Progress is counted in characters of the whole verse, which
+        // is why it can be compared against absolute line offsets.
+        int cleared = boss.getClearedCharacters();
         int consumed = 0;
         int baseline = panelY + PANEL_PADDING + fm.getAscent();
 
@@ -326,7 +509,7 @@ public class BossRenderer {
             }
             int lineEnd = lineStart + line.length();
             int matchedInLine = Math.max(0,
-                    Math.min(line.length(), typed.length() - lineStart));
+                    Math.min(line.length(), cleared - lineStart));
 
             int x = GameConfig.TEMPLE_CENTER_X - fm.stringWidth(line) / 2;
 

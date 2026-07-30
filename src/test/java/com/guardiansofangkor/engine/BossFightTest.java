@@ -34,17 +34,37 @@ class BossFightTest {
         return boss;
     }
 
+    /** Ticks through the rise AND the held briefing, to the live fight. */
     private static void settleArrival(BossFight boss) {
-        for (int i = 0; i <= BossFight.ARRIVAL_TICKS; i++) {
+        for (int i = 0; i <= BossFight.ARRIVAL_TICKS + BossFight.BRIEFING_TICKS; i++) {
             boss.update();
         }
     }
 
-    /** Types a whole string one character at a time, as the input field would. */
-    private static BossFight.Result typeOut(BossFight boss, String text) {
+    /**
+     * Types one word, a character at a time, then the confirming space, as the
+     * input field would. The word only advances on that space — see
+     * {@link BossFight#submit(String)}.
+     */
+    private static BossFight.Result typeWord(BossFight boss, String word) {
         BossFight.Result last = BossFight.Result.NONE;
-        for (int i = 1; i <= text.length(); i++) {
-            last = boss.submit(text.substring(0, i));
+        for (int i = 1; i <= word.length(); i++) {
+            last = boss.submit(word.substring(0, i));
+        }
+        last = boss.submit(word + " ");
+        return last;
+    }
+
+    /**
+     * Types the whole of the current verse.
+     *
+     * <p>Word by word, with the buffer clearing between them — which is how the
+     * input field behaves, since each finished word comes back as COMPLETED.
+     */
+    private static BossFight.Result typeVerse(BossFight boss) {
+        BossFight.Result last = BossFight.Result.NONE;
+        for (String word : List.copyOf(boss.currentVerseWords())) {
+            last = typeWord(boss, word);
         }
         return last;
     }
@@ -73,14 +93,95 @@ class BossFightTest {
     }
 
     @Test
-    @DisplayName("no venom flies during the entrance")
+    @DisplayName("no venom flies during the entrance or the briefing")
     void noVenomWhileArriving() {
         BossFight boss = new BossFight(EnemyType.NAGA, VERSES, Difficulty.EASY);
 
-        for (int i = 0; i < BossFight.ARRIVAL_TICKS; i++) {
+        for (int i = 0; i < BossFight.ARRIVAL_TICKS + BossFight.BRIEFING_TICKS; i++) {
             boss.update();
-            assertFalse(boss.isVenomDue(), "spat at tick " + i + ", before it had arrived");
+            assertFalse(boss.isVenomDue(),
+                    "spat at tick " + i + ", before the fight was live");
         }
+    }
+
+    // ---- the briefing ------------------------------------------------------
+
+    /** Ticks only far enough to finish the rise, leaving the briefing up. */
+    private static BossFight briefing() {
+        BossFight boss = new BossFight(EnemyType.NAGA, VERSES, Difficulty.EASY);
+        for (int i = 0; i <= BossFight.ARRIVAL_TICKS; i++) {
+            boss.update();
+        }
+        return boss;
+    }
+
+    @Test
+    @DisplayName("the rules are held on screen once the boss has risen")
+    void briefingFollowsTheArrival() {
+        BossFight boss = briefing();
+
+        assertTrue(boss.isBriefing());
+        assertFalse(boss.isArriving(), "the rise is over");
+        assertFalse(boss.isFighting(), "but the fight has not started either");
+    }
+
+    @Test
+    @DisplayName("nothing is typeable while the briefing is up")
+    void briefingRefusesInput() {
+        // The overlay covers the verse. Accepting keystrokes under it would ask
+        // the player to type a sentence they cannot see.
+        BossFight boss = briefing();
+
+        assertEquals(BossFight.Result.NONE, boss.submit("o"));
+        assertFalse(boss.isActive(), "the matcher must not see it as a target");
+    }
+
+    @Test
+    @DisplayName("no venom flies while the briefing is up")
+    void briefingHoldsTheVenom() {
+        BossFight boss = briefing();
+
+        for (int i = 0; i < BossFight.BRIEFING_TICKS; i++) {
+            assertFalse(boss.isVenomDue(), "spat during its own warning, at tick " + i);
+            boss.update();
+        }
+    }
+
+    @Test
+    @DisplayName("the briefing ends on its own and hands over to the fight")
+    void briefingEnds() {
+        BossFight boss = briefing();
+
+        for (int i = 0; i <= BossFight.BRIEFING_TICKS; i++) {
+            boss.update();
+        }
+
+        assertFalse(boss.isBriefing(), "the overlay never came down");
+        assertTrue(boss.isFighting(), "and play should have resumed");
+        assertEquals(VERSES.get(0), boss.currentSentence(),
+                "the fight starts at the first verse, not part-way in");
+    }
+
+    @Test
+    @DisplayName("the briefing is long enough to actually be read")
+    void briefingIsReadable() {
+        // Three lines of rules. Anything much shorter and the panel is a flash
+        // the player registers as decoration rather than as instructions.
+        assertTrue(BossFight.BRIEFING_TICKS >= GameConfig.TARGET_FPS * 4,
+                "too brief to read three lines");
+    }
+
+    @Test
+    @DisplayName("a Time Freeze cannot stretch the briefing")
+    void briefingIgnoresTimeScale() {
+        // Freezing a screen that is already held would read as a hang, and a
+        // boon should never make the player wait longer to start playing.
+        BossFight boss = new BossFight(EnemyType.NAGA, VERSES, Difficulty.EASY);
+
+        for (int i = 0; i <= BossFight.ARRIVAL_TICKS + BossFight.BRIEFING_TICKS; i++) {
+            boss.update(0.0);
+        }
+        assertTrue(boss.isFighting(), "the briefing outstayed its window under a freeze");
     }
 
     @Test
@@ -95,14 +196,50 @@ class BossFightTest {
     // ---- typing ------------------------------------------------------------
 
     @Test
-    @DisplayName("correct letters advance the verse")
+    @DisplayName("correct letters advance the current word")
     void correctLettersProgress() {
         BossFight boss = fighting();
 
         assertEquals(BossFight.Result.PROGRESS, boss.submit("o"));
         assertEquals(BossFight.Result.PROGRESS, boss.submit("on"));
         assertEquals("on", boss.getTyped());
-        assertEquals("e two", boss.getRemaining());
+        assertEquals("e", boss.getRemaining());
+    }
+
+    @Test
+    @DisplayName("the matcher is offered one word at a time, not the whole verse")
+    void oneWordAtATime() {
+        // This is what makes room for a venom bolt mid-verse: the buffer is
+        // always a partial word, never a partial sentence.
+        BossFight boss = fighting();
+
+        assertEquals("one", boss.getWord());
+        typeWord(boss, "one");
+        assertEquals("two", boss.getWord());
+        assertEquals(1, boss.getWordIndex());
+    }
+
+    @Test
+    @DisplayName("finishing a word clears the buffer without clearing the verse")
+    void wordsClearIndividually() {
+        BossFight boss = fighting();
+
+        assertEquals(BossFight.Result.WORD_CLEARED, typeWord(boss, "one"));
+        assertEquals(0, boss.getStage(), "one word is not a whole verse");
+        assertEquals("", boss.getTyped());
+    }
+
+    @Test
+    @DisplayName("venom words never collide with words the verse still wants")
+    void remainingWordsAreExcludable() {
+        BossFight boss = fighting();
+        typeWord(boss, "one");
+
+        List<String> remaining = boss.remainingWords();
+
+        assertFalse(remaining.contains("one"), "a cleared word is no longer wanted");
+        assertTrue(remaining.contains("two"));
+        assertTrue(remaining.contains("five"), "later verses count too");
     }
 
     @Test
@@ -110,7 +247,7 @@ class BossFightTest {
     void clearingAVerseAdvances() {
         BossFight boss = fighting();
 
-        assertEquals(BossFight.Result.STAGE_CLEARED, typeOut(boss, "one two"));
+        assertEquals(BossFight.Result.STAGE_CLEARED, typeVerse(boss));
 
         assertEquals(1, boss.getStage());
         assertEquals("three four", boss.currentSentence());
@@ -123,9 +260,9 @@ class BossFightTest {
     void clearingEveryVerseWins() {
         BossFight boss = fighting();
 
-        typeOut(boss, "one two");
-        typeOut(boss, "three four");
-        assertEquals(BossFight.Result.DEFEATED, typeOut(boss, "five six"));
+        typeVerse(boss);
+        typeVerse(boss);
+        assertEquals(BossFight.Result.DEFEATED, typeVerse(boss));
 
         assertTrue(boss.isBeaten());
         assertEquals(0, boss.getHealthFraction(), 0.0001);
@@ -135,9 +272,9 @@ class BossFightTest {
     @DisplayName("the run is not won until the death has played out")
     void deathHasToFinish() {
         BossFight boss = fighting();
-        typeOut(boss, "one two");
-        typeOut(boss, "three four");
-        typeOut(boss, "five six");
+        typeVerse(boss);
+        typeVerse(boss);
+        typeVerse(boss);
 
         assertTrue(boss.isBeaten());
         assertFalse(boss.isFinished(), "the victory screen must not cut off the death");
@@ -157,7 +294,8 @@ class BossFightTest {
 
         assertEquals(BossFight.Result.TYPO, boss.submit("onx"));
         assertEquals("", boss.getTyped(), "the verse should be back to the start");
-        assertEquals(VERSES.get(0), boss.getRemaining());
+        assertEquals(0, boss.getWordIndex());
+        assertEquals("one", boss.getRemaining());
     }
 
     @Test
@@ -166,8 +304,8 @@ class BossFightTest {
         // One slip at word thirty undoing the whole fight would make the finale
         // a lottery rather than a test.
         BossFight boss = fighting();
-        typeOut(boss, "one two");
-        typeOut(boss, "three four");
+        typeVerse(boss);
+        typeVerse(boss);
         assertEquals(2, boss.getStage());
 
         boss.submit("f");
@@ -175,15 +313,17 @@ class BossFightTest {
 
         assertEquals(2, boss.getStage(), "cleared verses must stay cleared");
         assertEquals("five six", boss.currentSentence());
+        assertEquals(0, boss.getWordIndex(), "but the verse itself starts over");
     }
 
     @Test
     @DisplayName("a reset verse can be typed again from scratch")
     void resetVersesAreStillWinnable() {
         BossFight boss = fighting();
-        boss.submit("onx");
+        typeWord(boss, "one");
+        boss.submit("tx");
 
-        assertEquals(BossFight.Result.STAGE_CLEARED, typeOut(boss, "one two"));
+        assertEquals(BossFight.Result.STAGE_CLEARED, typeVerse(boss));
     }
 
     @Test
@@ -200,11 +340,57 @@ class BossFightTest {
     @DisplayName("keystrokes after the boss falls do nothing")
     void beatenBossIgnoresInput() {
         BossFight boss = fighting();
-        typeOut(boss, "one two");
-        typeOut(boss, "three four");
-        typeOut(boss, "five six");
+        typeVerse(boss);
+        typeVerse(boss);
+        typeVerse(boss);
 
         assertEquals(BossFight.Result.NONE, boss.submit("f"));
+    }
+
+    @Test
+    @DisplayName("a fully typed word waits for the space, it does not auto-advance")
+    void fullyTypedWordWaitsForTheSpace() {
+        BossFight boss = fighting();
+
+        assertEquals(BossFight.Result.PROGRESS, boss.submit("one"),
+                "the last letter alone must not clear the word");
+        assertEquals("one", boss.getWord(), "still on the same word");
+        assertEquals(0, boss.getWordIndex());
+        assertEquals("", boss.getRemaining(), "nothing left to type but the space");
+    }
+
+    @Test
+    @DisplayName("the space is what actually clears the word")
+    void theSpaceConfirms() {
+        BossFight boss = fighting();
+        boss.submit("one");
+
+        assertEquals(BossFight.Result.WORD_CLEARED, boss.submit("one "));
+        assertEquals("two", boss.getWord());
+        assertEquals(1, boss.getWordIndex());
+    }
+
+    @Test
+    @DisplayName("typing the next word without a space is a mistype")
+    void skippingTheSpaceIsATypo() {
+        // The whole point: the player must actually press space, the game must
+        // not paper over a missing one.
+        BossFight boss = fighting();
+        boss.submit("one");
+
+        assertEquals(BossFight.Result.TYPO, boss.submit("onet"));
+        assertEquals(0, boss.getWordIndex(), "the verse should be back to the start");
+    }
+
+    @Test
+    @DisplayName("a verse of one word still works")
+    void singleWordVerses() {
+        BossFight boss = new BossFight(EnemyType.NAGA,
+                List.of("alpha", "beta"), Difficulty.EASY, new Random(1));
+        settleArrival(boss);
+
+        assertEquals(BossFight.Result.STAGE_CLEARED, typeWord(boss, "alpha"));
+        assertEquals(BossFight.Result.DEFEATED, typeWord(boss, "beta"));
     }
 
     // ---- health ------------------------------------------------------------
@@ -217,10 +403,10 @@ class BossFightTest {
         BossFight boss = fighting();
         double full = boss.getHealthFraction();
 
-        boss.submit("one");
+        boss.submit("on");
         double partway = boss.getHealthFraction();
 
-        assertTrue(partway < full, "mid-verse typing should show on the bar");
+        assertTrue(partway < full, "mid-word typing should show on the bar");
         assertTrue(partway > 0.5, "and not finish the first verse's worth early");
     }
 
@@ -230,13 +416,22 @@ class BossFightTest {
         BossFight boss = fighting();
         double last = boss.getHealthFraction();
 
-        for (String verse : VERSES) {
-            for (int i = 1; i <= verse.length(); i++) {
-                boss.submit(verse.substring(0, i));
-                double now = boss.getHealthFraction();
-                assertTrue(now <= last + 0.0001,
-                        "health went back up at '" + verse.substring(0, i) + "'");
-                last = now;
+        for (int verse = 0; verse < VERSES.size(); verse++) {
+            for (String word : List.copyOf(boss.currentVerseWords())) {
+                for (int i = 1; i <= word.length(); i++) {
+                    boss.submit(word.substring(0, i));
+                    double now = boss.getHealthFraction();
+                    assertTrue(now <= last + 0.0001,
+                            "health went back up at '" + word.substring(0, i) + "'");
+                    last = now;
+                }
+                // The confirming space is what actually advances the word — see
+                // BossFight.submit — and it must not raise the bar either.
+                boss.submit(word + " ");
+                double afterConfirm = boss.getHealthFraction();
+                assertTrue(afterConfirm <= last + 0.0001,
+                        "health went back up confirming '" + word + "'");
+                last = afterConfirm;
             }
         }
         assertEquals(0, last, 0.0001);
@@ -276,30 +471,30 @@ class BossFightTest {
     }
 
     @Test
-    @DisplayName("venom comes faster as verses fall")
-    void venomEscalates() {
+    @DisplayName("the attack gap is a random five to ten seconds")
+    void venomIntervalStaysInItsWindow() {
         BossFight boss = fighting();
-        int opening = boss.venomIntervalTicks();
 
-        typeOut(boss, "one two");
-        int later = boss.venomIntervalTicks();
-
-        assertTrue(later < opening,
-                "the last verse should be the loudest: " + opening + " then " + later);
+        for (int i = 0; i < 500; i++) {
+            int gap = boss.venomIntervalTicks();
+            assertTrue(gap >= GameConfig.VENOM_INTERVAL_MIN_TICKS
+                            && gap <= GameConfig.VENOM_INTERVAL_MAX_TICKS,
+                    "gap of " + gap + " ticks is outside five to ten seconds");
+        }
     }
 
     @Test
-    @DisplayName("the venom interval has a floor")
-    void venomHasAFloor() {
-        BossFight boss = new BossFight(EnemyType.KRONG_REAP,
-                List.of("a", "b", "c", "d", "e", "f", "g", "h"), Difficulty.HARD);
-        settleArrival(boss);
+    @DisplayName("the gap actually varies rather than being a metronome")
+    void venomIntervalIsUnpredictable() {
+        // A fixed cadence becomes a rhythm the player memorises and stops
+        // reacting to, which is the opposite of what the venom is for.
+        BossFight boss = fighting();
+        java.util.Set<Integer> seen = new java.util.HashSet<>();
 
-        for (int i = 0; i < 7; i++) {
-            typeOut(boss, boss.currentSentence());
-            assertTrue(boss.venomIntervalTicks() >= 60,
-                    "escalation ran away at stage " + i);
+        for (int i = 0; i < 200; i++) {
+            seen.add(boss.venomIntervalTicks());
         }
+        assertTrue(seen.size() > 20, "only saw " + seen.size() + " distinct gaps");
     }
 
     @Test
@@ -391,36 +586,106 @@ class BossFightTest {
         }
     }
 
-    @Test
-    @DisplayName("the boss spits venom, and venom cannot be typed away")
-    void venomIsAHazardNotATarget() {
-        GameState state = atTheFinale();
+    /** Ticks a state past the rise and the held briefing, into the live fight. */
+    private static void settleIntoTheFight(GameState state) {
+        for (int i = 0; i <= BossFight.ARRIVAL_TICKS + BossFight.BRIEFING_TICKS; i++) {
+            state.update();
+        }
+    }
 
-        Projectile venom = null;
-        for (int i = 0; i < 4000 && venom == null; i++) {
+    /** Runs the fight until a bolt is in the air, and returns it. */
+    private static Projectile waitForVenom(GameState state) {
+        for (int i = 0; i < 4000; i++) {
             state.update();
             for (Projectile p : state.getProjectiles()) {
-                if (p.getKind() == Projectile.Kind.VENOM) {
-                    venom = p;
+                if (p.getKind() == Projectile.Kind.VENOM && p.isActive()) {
+                    return p;
                 }
             }
         }
-
-        assertNotNull(venom, "the boss never spat");
-        assertFalse(venom.isTypeable());
-        assertEquals("", venom.getWord(), "venom carries nothing to type");
+        throw new AssertionError("the boss never spat");
     }
 
     @Test
-    @DisplayName("typing goes to the paragraph, never to a bolt")
-    void typingIsOwnedByTheBoss() {
+    @DisplayName("venom carries a word of its own")
+    void venomIsTypeable() {
         GameState state = atTheFinale();
-        for (int i = 0; i <= BossFight.ARRIVAL_TICKS; i++) {
+        Projectile venom = waitForVenom(state);
+
+        assertNotNull(venom);
+        assertTrue(venom.isVenom());
+        assertFalse(venom.getWord().isBlank(), "venom must be answerable");
+        assertTrue(venom.getWord().length() >= 5,
+                "a middling word, not a two-letter freebie: " + venom.getWord());
+    }
+
+    @Test
+    @DisplayName("a venom word never collides with a word the verse still wants")
+    void venomNeverStealsAVerseWord() {
+        // Otherwise one set of keystrokes would mean two things at once, which
+        // is exactly what typing the verse word-at-a-time exists to avoid.
+        GameState state = atTheFinale();
+
+        for (int i = 0; i < 12_000; i++) {
             state.update();
+            if (state.getBoss() == null || !state.getBoss().isFighting()) {
+                break;
+            }
+            List<String> wanted = state.getBoss().remainingWords();
+            for (Projectile bolt : state.getProjectiles()) {
+                assertFalse(wanted.contains(bolt.getWord()),
+                        "venom '" + bolt.getWord() + "' is also a word of the verse");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("typing a venom word deflects it")
+    void venomCanBeDeflected() {
+        GameState state = atTheFinale();
+        Projectile venom = waitForVenom(state);
+        String word = venom.getWord();
+
+        for (int i = 1; i <= word.length(); i++) {
+            state.handleInput(word.substring(0, i));
         }
 
-        String verse = state.getBoss().currentSentence();
-        ResolveResult result = state.handleInput(verse.substring(0, 1));
+        assertFalse(venom.isActive(), "the bolt should have been shot out of the air");
+    }
+
+    @Test
+    @DisplayName("deflecting a bolt does not cost the verse")
+    void deflectingKeepsVerseProgress() {
+        GameState state = atTheFinale();
+        Projectile venom = waitForVenom(state);
+        int verseBefore = state.getBoss().getStage();
+
+        String word = venom.getWord();
+        for (int i = 1; i <= word.length(); i++) {
+            state.handleInput(word.substring(0, i));
+        }
+
+        assertEquals(verseBefore, state.getBoss().getStage());
+    }
+
+    @Test
+    @DisplayName("venom flies slowly enough to be answered")
+    void venomIsSlow() {
+        // Five and a half seconds. The player is already holding a verse in
+        // their head; a bolt they cannot read in time is a hazard, not a
+        // decision.
+        assertTrue(GameConfig.VENOM_FLIGHT_TICKS >= GameConfig.TARGET_FPS * 4,
+                "venom would arrive before it could be read");
+    }
+
+    @Test
+    @DisplayName("typing goes to the verse when no bolt matches")
+    void typingIsOwnedByTheBoss() {
+        GameState state = atTheFinale();
+        settleIntoTheFight(state);
+
+        String word = state.getBoss().currentWord();
+        ResolveResult result = state.handleInput(word.substring(0, 1));
 
         assertEquals(MatchStatus.LOCKED, result.status());
         assertTrue(result.target() instanceof BossFight);
@@ -430,9 +695,7 @@ class BossFightTest {
     @DisplayName("a mistype tells the input field to clear itself")
     void typoClearsTheField() {
         GameState state = atTheFinale();
-        for (int i = 0; i <= BossFight.ARRIVAL_TICKS; i++) {
-            state.update();
-        }
+        settleIntoTheFight(state);
 
         ResolveResult result = state.handleInput("zzz");
 
@@ -445,20 +708,11 @@ class BossFightTest {
     @DisplayName("finishing a verse sweeps the venom already in the air")
     void counterVolleyClearsTheSky() {
         GameState state = atTheFinale();
-        for (int i = 0; i <= BossFight.ARRIVAL_TICKS; i++) {
-            state.update();
-        }
+        settleIntoTheFight(state);
 
-        // Let it spit a few times.
-        for (int i = 0; i < 4000 && state.getProjectiles().isEmpty(); i++) {
-            state.update();
-        }
-        assertFalse(state.getProjectiles().isEmpty(), "the boss never spat");
+        waitForVenom(state);
 
-        String verse = state.getBoss().currentSentence();
-        for (int i = 1; i <= verse.length(); i++) {
-            state.handleInput(verse.substring(0, i));
-        }
+        typeVerseThrough(state);
 
         for (Projectile bolt : state.getProjectiles()) {
             assertFalse(bolt.isActive(),
@@ -467,20 +721,31 @@ class BossFightTest {
         }
     }
 
+    /**
+     * Types the boss's current verse through GameState, one word at a time,
+     * confirming each with the trailing space that actually advances it.
+     */
+    private static void typeVerseThrough(GameState state) {
+        BossFight boss = state.getBoss();
+        int verse = boss.getStage();
+        while (boss.getStage() == verse && boss.isFighting()) {
+            String word = boss.currentWord();
+            for (int i = 1; i <= word.length(); i++) {
+                state.handleInput(word.substring(0, i));
+            }
+            state.handleInput(word + " ");
+        }
+    }
+
     @Test
     @DisplayName("the run is won only once the boss is finished")
     void victoryWaitsForTheBoss() {
         GameState state = atTheFinale();
-        for (int i = 0; i <= BossFight.ARRIVAL_TICKS; i++) {
-            state.update();
-        }
+        settleIntoTheFight(state);
         assertFalse(state.isVictory());
 
         for (int verse = 0; verse < state.getBoss().getStageCount(); verse++) {
-            String text = state.getBoss().currentSentence();
-            for (int i = 1; i <= text.length(); i++) {
-                state.handleInput(text.substring(0, i));
-            }
+            typeVerseThrough(state);
         }
         assertFalse(state.isVictory(), "the death animation should still be playing");
 
@@ -507,14 +772,14 @@ class BossFightTest {
     @DisplayName("venom that lands costs a life like anything else")
     void venomStillHurts() {
         GameState state = atTheFinale();
-        int lives = state.getLives();
+        int halves = state.getHalfLives();
 
-        for (int i = 0; i < 20_000 && state.getLives() == lives; i++) {
+        for (int i = 0; i < 20_000 && state.getHalfLives() == halves; i++) {
             state.update();
         }
 
-        assertTrue(state.getLives() < lives,
-                "ignoring the boss entirely should eventually kill you");
+        assertEquals(halves - GameConfig.DAMAGE_PROJECTILE, state.getHalfLives(),
+                "a bolt costs half a heart, like every other projectile");
     }
 
     @Test
@@ -522,12 +787,12 @@ class BossFightTest {
     void wardAbsorbsVenom() {
         GameState state = atTheFinale();
         state.applyPowerUp(PowerUpType.NAGA_SHIELD);
-        int lives = state.getLives();
+        int halves = state.getHalfLives();
 
         for (int i = 0; i < 20_000; i++) {
             state.update();
             if (state.getPowerUpState().getShieldCharges() == 0) {
-                assertEquals(lives, state.getLives(),
+                assertEquals(halves, state.getHalfLives(),
                         "the ward should have taken the hit, not the player");
                 return;
             }

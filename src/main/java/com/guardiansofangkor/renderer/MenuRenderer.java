@@ -3,6 +3,7 @@ package com.guardiansofangkor.renderer;
 import com.guardiansofangkor.engine.Difficulty;
 import com.guardiansofangkor.engine.MenuItem;
 import com.guardiansofangkor.engine.MenuState;
+import com.guardiansofangkor.i18n.FontManager;
 import com.guardiansofangkor.util.GameConfig;
 
 import java.awt.AlphaComposite;
@@ -65,7 +66,12 @@ public class MenuRenderer {
 
     public MenuRenderer() {
         this.eyebrowFont = new Font(Font.SERIF, Font.PLAIN, 17);
-        this.titleFont = new Font(Font.SERIF, Font.BOLD, 52);
+        // The wordmark reaches for Cinzel Decorative — an inscription-style
+        // display face — and falls back to the plain serif the title always
+        // used if neither it nor its Cinzel sibling is bundled or installed.
+        // See FontManager.displayFont: this is the same optional-asset
+        // treatment the Khmer faces get, not a hard dependency.
+        this.titleFont = FontManager.displayFont(52, Font.BOLD);
         this.subtitleFont = new Font(Font.SERIF, Font.ITALIC, 15);
         this.buttonFont = new Font(Font.SERIF, Font.BOLD, 16);
         this.taglineFont = new Font(Font.SERIF, Font.ITALIC, 13);

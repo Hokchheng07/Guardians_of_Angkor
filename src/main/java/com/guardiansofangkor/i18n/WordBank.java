@@ -586,6 +586,38 @@ public class WordBank {
     }
 
     /**
+     * A middling word for a boss venom bolt.
+     *
+     * <p>Six or seven letters: long enough to be a real interruption to the
+     * verse, short enough to answer in the five and a half seconds a bolt
+     * takes to arrive. Drawn from the {@code medium} pool rather than from the
+     * band the run is in, because the finale is past the last band and its
+     * difficulty is set by the paragraph, not by the bolts.
+     */
+    public String venomWord(List<String> exclude) {
+        List<String> pool = pools.getOrDefault("medium", List.of());
+        List<String> candidates = new ArrayList<>();
+        for (String word : pool) {
+            if (exclude == null || !exclude.contains(word)) {
+                candidates.add(word);
+            }
+        }
+        if (!candidates.isEmpty()) {
+            return candidates.get(random.nextInt(candidates.size()));
+        }
+        // Every medium word is spoken for. Widen rather than repeat a word the
+        // verse also wants, which would make one keystroke mean two things.
+        for (String word : words) {
+            if (exclude == null || !exclude.contains(word)) {
+                candidates.add(word);
+            }
+        }
+        return candidates.isEmpty()
+                ? "shrine"
+                : candidates.get(random.nextInt(candidates.size()));
+    }
+
+    /**
      * A short word to label a power-up pickup.
      *
      * <p>Shares the projectile pool on purpose: both are things the player has

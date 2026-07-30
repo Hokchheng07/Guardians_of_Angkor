@@ -30,6 +30,40 @@ public final class GameConfig {
     /** Lives the player starts a run with. */
     public static final int STARTING_LIVES = 3;
 
+    /**
+     * Steps each life is divided into.
+     *
+     * <p>Damage is tracked in halves so a light hit can cost less than a heavy
+     * one. Held as an integer count of halves rather than a fractional life, so
+     * three half-hits and one full hit can never disagree by a rounding error
+     * about whether the player is dead.
+     */
+    public static final int HALVES_PER_LIFE = 2;
+
+    /** Half-hearts a run starts with. */
+    public static final int STARTING_HALF_LIVES = STARTING_LIVES * HALVES_PER_LIFE;
+
+    /**
+     * What a grounded monster costs when it reaches the temple.
+     *
+     * <p>The heavies walk slowly and carry the long words — reaching the temple
+     * means the player was beaten on a word they had plenty of time for, so it
+     * costs the full heart.
+     */
+    public static final int DAMAGE_GROUNDED_BREACH = HALVES_PER_LIFE;
+
+    /**
+     * What a flyer costs.
+     *
+     * <p>Half, because the swarm types are fast, short-worded and arrive several
+     * at a time. Charging a full life for each would make a single bad Ahp wave
+     * end a run outright, which is not the kind of pressure they are for.
+     */
+    public static final int DAMAGE_FLYING_BREACH = 1;
+
+    /** What a bolt or a venom spit costs when it lands. Half a heart. */
+    public static final int DAMAGE_PROJECTILE = 1;
+
     // ---- Shared animation timing ------------------------------------------
 
     /**
@@ -232,10 +266,46 @@ public final class GameConfig {
      * <p>Far larger than anything in the roster, and that is the whole point:
      * the finale has to announce itself before a single word is read.
      */
-    public static final int BOSS_HEIGHT = 420;
+    public static final int BOSS_HEIGHT = 380;
 
-    /** How long a venom bolt takes to cross the plaza at the reference tuning. */
-    public static final int VENOM_FLIGHT_TICKS = 130;
+    /**
+     * Where the boss's lowest point sits.
+     *
+     * <p>Well above {@link #GROUND_LINE_Y}, which reads as the serpent rearing
+     * up out of the plaza behind the temple rather than standing on it. It also
+     * moves the whole monster back and up, out from behind Preah Ream — at
+     * ground level the hero was planted squarely in front of it.
+     */
+    public static final int BOSS_BASE_Y = GROUND_LINE_Y - 110;
+
+    /** Top of the boss's artwork, derived so the two can never disagree. */
+    public static final int BOSS_TOP_Y = BOSS_BASE_Y - BOSS_HEIGHT;
+
+    /**
+     * Bottom edge of the verse panel.
+     *
+     * <p>Derived from the hero rather than picked: the panel must clear the top
+     * of Preah Ream's head, because he is drawn in the foreground and any part
+     * of a sentence behind him is a part the player cannot read. Sitting it here
+     * also lands it over the boss's middle, which is where the eye already is.
+     */
+    public static final int VERSE_PANEL_BOTTOM_Y =
+            PLAYER_FEET_Y - PLAYER_HEIGHT - 18;
+
+    /**
+     * How long a venom bolt takes to reach the hero.
+     *
+     * <p>Slow — five and a half seconds. Venom carries a real word to type, so
+     * the flight has to be long enough to notice it, read it and answer it while
+     * a verse is already in progress.
+     */
+    public static final int VENOM_FLIGHT_TICKS = TARGET_FPS * 5 + TARGET_FPS / 2;
+
+    /** Shortest gap between boss attacks. */
+    public static final int VENOM_INTERVAL_MIN_TICKS = TARGET_FPS * 5;
+
+    /** Longest gap between boss attacks. */
+    public static final int VENOM_INTERVAL_MAX_TICKS = TARGET_FPS * 10;
 
     /** Height of the boss health bar under the HUD. */
     public static final int BOSS_BAR_HEIGHT = 14;

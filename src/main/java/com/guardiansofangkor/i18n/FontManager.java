@@ -68,9 +68,37 @@ public final class FontManager {
         "Noto Sans Khmer", "Khmer MN", "Khmer Sangam MN",
     };
 
+    /**
+     * The wordmark's inscription face — the design reference calls for Cinzel
+     * Decorative, with Cinzel (its non-decorative sibling) as the fallback
+     * Google itself suggests when Decorative is unavailable.
+     *
+     * <p>Not committed for the same reason the Khmer faces are not: it is a
+     * Google Fonts file, and this repository does not vendor font binaries.
+     * Missing it is not an error — the menu falls back to the plain serif it
+     * always used, exactly as Khmer falls back to sans-serif tofu-free English.
+     */
+    private static final String[] DISPLAY_CANDIDATES = {
+        "/fonts/CinzelDecorative-Black.ttf",
+        "/fonts/CinzelDecorative-Bold.ttf",
+        "/fonts/CinzelDecorative-Regular.ttf",
+        "/fonts/Cinzel-Black.ttf",
+        "/fonts/Cinzel-Bold.ttf",
+        "/fonts/Cinzel-Regular.ttf",
+    };
+
+    /** System faces to look for if nothing is bundled. */
+    private static final String[] DISPLAY_SYSTEM_FALLBACKS = {
+        "Cinzel Decorative", "Cinzel",
+    };
+
     private static Font khmerBase;
     private static String loadedFrom;
     private static boolean loadAttempted;
+
+    private static Font displayBase;
+    private static String displayLoadedFrom;
+    private static boolean displayLoadAttempted;
 
     private FontManager() {
         // Utility class — not instantiable.
@@ -154,14 +182,19 @@ public final class FontManager {
 
     /** Looks for a Khmer face the operating system already has registered. */
     private static Font findSystemKhmerFont() {
+        return findSystemFont(SYSTEM_FALLBACKS);
+    }
+
+    /** Looks for any of {@code wanted} among the faces the OS already has. */
+    private static Font findSystemFont(String[] wanted) {
         try {
             List<String> installed = new ArrayList<>(List.of(
                     GraphicsEnvironment.getLocalGraphicsEnvironment()
                             .getAvailableFontFamilyNames()));
 
-            for (String wanted : SYSTEM_FALLBACKS) {
+            for (String name : wanted) {
                 for (String available : installed) {
-                    if (available.equalsIgnoreCase(wanted)) {
+                    if (available.equalsIgnoreCase(name)) {
                         return new Font(available, Font.PLAIN, 12);
                     }
                 }
@@ -171,6 +204,70 @@ public final class FontManager {
             return null;
         }
         return null;
+    }
+
+    /**
+     * The inscription-style display face, or null when nothing usable was
+     * found. Resolved once and cached, the same as {@link #khmerBase()}.
+     */
+    public static synchronized Font displayBase() {
+        if (displayLoadAttempted) {
+            return displayBase;
+        }
+        displayLoadAttempted = true;
+
+        Font bundled = loadFirstAvailableDisplay(DISPLAY_CANDIDATES);
+        if (bundled != null) {
+            displayBase = bundled;
+            return displayBase;
+        }
+
+        Font system = findSystemFont(DISPLAY_SYSTEM_FALLBACKS);
+        if (system != null) {
+            System.out.println("[FontManager] No bundled display face — "
+                    + "using system face " + system.getFontName() + ".");
+            displayBase = system;
+            return displayBase;
+        }
+
+        System.out.println("[FontManager] No Cinzel Decorative / Cinzel found. Add "
+                + "e.g. " + DISPLAY_CANDIDATES[1] + " under src/main/resources to give "
+                + "the wordmark its inscription face. The menu falls back to a plain "
+                + "serif otherwise.");
+        return null;
+    }
+
+    private static Font loadFirstAvailableDisplay(String[] paths) {
+        for (String path : paths) {
+            Font font = loadResourceFont(path);
+            if (font != null) {
+                displayLoadedFrom = path;
+                System.out.println("[FontManager] Loaded " + font.getFontName()
+                        + " from " + path);
+                return font;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * A font suitable for the main-menu wordmark. Falls back to a plain bold
+     * serif — the same face the title always used — when nothing decorative is
+     * bundled or installed, so a fresh clone still has a title, just a plainer
+     * one.
+     */
+    public static Font displayFont(int size, int style) {
+        Font base = displayBase();
+        if (base != null) {
+            return base.deriveFont(style, (float) size);
+        }
+        return new Font(Font.SERIF, style, size);
+    }
+
+    /** Which resource the display face came from, or null if none was bundled. */
+    public static synchronized String displayLoadedFrom() {
+        displayBase();
+        return displayLoadedFrom;
     }
 
     /**

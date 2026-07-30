@@ -392,8 +392,14 @@ public class HUDRenderer {
         g2.drawString(label, firstX - labelWidth - 18, BAR_HEIGHT / 2 + 5);
 
         int y = (BAR_HEIGHT - size) / 2;
+        int halves = state.getHalfLives();
         for (int i = 0; i < total; i++) {
-            drawLotusBud(g2, firstX + i * (size + gap), y, size, i < state.getLives());
+            // Two halves per bud: full if both are held, half if one is, empty
+            // if neither. Comparing against the half count directly means the
+            // pip and the life total can never disagree.
+            int heldHere = Math.max(0, Math.min(GameConfig.HALVES_PER_LIFE,
+                    halves - i * GameConfig.HALVES_PER_LIFE));
+            drawLotusBud(g2, firstX + i * (size + gap), y, size, heldHere);
         }
     }
 
@@ -405,8 +411,16 @@ public class HUDRenderer {
      * <p>Held lives are solid gold; spent ones keep the full outline in dim
      * stone. Preserving the silhouette rather than removing the icon means the
      * player reads "three slots, one spent" without counting gaps.
+     *
+     * <p>Half a life fills the LEFT half of the same silhouette, by clipping the
+     * gold to the left of the tower's centre before filling it. Splitting an
+     * existing pip is what keeps the bar readable — six small pips would be
+     * exact and require actual counting, where three towers with one of them
+     * half dark is a shape the eye reads at a glance.
+     *
+     * @param heldHalves 0, 1 or 2
      */
-    private void drawLotusBud(Graphics2D g2, int x, int y, int size, boolean lit) {
+    private void drawLotusBud(Graphics2D g2, int x, int y, int size, int heldHalves) {
         // Shared with the menu's title divider, so the two never drift apart.
         Path2D bud = Ornament.budPath(
                 x + size / 2.0, y + size * 0.94, size * 0.52, size * 0.80);
@@ -415,23 +429,35 @@ public class HUDRenderer {
         Path2D right = Ornament.budPath(
                 x + size * 0.80, y + size * 0.96, size * 0.30, size * 0.48);
 
-        if (lit) {
-            g2.setColor(Palette.LIFE_FILLED);
-            g2.fill(left);
-            g2.fill(right);
-            g2.fill(bud);
+        // The empty silhouette is always drawn, so a half pip has a dark right
+        // side to be half of rather than simply being a smaller pip.
+        g2.setColor(Palette.LIFE_LOST);
+        g2.setStroke(new BasicStroke(1.4f));
+        g2.draw(left);
+        g2.draw(right);
+        g2.draw(bud);
+        g2.drawLine((int) (x + size * 0.10), (int) (y + size * 0.94),
+                (int) (x + size * 0.90), (int) (y + size * 0.94));
+
+        if (heldHalves <= 0) {
+            return;
+        }
+
+        Graphics2D lit = (Graphics2D) g2.create();
+        try {
+            if (heldHalves < GameConfig.HALVES_PER_LIFE) {
+                lit.clipRect(x, y, (int) Math.round(size / 2.0), size + 2);
+            }
+            lit.setColor(Palette.LIFE_FILLED);
+            lit.fill(left);
+            lit.fill(right);
+            lit.fill(bud);
 
             // Plinth, so the towers sit on something.
-            g2.fillRect((int) (x + size * 0.10), (int) (y + size * 0.90),
+            lit.fillRect((int) (x + size * 0.10), (int) (y + size * 0.90),
                     (int) (size * 0.80), Math.max(2, (int) (size * 0.09)));
-        } else {
-            g2.setColor(Palette.LIFE_LOST);
-            g2.setStroke(new BasicStroke(1.4f));
-            g2.draw(left);
-            g2.draw(right);
-            g2.draw(bud);
-            g2.drawLine((int) (x + size * 0.10), (int) (y + size * 0.94),
-                    (int) (x + size * 0.90), (int) (y + size * 0.94));
+        } finally {
+            lit.dispose();
         }
     }
 

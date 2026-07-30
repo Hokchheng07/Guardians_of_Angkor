@@ -238,7 +238,7 @@ public class GamePanel extends JPanel {
 
             drawBackdrop(g2);
 
-            String typed = state.getResolver().getValidBuffer();
+            String typed = state.getTypedBuffer();
             List<WordTarget> highlighted = state.getResolver().getHighlighted();
             WordTarget locked = state.getResolver().getLockedTarget();
 
@@ -260,8 +260,14 @@ public class GamePanel extends JPanel {
             drawPlayer(g2, state.getPlayer());
 
             for (Projectile projectile : state.getProjectiles()) {
-                drawProjectile(g2, projectile, typed,
-                        highlighted.contains(projectile), locked == projectile);
+                // During the finale the resolver is bypassed, so candidacy is
+                // read straight off the buffer rather than from its highlight
+                // list — otherwise a bolt the player is part-way through would
+                // draw as if untouched.
+                boolean lit = highlighted.contains(projectile)
+                        || (state.isBossActive() && !typed.isEmpty()
+                            && projectile.getWord().startsWith(typed));
+                drawProjectile(g2, projectile, typed, lit, locked == projectile);
             }
 
             // Boons are drawn after the monsters and the hero so a drop is never
@@ -892,9 +898,9 @@ public class GamePanel extends JPanel {
                         x - radius * 0.7, y - radius * 0.7, radius * 1.4, radius * 1.4));
             }
 
-            // Only a typeable bolt gets a word plate. Venom carries no word, and
-            // drawing an empty plate over it would suggest there is one.
-            if (projectile.isActive() && projectile.isTypeable()) {
+            // Venom carries a word too, and it is the only way to deflect one,
+            // so it needs a plate exactly as much as a thrown bolt does.
+            if (projectile.isActive()) {
                 drawWord(pg, projectile.getWord(), typed, isCandidate,
                         (int) Math.round(x), (int) Math.round(y - radius - 12), boltFont);
             }
