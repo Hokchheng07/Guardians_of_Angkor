@@ -37,6 +37,7 @@ public class MenuPanel extends JPanel {
     private final MenuRenderer renderer = new MenuRenderer();
     private final SpriteCache sprites;
     private final CrashGuard paintGuard = new CrashGuard("menu", Integer.MAX_VALUE);
+    private final CrashGuard tickGuard = new CrashGuard("menu tick", Integer.MAX_VALUE);
 
     /** Drives the selected entry's breathing glow. */
     private final Timer animator;
@@ -79,14 +80,18 @@ public class MenuPanel extends JPanel {
         addMouseListener(mouse);
         addMouseMotionListener(mouse);
 
-        this.animator = new Timer(GameConfig.TICK_INTERVAL_MS, e -> {
+        this.animator = new Timer(GameConfig.TICK_INTERVAL_MS, e -> tickGuard.run(() -> {
             glowPhase += 0.055;
             if (glowPhase > Math.PI * 2) {
                 glowPhase -= Math.PI * 2;
             }
             this.state.tick();
+
+            // A press that has finished depressing fires here rather than at the
+            // moment of the click, which is what gives the menu its weight.
+            dispatch(this.state.pollReady());
             repaint();
-        });
+        }));
     }
 
     /** Starts the idle animation and takes keyboard focus. */
@@ -116,12 +121,9 @@ public class MenuPanel extends JPanel {
             }
             case KeyEvent.VK_ENTER, KeyEvent.VK_SPACE -> activate();
             case KeyEvent.VK_ESCAPE, KeyEvent.VK_BACK_SPACE -> {
-                MenuState.Outcome outcome = state.back();
-                if (outcome == MenuState.Outcome.EXIT) {
-                    onExit.run();
-                } else {
-                    onScreenChanged.accept(state.getScreen());
-                }
+                // Exit is immediate; backing out gets the same press delay as
+                // any other button.
+                dispatch(state.back());
                 repaint();
             }
             default -> {
@@ -130,18 +132,27 @@ public class MenuPanel extends JPanel {
         }
     }
 
+    /**
+     * Registers a press. The action itself fires later, from
+     * {@link MenuState#pollReady()} on the animation timer.
+     */
     private void activate() {
-        MenuState.Outcome outcome = state.activate();
+        state.activate();
+        repaint();
+    }
+
+    /** Acts on a resolved outcome. PENDING and NONE are both no-ops here. */
+    private void dispatch(MenuState.Outcome outcome) {
         switch (outcome) {
             case START_RUN -> onStartRun.run();
             case RESUME_RUN -> onResumeRun.run();
             case EXIT -> onExit.run();
             case OPEN_DIFFICULTY, BACK -> onScreenChanged.accept(state.getScreen());
-            case NONE -> {
-                // Locked entry — MenuState is already showing the reason.
+            case PENDING, NONE -> {
+                // Still depressing, or a locked entry that has already explained
+                // itself. Nothing to do either way.
             }
         }
-        repaint();
     }
 
     /**
@@ -194,6 +205,10 @@ public class MenuPanel extends JPanel {
                     RenderingHints.VALUE_INTERPOLATION_BILINEAR);
             g2.setRenderingHint(RenderingHints.KEY_RENDERING,
                     RenderingHints.VALUE_RENDER_QUALITY);
+            g2.setRenderingHint(RenderingHints.KEY_FRACTIONALMETRICS,
+                    RenderingHints.VALUE_FRACTIONALMETRICS_ON);
+            g2.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL,
+                    RenderingHints.VALUE_STROKE_PURE);
 
             renderer.draw(g2, state, sprites.menuBackground(), glowPhase);
         } finally {

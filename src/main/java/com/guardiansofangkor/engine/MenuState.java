@@ -28,6 +28,12 @@ public class MenuState {
         /** Nothing happened, or the highlighted entry is not ready. */
         NONE,
 
+        /**
+         * The press registered and is playing out. The real outcome arrives from
+         * {@link MenuState#pollReady()} once the button has finished depressing.
+         */
+        PENDING,
+
         /** Move to the difficulty picker. */
         OPEN_DIFFICULTY,
 
@@ -47,6 +53,14 @@ public class MenuState {
     /** How long the "not ready" nudge stays on screen, in ticks. */
     private static final int LOCKED_FLASH_TICKS = 90;
 
+    /**
+     * How long a button stays depressed before its action fires.
+     *
+     * <p>Roughly a fifth of a second. Long enough that the press is visible and
+     * the menu feels like it has weight, short enough that it never reads as lag.
+     */
+    private static final int PRESS_TICKS = 13;
+
     private Screen screen = Screen.MAIN;
     private int mainIndex;
     private int difficultyIndex = Difficulty.defaultChoice().ordinal();
@@ -58,6 +72,12 @@ public class MenuState {
     private int lockedFlashTicks;
 
     private String lockedMessage = "";
+
+    /** The outcome waiting for its button press to finish. */
+    private Outcome pendingOutcome = Outcome.NONE;
+
+    /** Counts down while a button is depressed. */
+    private int pressTicks;
 
     public MenuState() {
         this(false);
@@ -79,43 +99,95 @@ public class MenuState {
     }
 
     /**
-     * Activates the highlighted entry.
+     * Presses the highlighted entry.
      *
-     * @return what the caller should do about it
+     * <p>Does not act immediately. A valid press starts a short depress
+     * animation and returns {@link Outcome#PENDING}; the caller then watches
+     * {@link #pollReady()} for the real outcome. Instant response makes the menu
+     * feel like a list of hyperlinks rather than carved stone.
+     *
+     * @return {@link Outcome#PENDING} when the press took, {@link Outcome#NONE}
+     *         when the entry is locked or a press is already running
      */
     public Outcome activate() {
-        if (screen == Screen.MAIN) {
-            return activateMainItem();
+        if (pressTicks > 0 || pendingOutcome != Outcome.NONE) {
+            // Already committed — ignore a mashed second press.
+            return Outcome.NONE;
         }
-        return activateDifficulty();
+
+        Outcome resolved = screen == Screen.MAIN
+                ? resolveMainItem()
+                : resolveDifficulty();
+
+        if (resolved == Outcome.NONE) {
+            return Outcome.NONE;
+        }
+
+        clearLockedFlash();
+        pendingOutcome = resolved;
+        pressTicks = PRESS_TICKS;
+        return Outcome.PENDING;
     }
 
-    private Outcome activateMainItem() {
+    /**
+     * Collects the outcome of a completed press, exactly once.
+     *
+     * <p>Screen changes are applied here rather than in {@link #activate()}, so
+     * the button the player pressed is still the one on screen while it is
+     * depressing.
+     *
+     * @return the outcome, or {@link Outcome#NONE} if none is ready
+     */
+    public Outcome pollReady() {
+        if (pendingOutcome == Outcome.NONE || pressTicks > 0) {
+            return Outcome.NONE;
+        }
+        Outcome outcome = pendingOutcome;
+        pendingOutcome = Outcome.NONE;
+
+        switch (outcome) {
+            case OPEN_DIFFICULTY -> {
+                screen = Screen.DIFFICULTY;
+                difficultyIndex = Difficulty.defaultChoice().ordinal();
+            }
+            case BACK -> screen = Screen.MAIN;
+            default -> {
+                // START_RUN, RESUME_RUN and EXIT are the caller's business.
+            }
+        }
+        return outcome;
+    }
+
+    /** True while a button is depressed, for the renderer. */
+    public boolean isPressed() {
+        return pressTicks > 0;
+    }
+
+    /** Press progress, 1 at the moment of the press down to 0. */
+    public double getPressProgress() {
+        return pressTicks / (double) PRESS_TICKS;
+    }
+
+    private Outcome resolveMainItem() {
         MenuItem item = getSelectedItem();
         if (!isEnabled(item)) {
             flashLocked(lockedReasonFor(item));
             return Outcome.NONE;
         }
         return switch (item) {
-            case NEW_GAME -> {
-                screen = Screen.DIFFICULTY;
-                difficultyIndex = Difficulty.defaultChoice().ordinal();
-                clearLockedFlash();
-                yield Outcome.OPEN_DIFFICULTY;
-            }
+            case NEW_GAME -> Outcome.OPEN_DIFFICULTY;
             case CONTINUE -> Outcome.RESUME_RUN;
             case EXIT -> Outcome.EXIT;
             default -> Outcome.NONE;
         };
     }
 
-    private Outcome activateDifficulty() {
+    private Outcome resolveDifficulty() {
         Difficulty difficulty = getSelectedDifficulty();
         if (!difficulty.isImplemented()) {
             flashLocked(difficulty.getDisplayName() + " is not ready yet.");
             return Outcome.NONE;
         }
-        clearLockedFlash();
         return Outcome.START_RUN;
     }
 
@@ -127,9 +199,14 @@ public class MenuState {
      */
     public Outcome back() {
         clearLockedFlash();
+        if (pressTicks > 0 || pendingOutcome != Outcome.NONE) {
+            // A press is already committed; do not race it.
+            return Outcome.NONE;
+        }
         if (screen == Screen.DIFFICULTY) {
-            screen = Screen.MAIN;
-            return Outcome.BACK;
+            pendingOutcome = Outcome.BACK;
+            pressTicks = PRESS_TICKS;
+            return Outcome.PENDING;
         }
         return Outcome.EXIT;
     }
@@ -152,6 +229,8 @@ public class MenuState {
         screen = Screen.MAIN;
         mainIndex = 0;
         difficultyIndex = Difficulty.defaultChoice().ordinal();
+        pendingOutcome = Outcome.NONE;
+        pressTicks = 0;
         clearLockedFlash();
     }
 
@@ -199,6 +278,9 @@ public class MenuState {
             if (lockedFlashTicks == 0) {
                 lockedMessage = "";
             }
+        }
+        if (pressTicks > 0) {
+            pressTicks--;
         }
     }
 

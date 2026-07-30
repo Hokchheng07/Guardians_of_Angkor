@@ -35,6 +35,21 @@ public class GameState {
     private final Language language;
     private final Player player = new Player();
 
+    /**
+     * Not final: chosen in the menu after this state exists, and a new run can
+     * pick a different one. Changed only via {@link #restartWith(Difficulty)}.
+     */
+    private Difficulty difficulty;
+
+    /**
+     * The loading-and-countdown beat before play starts.
+     *
+     * <p>While this is active the simulation is skipped entirely, so nothing
+     * walks and no clock runs — but the loop keeps ticking so the renderer can
+     * draw it, the same arrangement pause uses.
+     */
+    private IntroSequence intro = new IntroSequence();
+
     private int score;
     private int lives = GameConfig.STARTING_LIVES;
     private long elapsedTicks;
@@ -78,13 +93,19 @@ public class GameState {
     private ResolveResult lastResult;
 
     public GameState() {
-        this(Language.ENGLISH);
+        this(Language.ENGLISH, Difficulty.defaultChoice());
     }
 
     public GameState(Language language) {
+        this(language, Difficulty.defaultChoice());
+    }
+
+    public GameState(Language language, Difficulty difficulty) {
         this.language = language == null ? Language.ENGLISH : language;
+        this.difficulty = difficulty == null ? Difficulty.defaultChoice() : difficulty;
         this.wordBank = new WordBank(this.language);
-        this.waveManager = new WaveManager(this.wordBank);
+        this.waveManager = new WaveManager(this.wordBank, this.difficulty);
+        this.intro = new IntroSequence(this.difficulty);
     }
 
     /** Advances the whole simulation one tick. */
@@ -94,6 +115,15 @@ public class GameState {
         if (paused || !running || gameOver) {
             return;
         }
+
+        // The opening beat runs before anything else exists. Returning here
+        // keeps elapsedTicks at zero, so the countdown does not count against
+        // the player's words-per-minute.
+        if (intro != null && intro.isActive()) {
+            intro.update();
+            return;
+        }
+
         elapsedTicks++;
 
         player.update();
@@ -181,7 +211,7 @@ public class GameState {
                 word,
                 enemy.getThrowOriginX(), enemy.getThrowOriginY(),
                 GameConfig.TEMPLE_CENTER_X, GameConfig.GROUND_LINE_Y - 40,
-                DifficultyCurve.projectileFlightTicks(getLevel())));
+                DifficultyCurve.projectileFlightTicks(getLevel(), difficulty)));
     }
 
     private List<String> collectWordsInPlay() {
@@ -203,7 +233,7 @@ public class GameState {
      * @return the resolution snapshot, so the caller can drive feedback
      */
     public ResolveResult handleInput(String typedSoFar) {
-        if (gameOver || paused) {
+        if (gameOver || paused || isIntroActive()) {
             return ResolveResult.EMPTY_RESULT;
         }
 
@@ -339,6 +369,9 @@ public class GameState {
         projectilesIntercepted = 0;
         resolvedThisLevel = 0;
         lastLevelSeen = 0;
+        // A restart earns the same countdown, so the player is never dropped
+        // straight back into a wave already in motion.
+        beginIntro();
         gameOver = false;
         running = true;
         levelJustCleared = false;
@@ -487,6 +520,45 @@ public class GameState {
 
     public boolean isPaused() {
         return paused;
+    }
+
+    /** The opening loading-and-countdown beat, for the renderer. */
+    public IntroSequence getIntro() {
+        return intro;
+    }
+
+    /** True while the opening beat is still playing and the sim is frozen. */
+    public boolean isIntroActive() {
+        return intro != null && intro.isActive();
+    }
+
+    /** Restarts the opening beat, e.g. when a new run begins. */
+    public void beginIntro() {
+        intro = new IntroSequence(difficulty);
+    }
+
+    /** Skips the remainder of the opening beat. */
+    public void skipIntro() {
+        if (intro != null) {
+            intro.skip();
+        }
+    }
+
+    public Difficulty getDifficulty() {
+        return difficulty;
+    }
+
+    /**
+     * Starts a fresh run on a chosen tier.
+     *
+     * <p>The tier is fixed for the life of a run — it decides speeds, word
+     * lengths and which monster ends the game — so switching it always goes
+     * through a full restart rather than taking effect mid-level.
+     */
+    public void restartWith(Difficulty difficulty) {
+        this.difficulty = difficulty == null ? Difficulty.defaultChoice() : difficulty;
+        waveManager.setDifficulty(this.difficulty);
+        restart();
     }
 
     /**

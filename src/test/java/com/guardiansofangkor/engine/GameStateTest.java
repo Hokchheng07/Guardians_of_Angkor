@@ -21,6 +21,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class GameStateTest {
 
     /**
+     * A state with the opening countdown already skipped.
+     *
+     * <p>These tests are about the simulation, not the ceremony in front of it —
+     * leaving the intro running would mean every one of them burned four seconds
+     * of ticks before anything happened.
+     */
+    private static GameState playing() {
+        GameState state = new GameState(Language.ENGLISH);
+        state.skipIntro();
+        return state;
+    }
+
+    /**
      * Adds a stationary Beisach {@code run} pixels out along a flank route.
      * A run of zero puts it exactly on the temple, i.e. already breaching.
      */
@@ -39,7 +52,7 @@ class GameStateTest {
     @Test
     @DisplayName("typing a full word defeats the enemy and scores")
     void typingDefeatsEnemy() {
-        GameState state = new GameState(Language.ENGLISH);
+        GameState state = playing();
         Enemy enemy = safeEnemy(state, "ash");
 
         var result = state.handleInput("ash");
@@ -53,7 +66,7 @@ class GameStateTest {
     @Test
     @DisplayName("defeating an enemy fires an arrow from Preah Ream")
     void defeatingFiresArrow() {
-        GameState state = new GameState(Language.ENGLISH);
+        GameState state = playing();
         safeEnemy(state, "ash");
 
         state.handleInput("ash");
@@ -67,7 +80,7 @@ class GameStateTest {
     @Test
     @DisplayName("the hero returns to idle once typing stops")
     void heroReturnsToIdle() {
-        GameState state = new GameState(Language.ENGLISH);
+        GameState state = playing();
         safeEnemy(state, "ash");
         state.handleInput("ash");
 
@@ -81,7 +94,7 @@ class GameStateTest {
     @Test
     @DisplayName("a breaching enemy costs a life")
     void breachCostsLife() {
-        GameState state = new GameState(Language.ENGLISH);
+        GameState state = playing();
         enemyAt(state, "ash", 0);
 
         int before = state.getLives();
@@ -93,7 +106,7 @@ class GameStateTest {
     @Test
     @DisplayName("running out of lives ends the game and freezes input")
     void losingAllLivesEndsGame() {
-        GameState state = new GameState(Language.ENGLISH);
+        GameState state = playing();
 
         for (int i = 0; i < GameConfig.STARTING_LIVES; i++) {
             state.loseLife();
@@ -108,7 +121,7 @@ class GameStateTest {
     @Test
     @DisplayName("spawned enemies get a puff of smoke")
     void spawnsProducePoof() {
-        GameState state = new GameState(Language.ENGLISH);
+        GameState state = playing();
 
         for (int tick = 0; tick < 400 && state.getEnemies().isEmpty(); tick++) {
             state.update();
@@ -123,7 +136,7 @@ class GameStateTest {
     @Test
     @DisplayName("restart wipes the run but keeps personal bests")
     void restartKeepsBests() {
-        GameState state = new GameState(Language.ENGLISH);
+        GameState state = playing();
         safeEnemy(state, "ash");
         state.handleInput("ash");
 
@@ -132,6 +145,7 @@ class GameStateTest {
         state.loseLife();
 
         state.restart();
+        state.skipIntro();
 
         assertEquals(0, state.getScore(), "score should reset");
         assertEquals(GameConfig.STARTING_LIVES, state.getLives(), "lives should reset");
@@ -147,13 +161,14 @@ class GameStateTest {
     @Test
     @DisplayName("restart after a game over makes the state playable again")
     void restartRecoversFromGameOver() {
-        GameState state = new GameState(Language.ENGLISH);
+        GameState state = playing();
         for (int i = 0; i < GameConfig.STARTING_LIVES; i++) {
             state.loseLife();
         }
         assertTrue(state.isGameOver());
 
         state.restart();
+        state.skipIntro();
 
         assertFalse(state.isGameOver());
         state.update();
@@ -163,7 +178,7 @@ class GameStateTest {
     @Test
     @DisplayName("level progress starts empty and advances with each kill")
     void progressAdvancesWithKills() {
-        GameState state = new GameState(Language.ENGLISH);
+        GameState state = playing();
 
         // Get a level running so getEnemiesInLevel() is meaningful.
         for (int tick = 0; tick < 400 && state.getLevel() < 1; tick++) {
@@ -182,7 +197,7 @@ class GameStateTest {
     @Test
     @DisplayName("a leaked enemy still advances progress, so the bar can fill")
     void breachAlsoAdvancesProgress() {
-        GameState state = new GameState(Language.ENGLISH);
+        GameState state = playing();
         for (int tick = 0; tick < 400 && state.getLevel() < 1; tick++) {
             state.update();
         }
@@ -199,7 +214,7 @@ class GameStateTest {
     @Test
     @DisplayName("level progress is always a sane fraction")
     void progressStaysInRange() {
-        GameState state = new GameState(Language.ENGLISH);
+        GameState state = playing();
         assertEquals(0.0, state.getLevelProgress(), 0.0001,
                 "before level one there is nothing to report");
 
@@ -214,7 +229,7 @@ class GameStateTest {
     @Test
     @DisplayName("restart clears level progress")
     void restartClearsProgress() {
-        GameState state = new GameState(Language.ENGLISH);
+        GameState state = playing();
         for (int tick = 0; tick < 400 && state.getLevel() < 1; tick++) {
             state.update();
         }
@@ -223,6 +238,7 @@ class GameStateTest {
         assertTrue(state.getResolvedThisLevel() > 0);
 
         state.restart();
+        state.skipIntro();
 
         assertEquals(0, state.getResolvedThisLevel());
         assertEquals(0.0, state.getLevelProgress(), 0.0001);
@@ -231,7 +247,7 @@ class GameStateTest {
     @Test
     @DisplayName("a mini-boss survives its first word and dies to its last")
     void miniBossTakesTheWholeChain() {
-        GameState state = new GameState(Language.ENGLISH);
+        GameState state = playing();
         Enemy naga = new Enemy(EnemyType.NAGA, ApproachPath.GROUND_FLANK,
                 List.of("alpha", "bravo"), GameConfig.FLANK_RUN_MIN, 1, 0.0);
         state.addEnemy(naga);
@@ -249,7 +265,7 @@ class GameStateTest {
     @Test
     @DisplayName("mid-chain hits score but do not advance level progress")
     void midChainHitScoresWithoutResolving() {
-        GameState state = new GameState(Language.ENGLISH);
+        GameState state = playing();
         for (int tick = 0; tick < 400 && state.getLevel() < 1; tick++) {
             state.update();
         }
@@ -270,7 +286,7 @@ class GameStateTest {
     @Test
     @DisplayName("pausing freezes the simulation")
     void pauseFreezesSimulation() {
-        GameState state = new GameState(Language.ENGLISH);
+        GameState state = playing();
         for (int tick = 0; tick < 60; tick++) {
             state.update();
         }
@@ -289,7 +305,7 @@ class GameStateTest {
     @Test
     @DisplayName("typing is inert while paused")
     void typingIsInertWhilePaused() {
-        GameState state = new GameState(Language.ENGLISH);
+        GameState state = playing();
         Enemy enemy = safeEnemy(state, "zzq");
         state.togglePause();
 
@@ -300,7 +316,7 @@ class GameStateTest {
     @Test
     @DisplayName("unpausing resumes the simulation")
     void unpauseResumes() {
-        GameState state = new GameState(Language.ENGLISH);
+        GameState state = playing();
         state.togglePause();
         state.update();
 
@@ -315,7 +331,7 @@ class GameStateTest {
     @Test
     @DisplayName("a finished run cannot be paused")
     void gameOverCannotBePaused() {
-        GameState state = new GameState(Language.ENGLISH);
+        GameState state = playing();
         for (int i = 0; i < GameConfig.STARTING_LIVES; i++) {
             state.loseLife();
         }
@@ -329,7 +345,7 @@ class GameStateTest {
     @Test
     @DisplayName("save data round-trips the level and bests")
     void saveDataCarriesProgress() {
-        GameState state = new GameState(Language.ENGLISH);
+        GameState state = playing();
         safeEnemy(state, "ash");
         state.handleInput("ash");
 

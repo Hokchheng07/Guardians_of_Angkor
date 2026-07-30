@@ -52,6 +52,8 @@ public class MenuRenderer {
     private static final Color LOCKED_TEXT = new Color(0x6E, 0x62, 0x50);
     private static final Color LOCKED_BORDER = new Color(0x46, 0x3C, 0x2C);
     private static final Color TAGLINE = new Color(0xB9, 0xA8, 0x8B);
+    private static final Color TITLE_FILL_TOP = new Color(0xFF, 0xEB, 0xB4);
+    private static final Color TITLE_FILL_BOTTOM = new Color(0xDE, 0xAE, 0x42);
 
     private Font eyebrowFont;
     private Font titleFont;
@@ -148,7 +150,8 @@ public class MenuRenderer {
         g2.setFont(eyebrowFont);
         drawTracked(g2, "GUARDIANS OF", centreX, PANEL_Y + 76, 3.2);
 
-        drawGlowingTitle(g2, "ANGKOR", centreX, PANEL_Y + 132);
+        // Optical centre now, not a baseline — DisplayText centres on the ink.
+        drawGlowingTitle(g2, "ANGKOR", centreX, PANEL_Y + 114);
 
         g2.setColor(Palette.alpha(Palette.HUD_TEXT_GOLD, 0.82));
         g2.setFont(subtitleFont);
@@ -160,32 +163,19 @@ public class MenuRenderer {
         return PANEL_Y + 236;
     }
 
-    /** The wordmark, with a soft halo behind it rather than a hard drop shadow. */
-    private void drawGlowingTitle(Graphics2D g2, String text, int centreX, int baselineY) {
-        g2.setFont(titleFont);
-        FontMetrics fm = g2.getFontMetrics();
-        int width = fm.stringWidth(text);
-        int x = centreX - width / 2;
-
-        Graphics2D glow = (Graphics2D) g2.create();
-        try {
-            glow.setFont(titleFont);
-            glow.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, 0.13f));
-            glow.setColor(Palette.HUD_TEXT_GOLD);
-            for (int r = 4; r >= 1; r--) {
-                glow.drawString(text, x - r, baselineY);
-                glow.drawString(text, x + r, baselineY);
-                glow.drawString(text, x, baselineY - r);
-                glow.drawString(text, x, baselineY + r);
-            }
-        } finally {
-            glow.dispose();
-        }
-
-        g2.setPaint(new GradientPaint(
-                x, baselineY - fm.getAscent(), new Color(0xFF, 0xEB, 0xB4),
-                x, baselineY, new Color(0xE0, 0xB2, 0x4A)));
-        g2.drawString(text, x, baselineY);
+    /**
+     * The wordmark, drawn as outlines through {@link DisplayText}.
+     *
+     * <p>Shares the countdown's renderer so both get the same real halo — the
+     * previous version stamped the string at four offsets, which reads as ghosting
+     * rather than glow at this size.
+     *
+     * @param centreY the optical centre of the wordmark, not a baseline
+     */
+    private void drawGlowingTitle(Graphics2D g2, String text, int centreX, int centreY) {
+        DisplayText.drawCentred(g2, text, titleFont, centreX, centreY,
+                TITLE_FILL_TOP, TITLE_FILL_BOTTOM,
+                Palette.HUD_TEXT_GOLD, 0.75f, 1f);
     }
 
     // ---- entry lists -------------------------------------------------------
@@ -196,9 +186,15 @@ public class MenuRenderer {
             boolean selected = state.getSelectedItem() == item
                     && state.getScreen() == MenuState.Screen.MAIN;
             drawButton(g2, item.getLabel().toUpperCase(java.util.Locale.ROOT),
-                    x, y, width, selected, state.isEnabled(item), glowPhase);
+                    x, y, width, selected, state.isEnabled(item), glowPhase,
+                    pressFor(state, selected));
             y += BUTTON_H + BUTTON_GAP;
         }
+    }
+
+    /** Press progress for a button — only the pressed, selected one moves. */
+    private static double pressFor(MenuState state, boolean selected) {
+        return selected && state.isPressed() ? state.getPressProgress() : 0;
     }
 
     private void drawDifficultyEntries(Graphics2D g2, MenuState state,
@@ -212,7 +208,8 @@ public class MenuRenderer {
         for (Difficulty difficulty : Difficulty.values()) {
             boolean selected = state.getSelectedDifficulty() == difficulty;
             drawButton(g2, difficulty.getDisplayName().toUpperCase(java.util.Locale.ROOT),
-                    x, y, width, selected, state.isEnabled(difficulty), glowPhase);
+                    x, y, width, selected, state.isEnabled(difficulty), glowPhase,
+                    pressFor(state, selected));
             y += BUTTON_H + BUTTON_GAP;
         }
 
@@ -238,7 +235,16 @@ public class MenuRenderer {
      * and not mistakable for either of the other two.
      */
     private void drawButton(Graphics2D g2, String label, int x, int y, int width,
-                            boolean selected, boolean enabled, double glowPhase) {
+                            boolean selected, boolean enabled, double glowPhase,
+                            double pressProgress) {
+        // A pressed button sinks a couple of pixels and loses a little width, so
+        // the click has a physical read rather than just changing colour.
+        int sink = (int) Math.round(2 * pressProgress);
+        int inset = (int) Math.round(1.5 * pressProgress);
+        x += inset;
+        y += sink;
+        width -= inset * 2;
+
         RoundRectangle2D plate = new RoundRectangle2D.Double(x, y, width, BUTTON_H, 10, 10);
 
         Color textColor;
@@ -258,8 +264,10 @@ public class MenuRenderer {
                 glow.dispose();
             }
 
-            g2.setPaint(new GradientPaint(
-                    x, y, BUTTON_SELECTED_TOP, x, y + BUTTON_H, BUTTON_SELECTED_BOTTOM));
+            // Pressing inverts the gradient, so the plate reads as pushed in.
+            Color top = pressProgress > 0 ? BUTTON_SELECTED_BOTTOM : BUTTON_SELECTED_TOP;
+            Color bottom = pressProgress > 0 ? BUTTON_SELECTED_TOP : BUTTON_SELECTED_BOTTOM;
+            g2.setPaint(new GradientPaint(x, y, top, x, y + BUTTON_H, bottom));
             g2.fill(plate);
             g2.setColor(Palette.alpha(new Color(0xFF, 0xF3, 0xC9), 0.9));
             g2.setStroke(new BasicStroke(1.2f));

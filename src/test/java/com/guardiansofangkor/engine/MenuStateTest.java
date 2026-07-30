@@ -11,10 +11,34 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DisplayName("MenuState — front-end navigation")
 class MenuStateTest {
 
+    /**
+     * Presses the highlighted entry and runs the press delay out, returning the
+     * outcome the caller would act on.
+     */
+    private static MenuState.Outcome press(MenuState state) {
+        MenuState.Outcome immediate = state.activate();
+        if (immediate != MenuState.Outcome.PENDING) {
+            return immediate;
+        }
+        return settle(state);
+    }
+
+    /** Ticks until any pending press has fired. */
+    private static MenuState.Outcome settle(MenuState state) {
+        for (int i = 0; i < 120; i++) {
+            state.tick();
+            MenuState.Outcome ready = state.pollReady();
+            if (ready != MenuState.Outcome.NONE) {
+                return ready;
+            }
+        }
+        return MenuState.Outcome.NONE;
+    }
+
     private static MenuState atDifficulty() {
         MenuState state = new MenuState();
         state.select(MenuItem.NEW_GAME);
-        state.activate();
+        press(state);
         return state;
     }
 
@@ -59,7 +83,7 @@ class MenuStateTest {
         MenuState state = new MenuState();
         state.select(MenuItem.BESTIARY);
 
-        assertEquals(MenuState.Outcome.NONE, state.activate());
+        assertEquals(MenuState.Outcome.NONE, press(state));
         assertFalse(state.getLockedMessage().isEmpty());
         assertTrue(state.getLockedMessageAlpha() > 0);
     }
@@ -69,7 +93,7 @@ class MenuStateTest {
     void newGameOpensDifficulty() {
         MenuState state = new MenuState();
 
-        assertEquals(MenuState.Outcome.OPEN_DIFFICULTY, state.activate());
+        assertEquals(MenuState.Outcome.OPEN_DIFFICULTY, press(state));
         assertEquals(MenuState.Screen.DIFFICULTY, state.getScreen());
     }
 
@@ -79,7 +103,7 @@ class MenuStateTest {
         MenuState state = new MenuState();
         state.select(MenuItem.EXIT);
 
-        assertEquals(MenuState.Outcome.EXIT, state.activate());
+        assertEquals(MenuState.Outcome.EXIT, press(state));
     }
 
     // ---- continue ----------------------------------------------------------
@@ -91,7 +115,7 @@ class MenuStateTest {
         state.select(MenuItem.CONTINUE);
 
         assertFalse(state.isEnabled(MenuItem.CONTINUE));
-        assertEquals(MenuState.Outcome.NONE, state.activate());
+        assertEquals(MenuState.Outcome.NONE, press(state));
         assertTrue(state.getLockedMessage().toLowerCase().contains("no saved run"));
     }
 
@@ -102,7 +126,7 @@ class MenuStateTest {
         state.select(MenuItem.CONTINUE);
 
         assertTrue(state.isEnabled(MenuItem.CONTINUE));
-        assertEquals(MenuState.Outcome.RESUME_RUN, state.activate());
+        assertEquals(MenuState.Outcome.RESUME_RUN, press(state));
     }
 
     // ---- difficulty screen -------------------------------------------------
@@ -117,13 +141,22 @@ class MenuStateTest {
     }
 
     @Test
-    @DisplayName("all four tiers are listed, even the unbuilt ones")
+    @DisplayName("all four tiers are listed; Easy and Medium are playable")
     void allTiersAreListed() {
         assertEquals(4, Difficulty.values().length);
         assertTrue(Difficulty.EASY.isImplemented());
-        assertFalse(Difficulty.MEDIUM.isImplemented());
+        assertTrue(Difficulty.MEDIUM.isImplemented());
         assertFalse(Difficulty.HARD.isImplemented());
         assertFalse(Difficulty.ENDLESS.isImplemented());
+    }
+
+    @Test
+    @DisplayName("Medium starts a run too")
+    void mediumStartsRun() {
+        MenuState state = atDifficulty();
+        state.select(Difficulty.MEDIUM);
+
+        assertEquals(MenuState.Outcome.START_RUN, press(state));
     }
 
     @Test
@@ -131,7 +164,7 @@ class MenuStateTest {
     void easyStartsRun() {
         MenuState state = atDifficulty();
 
-        assertEquals(MenuState.Outcome.START_RUN, state.activate());
+        assertEquals(MenuState.Outcome.START_RUN, press(state));
     }
 
     @Test
@@ -144,7 +177,7 @@ class MenuStateTest {
             MenuState state = atDifficulty();
             state.select(difficulty);
 
-            assertEquals(MenuState.Outcome.NONE, state.activate(),
+            assertEquals(MenuState.Outcome.NONE, press(state),
                     difficulty + " must not start a run");
             assertTrue(state.getLockedMessage().contains(difficulty.getDisplayName()),
                     "the message should name the tier, got: " + state.getLockedMessage());
@@ -168,7 +201,8 @@ class MenuStateTest {
     void backReturnsToMain() {
         MenuState state = atDifficulty();
 
-        assertEquals(MenuState.Outcome.BACK, state.back());
+        assertEquals(MenuState.Outcome.PENDING, state.back());
+        assertEquals(MenuState.Outcome.BACK, settle(state));
         assertEquals(MenuState.Screen.MAIN, state.getScreen());
     }
 
@@ -186,12 +220,101 @@ class MenuStateTest {
         MenuState state = atDifficulty();
         state.select(Difficulty.HARD);
         state.back();
+        settle(state);
 
         state.select(MenuItem.NEW_GAME);
-        state.activate();
+        press(state);
 
         assertEquals(Difficulty.EASY, state.getSelectedDifficulty(),
                 "a previous browse must not become the new default");
+    }
+
+    // ---- press delay -------------------------------------------------------
+
+    @Test
+    @DisplayName("a press does not act immediately")
+    void pressIsNotInstant() {
+        MenuState state = new MenuState();
+
+        assertEquals(MenuState.Outcome.PENDING, state.activate());
+        assertEquals(MenuState.Screen.MAIN, state.getScreen(),
+                "the screen must not change until the button finishes depressing");
+        assertEquals(MenuState.Outcome.NONE, state.pollReady(),
+                "nothing is ready yet");
+        assertTrue(state.isPressed());
+    }
+
+    @Test
+    @DisplayName("the outcome arrives once the press completes")
+    void pressResolvesAfterDelay() {
+        MenuState state = new MenuState();
+        state.activate();
+
+        assertEquals(MenuState.Outcome.OPEN_DIFFICULTY, settle(state));
+        assertEquals(MenuState.Screen.DIFFICULTY, state.getScreen());
+        assertFalse(state.isPressed());
+    }
+
+    @Test
+    @DisplayName("the outcome is collected exactly once")
+    void outcomeIsCollectedOnce() {
+        MenuState state = new MenuState();
+        state.activate();
+        settle(state);
+
+        assertEquals(MenuState.Outcome.NONE, state.pollReady(),
+                "polling again must not re-fire the action");
+    }
+
+    @Test
+    @DisplayName("mashing the key does not queue a second action")
+    void doublePressIsIgnored() {
+        MenuState state = new MenuState();
+
+        assertEquals(MenuState.Outcome.PENDING, state.activate());
+        assertEquals(MenuState.Outcome.NONE, state.activate(),
+                "a second press while one is running is dropped");
+
+        assertEquals(MenuState.Outcome.OPEN_DIFFICULTY, settle(state));
+        assertEquals(MenuState.Outcome.NONE, state.pollReady(),
+                "and only one outcome ever arrives");
+    }
+
+    @Test
+    @DisplayName("press progress runs from full to zero")
+    void pressProgressDecays() {
+        MenuState state = new MenuState();
+        state.activate();
+
+        double first = state.getPressProgress();
+        assertEquals(1.0, first, 0.0001);
+
+        state.tick();
+        assertTrue(state.getPressProgress() < first);
+    }
+
+    @Test
+    @DisplayName("a locked entry starts no press at all")
+    void lockedEntryStartsNoPress() {
+        MenuState state = new MenuState();
+        state.select(MenuItem.OPTIONS);
+
+        assertEquals(MenuState.Outcome.NONE, state.activate());
+        assertFalse(state.isPressed(), "there is nothing to animate");
+    }
+
+    @Test
+    @DisplayName("reset drops a press in flight")
+    void resetDropsPendingPress() {
+        MenuState state = new MenuState();
+        state.activate();
+        assertTrue(state.isPressed());
+
+        state.reset();
+
+        assertFalse(state.isPressed());
+        assertEquals(MenuState.Outcome.NONE, settle(state),
+                "the dropped action must not fire later");
     }
 
     // ---- locked message lifecycle ------------------------------------------

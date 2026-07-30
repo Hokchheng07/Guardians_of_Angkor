@@ -24,13 +24,10 @@ public record LevelPreview(String hint) {
             Map.entry(7, "Swarms grow bolder"),
             Map.entry(9, "The causeway fills"),
             Map.entry(11, "Little is slow now"),
-            Map.entry(13, "The temple lights dim"),
-            Map.entry(15, "Krong Reap comes for the temple"));
+            Map.entry(13, "The temple lights dim"));
 
     /** Levels that are a multiple of this are Naga mini-boss levels. */
     private static final int MINI_BOSS_INTERVAL = 5;
-
-    private static final int FINAL_BOSS_LEVEL = 15;
 
     /**
      * The hint for an upcoming level, or {@code null} when that level has
@@ -40,15 +37,34 @@ public record LevelPreview(String hint) {
      * always carries a third line trains the player to stop reading it.
      */
     public static LevelPreview forLevel(int level) {
+        return forLevel(level, Difficulty.reference());
+    }
+
+    /**
+     * The hint for an upcoming level on a given tier.
+     *
+     * <p>Tier-aware because the final boss moves: Easy ends with the Naga at
+     * level 10, Medium with Krong Reap at 15. Announcing the wrong one would be
+     * worse than announcing nothing.
+     */
+    public static LevelPreview forLevel(int level, Difficulty difficulty) {
         if (level <= 0) {
             return null;
         }
+        Difficulty tier = difficulty == null ? Difficulty.reference() : difficulty;
+
+        // The tier's own finale takes precedence over everything below.
+        if (tier.hasFinalBoss() && level == tier.getFinalBossLevel()) {
+            return new LevelPreview(
+                    tier.getFinalBossType().getDisplayName() + " comes for the temple");
+        }
+
         String specific = BY_LEVEL.get(level);
         if (specific != null) {
             return new LevelPreview(specific);
         }
-        // Boss levels are rule-based, so they keep working past the table.
-        if (level != FINAL_BOSS_LEVEL && level % MINI_BOSS_INTERVAL == 0) {
+        // Mini-bosses are rule-based, so they keep working past the table.
+        if (level % MINI_BOSS_INTERVAL == 0) {
             return new LevelPreview("A Naga coils at the gate");
         }
         return null;

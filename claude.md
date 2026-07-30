@@ -262,11 +262,51 @@ jumps past items the player can see reads as broken; landing on one and
 being told it is not ready does not.
 
 ## Difficulty tiers
-Difficulty has four entries but only EASY.isImplemented(). MenuState
-refuses to return START_RUN for the others, so Main needs no branching
-yet. Implementing one means flipping the flag and consuming its
-speedScale / spawnIntervalScale in DifficultyCurve — the multipliers are
-already recorded so the intended balance is not lost.
+MEDIUM is the REFERENCE TUNING. Every number in DifficultyCurve is
+written at Medium's values, and all of Medium's scales are 1.0 — so the
+single-argument curve methods describe Medium exactly, and the
+Difficulty overloads apply a tier's deviation on top. There are tests
+asserting the two agree for Medium. Never retune a curve without
+checking what it does to the other tiers.
+
+EASY and MEDIUM are playable. HARD and ENDLESS are listed but
+implemented=false; MenuState refuses START_RUN for them. Their
+multipliers are already recorded so the intended balance is not lost.
+
+Easy is not merely slower — it also shortens words
+(getWordMinShift/getWordMaxShift), because a beginner's problem is
+finding the letters rather than the clock. Per-type speed multipliers are
+deliberately tier-INDEPENDENT: the tier scales the base speed, so the
+relationship between light and heavy types survives at every tier.
+
+Each tier names its own finale (finalBossType / finalBossLevel /
+finalBossChainLength). Easy ends with a 3-word Naga at level 10; Medium
+with Krong Reap at 15. getBossWordLengthBonus stacks on top of the tier
+shift, so Easy's boss still demands the hardest typing in an Easy run.
+LevelPreview is tier-aware for the same reason — announcing the wrong
+finale is worse than announcing nothing.
+
+Difficulty is settable on GameState/WaveManager but ONLY between runs, via
+GameState.restartWith(). The tier decides speeds, word lengths and which
+monster ends the game, so changing it mid-level would finish a level
+under different rules than it started.
+
+## Opening sequence
+IntroSequence gates the start of play: a loading bar, then 3-2-1, then a
+DEFEND flash — about four seconds total. GameState.update() returns early
+while it is active, so nothing walks and elapsedTicks stays at zero (the
+countdown must not count against the player's WPM). The loop keeps
+ticking so the renderer can draw it, exactly as pause works. restart()
+replays it, so a player is never dropped back into a wave already in
+motion. Tests that exercise the simulation call skipIntro() first.
+
+## Menu press delay
+MenuState.activate() does NOT act. It starts a short depress and returns
+PENDING; the caller watches pollReady() for the real outcome, which
+arrives once the button has finished sinking. Screen changes are applied
+in pollReady, not activate, so the button the player pressed is still the
+one on screen while it depresses. A second press while one is running is
+dropped, and reset() discards a press in flight.
 
 ## Shared ornament
 renderer/Ornament holds the lotus-bud prang path used BOTH as HUD life

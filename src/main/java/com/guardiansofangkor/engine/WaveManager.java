@@ -26,14 +26,17 @@ public class WaveManager {
     /** Every 5th level is a Naga mini-boss level. */
     private static final int MINI_BOSS_INTERVAL = 5;
 
-    /** Krong Reap appears at this level. */
-    private static final int FINAL_BOSS_LEVEL = 15;
-
     /** Pause between a level being cleared and the next starting. */
     private static final int INTERMISSION_TICKS = GameConfig.TARGET_FPS * 2;
 
     private final WordBank wordBank;
     private final Random random;
+
+    /**
+     * Not final: the tier is chosen in the menu, after this manager exists, and
+     * a new run can pick a different one. It is only ever changed between runs.
+     */
+    private Difficulty difficulty;
 
     private int level;
     private int remainingToSpawn;
@@ -43,12 +46,22 @@ public class WaveManager {
     private int lastDirection = -1;
 
     public WaveManager(WordBank wordBank) {
-        this(wordBank, new Random());
+        this(wordBank, Difficulty.defaultChoice(), new Random());
+    }
+
+    public WaveManager(WordBank wordBank, Difficulty difficulty) {
+        this(wordBank, difficulty, new Random());
     }
 
     /** Seeded constructor so level composition is reproducible in tests. */
     public WaveManager(WordBank wordBank, Random random) {
+        this(wordBank, Difficulty.defaultChoice(), random);
+    }
+
+    /** Seeded constructor so level composition is reproducible in tests. */
+    public WaveManager(WordBank wordBank, Difficulty difficulty, Random random) {
         this.wordBank = wordBank == null ? new WordBank(null) : wordBank;
+        this.difficulty = difficulty == null ? Difficulty.defaultChoice() : difficulty;
         this.random = random == null ? new Random() : random;
     }
 
@@ -76,7 +89,7 @@ public class WaveManager {
             } else {
                 spawned.add(spawnOne(activeEnemies));
                 remainingToSpawn--;
-                spawnCooldown = DifficultyCurve.spawnIntervalTicks(level);
+                spawnCooldown = DifficultyCurve.spawnIntervalTicks(level, difficulty);
             }
         } else if (activeEnemies.isEmpty()) {
             levelInProgress = false;
@@ -100,6 +113,7 @@ public class WaveManager {
 
     private Enemy spawnOne(List<Enemy> activeEnemies) {
         EnemyType type = chooseType();
+        boolean isFinalBoss = isFinalBossSpawn();
 
         // Collect every word already promised to the field, including words
         // later in a mini-boss chain that have not been revealed yet — otherwise
@@ -109,10 +123,19 @@ public class WaveManager {
             inPlay.addAll(enemy.getAllWords());
         }
 
+        // The tier shifts every word's length window; the final boss gets a
+        // further push, so even a gentle tier's boss demands its hardest typing.
+        int minShift = difficulty.getWordMinShift();
+        int maxShift = difficulty.getWordMaxShift();
+        if (isFinalBoss) {
+            minShift += difficulty.getBossWordLengthBonus();
+            maxShift += difficulty.getBossWordLengthBonus();
+        }
+
         List<String> words = new ArrayList<>();
-        int chainLength = chainLengthFor(type);
+        int chainLength = chainLengthFor(type, isFinalBoss);
         for (int i = 0; i < chainLength; i++) {
-            String word = wordBank.wordFor(type, inPlay);
+            String word = wordBank.wordFor(type, inPlay, minShift, maxShift);
             words.add(word);
             inPlay.add(word);
         }
@@ -132,7 +155,7 @@ public class WaveManager {
         int maxRun = path.maxRunFor(type.anchorTargetY(), type.spawnHeadroom());
         int run = path.runMin() + random.nextInt(Math.max(1, maxRun - path.runMin() + 1));
 
-        double speed = DifficultyCurve.speedFor(type, level);
+        double speed = DifficultyCurve.speedFor(type, level, difficulty);
 
         return new Enemy(type, path, words, run, direction, speed);
     }
@@ -140,10 +163,14 @@ public class WaveManager {
     /**
      * How many words this spawn must take to kill.
      *
-     * <p>Mini-bosses get a randomised chain within their configured range, so
-     * two Naga encounters do not feel identical.
+     * <p>The final boss uses the tier's fixed chain length so the climactic
+     * fight is predictable. Ordinary mini-bosses get a randomised chain within
+     * their configured range, so two Naga encounters do not feel identical.
      */
-    private int chainLengthFor(EnemyType type) {
+    private int chainLengthFor(EnemyType type, boolean isFinalBoss) {
+        if (isFinalBoss) {
+            return Math.max(1, difficulty.getFinalBossChainLength());
+        }
         int max = type.getMaxChainLength();
         if (max <= 1) {
             return 1;
@@ -152,14 +179,39 @@ public class WaveManager {
         return min + random.nextInt(max - min + 1);
     }
 
+    /** True when the spawn about to happen is this tier's final boss. */
+    private boolean isFinalBossSpawn() {
+        return difficulty.hasFinalBoss()
+                && level == difficulty.getFinalBossLevel()
+                && remainingToSpawn == 1;
+    }
+
     private EnemyType chooseType() {
-        if (level == FINAL_BOSS_LEVEL && remainingToSpawn == 1) {
-            return EnemyType.KRONG_REAP;
+        if (isFinalBossSpawn()) {
+            return difficulty.getFinalBossType();
         }
         if (level % MINI_BOSS_INTERVAL == 0 && remainingToSpawn == 1) {
             return EnemyType.NAGA;
         }
         return WaveWeights.pick(level, random);
+    }
+
+    /** The tier this manager is running, for the HUD and the boss banner. */
+    public Difficulty getDifficulty() {
+        return difficulty;
+    }
+
+    /**
+     * Switches tier. Only valid between runs — call {@link #reset()} after, or
+     * the current level would finish under different rules than it started.
+     */
+    public void setDifficulty(Difficulty difficulty) {
+        this.difficulty = difficulty == null ? Difficulty.defaultChoice() : difficulty;
+    }
+
+    /** True when the level just begun is this tier's final boss level. */
+    public boolean isFinalBossLevel() {
+        return difficulty.hasFinalBoss() && level == difficulty.getFinalBossLevel();
     }
 
     public int getLevel() {

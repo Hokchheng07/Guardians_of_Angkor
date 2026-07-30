@@ -180,15 +180,14 @@ public final class Main {
         // ---- menu actions --------------------------------------------------
 
         menuPanel.setOnStartRun(() -> menuGuard.run(() -> {
-            // Only Easy is implemented, and MenuState refuses to hand back
-            // START_RUN for any other tier, so a fresh run needs no branching yet.
-            state.restart();
+            state.restartWith(menuState.getSelectedDifficulty());
             autosave.saveQuietly();
             showGame.run();
         }));
 
         menuPanel.setOnResumeRun(() -> menuGuard.run(() -> {
             state.restoreFrom(saveManager.load());
+            state.beginIntro();
             showGame.run();
         }));
 

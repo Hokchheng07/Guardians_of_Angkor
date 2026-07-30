@@ -25,7 +25,7 @@ class LevelPreviewTest {
     @DisplayName("every mini-boss level is telegraphed, including past the table")
     void miniBossLevelsAreTelegraphed() {
         for (int level : new int[] {5, 10, 20, 25, 100}) {
-            LevelPreview preview = LevelPreview.forLevel(level);
+            LevelPreview preview = LevelPreview.forLevel(level, Difficulty.MEDIUM);
             assertNotNull(preview, "level " + level + " is a mini-boss level");
             assertTrue(preview.hint().contains("Naga"),
                     "level " + level + " should mention the Naga, got: " + preview.hint());
@@ -35,12 +35,28 @@ class LevelPreviewTest {
     @Test
     @DisplayName("the final boss level gets its own hint, not the Naga one")
     void finalBossOverridesMiniBoss() {
-        LevelPreview preview = LevelPreview.forLevel(15);
+        LevelPreview preview = LevelPreview.forLevel(15, Difficulty.MEDIUM);
 
         assertNotNull(preview);
         assertTrue(preview.hint().contains("Krong Reap"));
-        assertFalse(preview.hint().contains("Naga"),
-                "level 15 is the final boss, not a mini-boss");
+        assertFalse(preview.hint().contains("coils"),
+                "level 15 on Medium is the finale, not a mini-boss visit");
+    }
+
+    @Test
+    @DisplayName("the hint follows the tier's own boss")
+    void hintFollowsTheTierBoss() {
+        // Easy ends with the Naga at 10; Medium with Krong Reap at 15.
+        // Announcing the wrong finale is worse than announcing nothing.
+        LevelPreview easyFinale = LevelPreview.forLevel(10, Difficulty.EASY);
+        assertNotNull(easyFinale);
+        assertTrue(easyFinale.hint().contains("Naga"),
+                "got: " + easyFinale.hint());
+
+        LevelPreview mediumAtTen = LevelPreview.forLevel(10, Difficulty.MEDIUM);
+        assertNotNull(mediumAtTen);
+        assertTrue(mediumAtTen.hint().contains("coils"),
+                "level 10 on Medium is only a mini-boss, got: " + mediumAtTen.hint());
     }
 
     @Test

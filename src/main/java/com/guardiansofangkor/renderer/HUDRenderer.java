@@ -1,6 +1,7 @@
 package com.guardiansofangkor.renderer;
 
 import com.guardiansofangkor.engine.GameState;
+import com.guardiansofangkor.engine.IntroSequence;
 import com.guardiansofangkor.engine.LevelPreview;
 import com.guardiansofangkor.engine.WaveManager;
 import com.guardiansofangkor.i18n.FontManager;
@@ -50,6 +51,18 @@ public class HUDRenderer {
     /** Secondary labels sit below full strength so the row recedes. */
     private static final double SECONDARY_LABEL_ALPHA = 0.7;
 
+    /** Point size of a countdown numeral at rest. */
+    private static final float COUNT_SIZE = 150f;
+
+    /**
+     * Point size of the DEFEND flash. Smaller than a numeral because it is six
+     * characters wide, so matching the numeral's size would run off the screen.
+     */
+    private static final float DEFEND_SIZE = 92f;
+
+    private static final Color COUNT_FILL_TOP = new Color(0xFF, 0xF1, 0xC4);
+    private static final Color COUNT_FILL_BOTTOM = new Color(0xE0, 0xAE, 0x3C);
+
     private Font microFont;
     private Font displayFont;
     private Font secondaryFont;
@@ -57,6 +70,8 @@ public class HUDRenderer {
     private Font bodyFont;
     private Font hintFont;
     private Font titleFont;
+    private Font countFont;
+    private Font defendFont;
 
     public HUDRenderer(Language language) {
         setLanguage(language);
@@ -71,6 +86,10 @@ public class HUDRenderer {
         this.titleFont = FontManager.uiFont(language, 52, Font.BOLD);
         this.bodyFont = FontManager.uiFont(language, 19, Font.PLAIN);
         this.hintFont = FontManager.uiFont(language, 16, Font.PLAIN);
+        // Base sizes only — drawCountNumeral derives these per frame, so the
+        // animation re-rasterises at its true size instead of upscaling.
+        this.countFont = FontManager.uiFont(language, (int) COUNT_SIZE, Font.BOLD);
+        this.defendFont = FontManager.uiFont(language, (int) DEFEND_SIZE, Font.BOLD);
     }
 
     /**
@@ -78,6 +97,13 @@ public class HUDRenderer {
      */
     public void draw(Graphics2D g2, GameState state, boolean restartArmed) {
         drawTopBar(g2, state);
+
+        // The opening beat owns the screen — no level banner underneath it.
+        if (state.isIntroActive()) {
+            drawIntro(g2, state.getIntro());
+            return;
+        }
+
         drawLevelBanner(g2, state);
         if (state.isGameOver()) {
             drawGameOver(g2, state, restartArmed);
@@ -86,6 +112,100 @@ public class HUDRenderer {
         } else if (restartArmed) {
             drawRestartPrompt(g2);
         }
+    }
+
+    /**
+     * The opening loading bar and countdown.
+     *
+     * <p>Drawn over a scrim rather than replacing the scene, so the player can
+     * already see the temple they are about to defend while the count runs.
+     */
+    private void drawIntro(Graphics2D g2, IntroSequence intro) {
+        if (intro == null) {
+            return;
+        }
+        int centerX = GameConfig.SCREEN_WIDTH / 2;
+        int centerY = GameConfig.SCREEN_HEIGHT / 2;
+
+        // Scrim lifts during the countdown so the scene reads through more
+        // strongly as play approaches.
+        float scrim = intro.getPhase() == IntroSequence.Phase.LOADING ? 0.82f : 0.52f;
+        g2.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, scrim));
+        g2.setColor(Palette.SCRIM);
+        g2.fillRect(0, 0, GameConfig.SCREEN_WIDTH, GameConfig.SCREEN_HEIGHT);
+        g2.setComposite(AlphaComposite.SrcOver);
+
+        switch (intro.getPhase()) {
+            case LOADING -> drawLoading(g2, intro, centerX, centerY);
+            case COUNTDOWN -> drawCountNumeral(g2, intro,
+                    Integer.toString(intro.getCount()), centerX, centerY);
+            case GO -> drawCountNumeral(g2, intro, "DEFEND", centerX, centerY);
+            case DONE -> {
+                // Nothing left to draw.
+            }
+        }
+    }
+
+    private void drawLoading(Graphics2D g2, IntroSequence intro,
+                             int centerX, int centerY) {
+        int barWidth = 340;
+        int barHeight = 6;
+        int barX = centerX - barWidth / 2;
+        int barY = centerY + 18;
+
+        g2.setFont(bodyFont);
+        FontMetrics fm = g2.getFontMetrics();
+        String label = intro.getLoadingLabel();
+        g2.setColor(Palette.HUD_TEXT_DIM);
+        g2.drawString(label, centerX - fm.stringWidth(label) / 2, centerY - 16);
+
+        // Three prangs above the bar, tying the wait to the game's own motif.
+        g2.setColor(Palette.alpha(Palette.HUD_DIVIDER, 0.75));
+        Ornament.drawTempleDivider(g2, centerX, centerY - 46, 220);
+
+        g2.setColor(Palette.PROGRESS_TRACK);
+        g2.fill(new RoundRectangle2D.Double(barX, barY, barWidth, barHeight, 3, 3));
+
+        int fill = (int) Math.round(barWidth * intro.getLoadingProgress());
+        if (fill > 0) {
+            g2.setPaint(new GradientPaint(
+                    barX, barY, Palette.HUD_DIVIDER,
+                    barX + barWidth, barY, Palette.HUD_TEXT_GOLD));
+            g2.fill(new RoundRectangle2D.Double(barX, barY, fill, barHeight, 3, 3));
+        }
+
+        g2.setColor(Palette.alpha(Palette.HUD_DIVIDER, 0.4));
+        g2.setStroke(new BasicStroke(1f));
+        g2.draw(new RoundRectangle2D.Double(barX, barY, barWidth, barHeight, 3, 3));
+    }
+
+    /**
+     * One counted beat, punched large on arrival and settling as it plays out.
+     *
+     * <p>The size is animated by deriving the font, not by scaling the graphics
+     * context. Scaling the context upscales a rasterised glyph bitmap, which is
+     * what made this look pixelated; deriving the font re-rasterises the outline
+     * at its true size every frame.
+     */
+    private void drawCountNumeral(Graphics2D g2, IntroSequence intro,
+                                  String text, int centerX, int centerY) {
+        double t = intro.getBeatProgress();
+
+        // Overshoot on arrival, then settle. Eased sharply so the punch lands in
+        // the first few frames rather than drifting.
+        double scale = 1.30 - 0.30 * Math.min(1.0, t * 2.6);
+
+        // Hold, then fade over the last quarter of the beat.
+        float alpha = (float) Math.max(0.0, 1.0 - Math.max(0.0, t - 0.74) / 0.26);
+
+        boolean isWord = text.length() > 2;
+        float baseSize = isWord ? DEFEND_SIZE : COUNT_SIZE;
+        Font font = (isWord ? defendFont : countFont)
+                .deriveFont((float) (baseSize * scale));
+
+        DisplayText.drawCentred(g2, text, font, centerX, centerY,
+                COUNT_FILL_TOP, COUNT_FILL_BOTTOM,
+                Palette.HUD_TEXT_GOLD, 1.0f, alpha);
     }
 
     /**
@@ -316,7 +436,7 @@ public class HUDRenderer {
                 ? "Type the words above the spirits"
                 : "Level " + next + " approaching";
 
-        LevelPreview preview = LevelPreview.forLevel(next);
+        LevelPreview preview = LevelPreview.forLevel(next, state.getDifficulty());
         String hint = preview == null ? null : preview.hint();
 
         drawCenteredPlaque(g2, text, sub, hint,

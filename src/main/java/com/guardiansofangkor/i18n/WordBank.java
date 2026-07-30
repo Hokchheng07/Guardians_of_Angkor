@@ -96,8 +96,24 @@ public class WordBank {
      * @param exclude words already in play, to avoid two enemies sharing a word
      */
     public String wordFor(EnemyType type, List<String> exclude) {
-        int min = type.getMinWordLength();
-        int max = type.getMaxWordLength();
+        return wordFor(type, exclude, 0, 0);
+    }
+
+    /**
+     * A word sized for the given enemy tier, with the length window shifted.
+     *
+     * <p>The shifts are how difficulty tiers change the typing load without
+     * needing separate word lists — Easy pulls the maximum down a character,
+     * a boss pushes it up. Both bounds are clamped so a large negative shift
+     * cannot invert the window or ask for zero-length words.
+     *
+     * @param minShift adjustment to the type's minimum length
+     * @param maxShift adjustment to the type's maximum length
+     */
+    public String wordFor(EnemyType type, List<String> exclude,
+                          int minShift, int maxShift) {
+        int min = Math.max(2, type.getMinWordLength() + minShift);
+        int max = Math.max(min, type.getMaxWordLength() + maxShift);
 
         List<String> inTier = new ArrayList<>();
         for (String word : words) {

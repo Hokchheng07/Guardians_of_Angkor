@@ -21,8 +21,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @DisplayName("WaveManager — diagonal spawning and level flow")
 class WaveManagerTest {
 
+    /**
+     * A manager on the reference tuning, so these tests describe the baseline
+     * rather than whichever tier happens to be the menu default.
+     */
     private WaveManager newManager() {
-        return new WaveManager(new WordBank(Language.ENGLISH, new Random(42)), new Random(42));
+        return new WaveManager(new WordBank(Language.ENGLISH, new Random(42)),
+                Difficulty.MEDIUM, new Random(42));
     }
 
     @Test
