@@ -25,7 +25,13 @@ public class Projectile implements WordTarget {
     /** Total ticks the flight should take. Shrinks with level. */
     private final int flightTicks;
 
-    private int ticksFlown;
+    /**
+     * Fractional so a Slow Tide genuinely slows a bolt in flight. Rounding this
+     * to whole ticks would let a slowed bolt arrive at full speed, which reads
+     * as the boon being broken rather than as a design choice.
+     */
+    private double ticksFlown;
+
     private boolean alive = true;
     private boolean landed;
 
@@ -56,7 +62,19 @@ public class Projectile implements WordTarget {
         this.flightTicks = Math.max(1, flightTicks);
     }
 
+    /** Advances one tick at full pace. */
     public void update() {
+        update(1.0);
+    }
+
+    /**
+     * Advances one tick, scaled by how fast the world is running — 0 under a
+     * Time Freeze, a fraction under a Slow Tide.
+     *
+     * <p>The fade after interception is deliberately not scaled: it is feedback,
+     * not threat, and a frozen death animation looks like a stall.
+     */
+    public void update(double timeScale) {
         justLanded = false;
 
         if (hitFlashTicks > 0) {
@@ -66,7 +84,13 @@ public class Projectile implements WordTarget {
             defeatTicks++;
             return;
         }
-        ticksFlown++;
+
+        double scale = Math.max(0.0, timeScale);
+        if (scale <= 0.0001) {
+            return;
+        }
+
+        ticksFlown += scale;
         if (ticksFlown >= flightTicks) {
             landed = true;
             justLanded = true;
@@ -76,7 +100,7 @@ public class Projectile implements WordTarget {
 
     /** Flight progress, 0 at the throwing hand and 1 at the temple. */
     public double getProgress() {
-        return Math.min(1.0, ticksFlown / (double) flightTicks);
+        return Math.min(1.0, ticksFlown / flightTicks);
     }
 
     public double getX() {

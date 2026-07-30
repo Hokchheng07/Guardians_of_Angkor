@@ -3,7 +3,9 @@ package com.guardiansofangkor.renderer;
 import com.guardiansofangkor.engine.GameState;
 import com.guardiansofangkor.engine.IntroSequence;
 import com.guardiansofangkor.engine.LevelPreview;
+import com.guardiansofangkor.engine.PowerUpState;
 import com.guardiansofangkor.engine.WaveManager;
+import com.guardiansofangkor.entities.PowerUpType;
 import com.guardiansofangkor.i18n.FontManager;
 import com.guardiansofangkor.i18n.Language;
 import com.guardiansofangkor.util.GameConfig;
@@ -16,8 +18,10 @@ import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.GradientPaint;
 import java.awt.Graphics2D;
+import java.awt.geom.Ellipse2D;
 import java.awt.geom.Path2D;
 import java.awt.geom.RoundRectangle2D;
+import java.util.List;
 
 /**
  * Heads-up display and the game-over screen.
@@ -63,6 +67,15 @@ public class HUDRenderer {
     private static final Color COUNT_FILL_TOP = new Color(0xFF, 0xF1, 0xC4);
     private static final Color COUNT_FILL_BOTTOM = new Color(0xE0, 0xAE, 0x3C);
 
+    /** Height of one row in the active-boon strip. */
+    private static final int BOON_ROW_HEIGHT = 26;
+
+    /** Width of the strip's drain bars. */
+    private static final int BOON_BAR_WIDTH = 96;
+
+    /** Where the boon strip sits below the progress bar. */
+    private static final int BOON_STRIP_TOP = BAR_HEIGHT + 16;
+
     private Font microFont;
     private Font displayFont;
     private Font secondaryFont;
@@ -103,6 +116,8 @@ public class HUDRenderer {
             drawIntro(g2, state.getIntro());
             return;
         }
+
+        drawBoonStrip(g2, state.getPowerUpState());
 
         drawLevelBanner(g2, state);
         if (state.isGameOver()) {
@@ -420,6 +435,103 @@ public class HUDRenderer {
         }
     }
 
+    // ---- power-ups ---------------------------------------------------------
+
+    /**
+     * Running boons and banked shield charges, stacked down the left edge.
+     *
+     * <p>Left rather than on the top bar because the bar is already at capacity
+     * and because this list changes size. Something that appears and disappears
+     * has to live somewhere it can grow without pushing a permanent stat around
+     * — a HUD whose numbers move as boons come and go is unreadable at speed.
+     *
+     * <p>Nothing is drawn when nothing is active, so a player who never picks up
+     * a boon never sees this at all.
+     */
+    private void drawBoonStrip(Graphics2D g2, PowerUpState powerUps) {
+        if (powerUps == null || !powerUps.hasAnything()) {
+            return;
+        }
+
+        int y = BOON_STRIP_TOP;
+
+        if (powerUps.hasShield()) {
+            drawShieldRow(g2, powerUps.getShieldCharges(), EDGE_PADDING, y);
+            y += BOON_ROW_HEIGHT;
+        }
+
+        List<PowerUpState.Active> active = powerUps.getActive();
+        for (PowerUpState.Active boon : active) {
+            drawBoonRow(g2, boon, EDGE_PADDING, y);
+            y += BOON_ROW_HEIGHT;
+        }
+    }
+
+    /** One timed boon: pip, name, drain bar, seconds left. */
+    private void drawBoonRow(Graphics2D g2, PowerUpState.Active boon, int x, int y) {
+        Color accent = Palette.powerUp(boon.type());
+        int centreY = y + BOON_ROW_HEIGHT / 2;
+
+        g2.setColor(accent);
+        g2.fill(new Ellipse2D.Double(x, centreY - 5, 10, 10));
+
+        g2.setFont(microFont);
+        FontMetrics fm = g2.getFontMetrics();
+        String name = boon.type().getDisplayName().toUpperCase(java.util.Locale.ROOT);
+        int textX = x + 18;
+        g2.setColor(Palette.HUD_TEXT_WHITE);
+        g2.drawString(name, textX, centreY + fm.getAscent() / 2 - 1);
+
+        int barX = textX + Math.max(96, fm.stringWidth(name) + 12);
+        int barY = centreY - 3;
+
+        g2.setColor(Palette.PROGRESS_TRACK);
+        g2.fillRect(barX, barY, BOON_BAR_WIDTH, 6);
+
+        int fill = (int) Math.round(BOON_BAR_WIDTH * boon.fraction());
+        if (fill > 0) {
+            g2.setColor(accent);
+            g2.fillRect(barX, barY, fill, 6);
+        }
+
+        g2.setColor(Palette.HUD_TEXT_DIM);
+        g2.drawString(boon.secondsLeft() + "s",
+                barX + BOON_BAR_WIDTH + 10, centreY + fm.getAscent() / 2 - 1);
+    }
+
+    /**
+     * Banked Naga Shield charges, drawn as rings rather than a bar.
+     *
+     * <p>Deliberately a different shape from the timed rows: a charge does not
+     * drain, it is spent, and giving it a countdown bar would say the opposite.
+     */
+    private void drawShieldRow(Graphics2D g2, int charges, int x, int y) {
+        Color accent = Palette.powerUp(PowerUpType.NAGA_SHIELD);
+        int centreY = y + BOON_ROW_HEIGHT / 2;
+
+        g2.setFont(microFont);
+        FontMetrics fm = g2.getFontMetrics();
+        g2.setColor(Palette.HUD_TEXT_WHITE);
+        g2.drawString("WARD", x + 18, centreY + fm.getAscent() / 2 - 1);
+
+        g2.setColor(accent);
+        g2.fill(new Ellipse2D.Double(x, centreY - 5, 10, 10));
+
+        int ringX = x + 18 + fm.stringWidth("WARD") + 14;
+        g2.setStroke(new BasicStroke(2f));
+        for (int i = 0; i < GameConfig.MAX_SHIELD_CHARGES; i++) {
+            double cx = ringX + i * 18;
+            Ellipse2D ring = new Ellipse2D.Double(cx, centreY - 6, 12, 12);
+            if (i < charges) {
+                g2.setColor(accent);
+                g2.fill(ring);
+            } else {
+                g2.setColor(Palette.LIFE_LOST);
+                g2.draw(ring);
+            }
+        }
+    }
+
     // ---- banners -----------------------------------------------------------
 
     private void drawLevelBanner(Graphics2D g2, GameState state) {
@@ -472,8 +584,11 @@ public class HUDRenderer {
         final int centerX = GameConfig.SCREEN_WIDTH / 2;
         final int panelWidth = 620;
         final int panelX = centerX - panelWidth / 2;
-        final int panelY = 96;
-        final int panelHeight = 500;
+        final int panelY = 66;
+        // Grown by one stat row and the victory subtitle. Kept as one constant
+        // rather than measured, because the controls below it are positioned
+        // from the panel's bottom edge.
+        final int panelHeight = 552;
 
         RoundRectangle2D panel = new RoundRectangle2D.Double(
                 panelX, panelY, panelWidth, panelHeight, 20, 20);
@@ -483,22 +598,37 @@ public class HUDRenderer {
         g2.setStroke(new BasicStroke(1.5f));
         g2.draw(panel);
 
+        // A won run and a lost one share this panel but must never share its
+        // headline — congratulating the player in the defeat colour, or vice
+        // versa, is the one mistake here nobody would forgive.
+        boolean won = state.isVictory();
+
         int titleBaseline = panelY + 74;
         g2.setFont(titleFont);
         FontMetrics titleMetrics = g2.getFontMetrics();
-        String title = "The temple has fallen";
-        g2.setColor(Palette.DANGER);
+        String title = won ? "The temple stands" : "The temple has fallen";
+        g2.setColor(won ? Palette.HUD_TEXT_GOLD : Palette.DANGER);
         g2.drawString(title, centerX - titleMetrics.stringWidth(title) / 2, titleBaseline);
 
+        if (won) {
+            g2.setFont(bodyFont);
+            FontMetrics subMetrics = g2.getFontMetrics();
+            String sub = state.getDifficulty().getDisplayName()
+                    + " cleared  ·  all " + state.getFinalLevel() + " levels";
+            g2.setColor(Palette.BOON);
+            g2.drawString(sub, centerX - subMetrics.stringWidth(sub) / 2, titleBaseline + 30);
+        }
+
+        int ruleY = titleBaseline + (won ? 54 : 24);
         g2.setColor(Palette.HUD_DIVIDER);
         g2.setStroke(new BasicStroke(2f));
-        g2.drawLine(centerX - 150, titleBaseline + 24, centerX + 150, titleBaseline + 24);
+        g2.drawLine(centerX - 150, ruleY, centerX + 150, ruleY);
 
         final int columnWidth = 210;
         final int columnGap = 70;
         final int leftCol = centerX - columnGap / 2 - columnWidth;
         final int rightCol = centerX + columnGap / 2;
-        final int gridTop = titleBaseline + 82;
+        final int gridTop = ruleY + 58;
         final int rowHeight = 76;
 
         drawGameOverStat(g2, "LEVEL REACHED",
@@ -516,8 +646,14 @@ public class HUDRenderer {
         drawGameOverStat(g2, "ACCURACY",
                 Math.round(state.getResolver().getAccuracy() * 100) + "%",
                 rightCol, gridTop + rowHeight * 2);
+        drawGameOverStat(g2, "BOONS CLAIMED",
+                Integer.toString(state.getPowerUpsCollected()),
+                leftCol, gridTop + rowHeight * 3);
+        drawGameOverStat(g2, "DIFFICULTY",
+                state.getDifficulty().getDisplayName(),
+                rightCol, gridTop + rowHeight * 3);
 
-        int bestY = gridTop + rowHeight * 2 + 62;
+        int bestY = gridTop + rowHeight * 3 + 62;
         boolean newBest = state.getScore() >= state.getBestScore() && state.getScore() > 0;
         g2.setFont(bodyFont);
         String bestText = newBest

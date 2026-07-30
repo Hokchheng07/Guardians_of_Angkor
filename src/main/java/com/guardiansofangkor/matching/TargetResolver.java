@@ -58,6 +58,26 @@ public class TargetResolver {
     public ResolveResult submit(String typedSoFar,
                                 List<? extends WordTarget> projectiles,
                                 List<? extends WordTarget> enemies) {
+        return submit(typedSoFar, projectiles, Collections.emptyList(), enemies);
+    }
+
+    /**
+     * Re-resolves against the current buffer, with power-up pickups sitting
+     * between the two existing tiers.
+     *
+     * <p>The ordering is by time budget, shortest first. A bolt lands in a
+     * second or two, a dropped boon fades in seven, an enemy takes as long as it
+     * takes to walk — so a prefix that could mean any of them should mean the
+     * one about to disappear. Putting pickups above enemies is also what makes
+     * collecting one a real decision: reaching for a boon breaks off whatever
+     * word you were part-way through.
+     *
+     * @param pickups power-up drops waiting to be claimed; may be empty
+     */
+    public ResolveResult submit(String typedSoFar,
+                                List<? extends WordTarget> projectiles,
+                                List<? extends WordTarget> pickups,
+                                List<? extends WordTarget> enemies) {
 
         String typed = typedSoFar == null ? "" : typedSoFar;
 
@@ -68,9 +88,12 @@ public class TargetResolver {
             return ResolveResult.empty();
         }
 
-        // Projectiles preempt enemies — only fall through when nothing in the
-        // priority list matches this prefix.
+        // Each tier preempts the ones below it — only fall through when nothing
+        // in the higher list matches this prefix.
         List<WordTarget> matches = widen(WordMatcher.candidates(projectiles, typed));
+        if (matches.isEmpty()) {
+            matches = widen(WordMatcher.candidates(pickups, typed));
+        }
         if (matches.isEmpty()) {
             matches = widen(WordMatcher.candidates(enemies, typed));
         }

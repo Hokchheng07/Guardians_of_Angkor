@@ -182,6 +182,38 @@ public final class GameConfig {
      */
     public static final int PLAYER_FEET_Y = GROUND_LINE_Y + 72;
 
+    // ---- Power-ups ---------------------------------------------------------
+
+    /**
+     * How long a dropped power-up waits to be typed before it fades.
+     *
+     * <p>Seven seconds is long enough to finish the word already in progress and
+     * still reach for it, and short enough that ignoring one is a real decision
+     * rather than a free option to bank forever.
+     */
+    public static final int POWERUP_LIFETIME_TICKS = TARGET_FPS * 7;
+
+    /** How far a pickup drifts upward over its lifetime, in pixels. */
+    public static final int POWERUP_DRIFT = 46;
+
+    /** On-screen size of a power-up icon. */
+    public static final int POWERUP_ICON_SIZE = 54;
+
+    /**
+     * How many Naga Shield charges can be held at once.
+     *
+     * <p>Capped so a lucky streak of drops cannot bank an unlosable run. Three
+     * matches {@link #STARTING_LIVES}, which is also how it reads on the HUD —
+     * a full ward is a second set of lives, not an infinite one.
+     */
+    public static final int MAX_SHIELD_CHARGES = 3;
+
+    /** Speed multiplier applied to everything while Slow Tide is running. */
+    public static final double SLOW_TIDE_FACTOR = 0.45;
+
+    /** How long the screen flashes when an instant power-up fires. */
+    public static final int POWERUP_FLASH_TICKS = 22;
+
     // ---- Restart chord -----------------------------------------------------
 
     /**

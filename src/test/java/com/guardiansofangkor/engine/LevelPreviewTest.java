@@ -46,17 +46,50 @@ class LevelPreviewTest {
     @Test
     @DisplayName("the hint follows the tier's own boss")
     void hintFollowsTheTierBoss() {
-        // Easy ends with the Naga at 10; Medium with Krong Reap at 15.
-        // Announcing the wrong finale is worse than announcing nothing.
-        LevelPreview easyFinale = LevelPreview.forLevel(10, Difficulty.EASY);
+        // Both tiers end on 15, but with different monsters. Announcing the
+        // wrong finale is worse than announcing nothing.
+        LevelPreview easyFinale = LevelPreview.forLevel(15, Difficulty.EASY);
         assertNotNull(easyFinale);
         assertTrue(easyFinale.hint().contains("Naga"),
-                "got: " + easyFinale.hint());
+                "Easy's finale is the Naga, got: " + easyFinale.hint());
+
+        LevelPreview mediumFinale = LevelPreview.forLevel(15, Difficulty.MEDIUM);
+        assertNotNull(mediumFinale);
+        assertTrue(mediumFinale.hint().contains("Krong Reap"),
+                "Medium's finale is Krong Reap, got: " + mediumFinale.hint());
 
         LevelPreview mediumAtTen = LevelPreview.forLevel(10, Difficulty.MEDIUM);
         assertNotNull(mediumAtTen);
         assertTrue(mediumAtTen.hint().contains("coils"),
                 "level 10 on Medium is only a mini-boss, got: " + mediumAtTen.hint());
+    }
+
+    @Test
+    @DisplayName("arrivals follow the tier, not a fixed table")
+    void arrivalsFollowTheTier() {
+        // Easy holds the roster back, so a hint tied to a hardcoded level would
+        // promise Yeak two levels before he actually turns up.
+        LevelPreview mediumThree = LevelPreview.forLevel(3, Difficulty.MEDIUM);
+        assertNotNull(mediumThree);
+        assertTrue(mediumThree.hint().contains("Yeak"), "got: " + mediumThree.hint());
+
+        LevelPreview easyThree = LevelPreview.forLevel(3, Difficulty.EASY);
+        if (easyThree != null) {
+            assertFalse(easyThree.hint().contains("Yeak"),
+                    "Yeak has not unlocked yet on Easy at level 3");
+        }
+    }
+
+    @Test
+    @DisplayName("a level that is both a mini-boss and an arrival says both")
+    void collisionsMentionBoth() {
+        // On Medium, Stec Kantoab unlocks on level 5, which is also a Naga
+        // level. Dropping either fact silently would misinform the player.
+        LevelPreview preview = LevelPreview.forLevel(5, Difficulty.MEDIUM);
+
+        assertNotNull(preview);
+        assertTrue(preview.hint().contains("Naga"), "got: " + preview.hint());
+        assertTrue(preview.hint().contains("Stec Kantoab"), "got: " + preview.hint());
     }
 
     @Test

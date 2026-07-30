@@ -22,6 +22,24 @@ final class WaveWeights {
     /** Relative spawn weight once unlocked. */
     private static final Map<EnemyType, Integer> WEIGHT = new EnumMap<>(EnemyType.class);
 
+    /**
+     * Levels each tier holds a type back by, on top of its base unlock.
+     *
+     * <p>Easy delays the roster rather than only slowing it. Meeting five
+     * different monsters in the first six levels is a lot to learn while also
+     * learning to type under pressure, and the tier's job is to let the player
+     * get good at one thing at a time. Hard does the reverse, within reason —
+     * nothing can unlock before level 1.
+     */
+    private static final Map<Difficulty, Integer> UNLOCK_DELAY = new EnumMap<>(Difficulty.class);
+
+    static {
+        UNLOCK_DELAY.put(Difficulty.EASY, 2);
+        UNLOCK_DELAY.put(Difficulty.MEDIUM, 0);
+        UNLOCK_DELAY.put(Difficulty.HARD, -1);
+        UNLOCK_DELAY.put(Difficulty.ENDLESS, 0);
+    }
+
     static {
         UNLOCK_WAVE.put(EnemyType.BEISACH, 1);
         UNLOCK_WAVE.put(EnemyType.AHP, 2);
@@ -45,12 +63,26 @@ final class WaveWeights {
         // Utility class — not instantiable.
     }
 
-    /** Every non-boss type available at {@code wave}. Never empty. */
+    /** Every non-boss type available at {@code wave} on the reference tier. */
     static List<EnemyType> available(int wave) {
+        return available(wave, Difficulty.reference());
+    }
+
+    /** Every non-boss type available at {@code wave} on a tier. Never empty. */
+    static List<EnemyType> available(int wave, Difficulty difficulty) {
+        int delay = UNLOCK_DELAY.getOrDefault(
+                difficulty == null ? Difficulty.reference() : difficulty, 0);
+
         List<EnemyType> types = new ArrayList<>();
         for (EnemyType type : EnemyType.values()) {
             Integer unlock = UNLOCK_WAVE.get(type);
-            if (unlock != null && wave >= unlock) {
+            if (unlock == null || unlock == Integer.MAX_VALUE) {
+                continue;
+            }
+            // Beisach is never delayed — a tier with no enemies at all on level
+            // one would be a stalled level, not a gentle one.
+            int effective = type == EnemyType.BEISACH ? unlock : Math.max(1, unlock + delay);
+            if (wave >= effective) {
                 types.add(type);
             }
         }
@@ -60,9 +92,39 @@ final class WaveWeights {
         return types;
     }
 
-    /** Picks a type for {@code wave}, respecting the weight table. */
+    /**
+     * Types appearing for the very first time at {@code wave} on this tier.
+     *
+     * <p>Exists so {@link LevelPreview} can announce a new monster from the same
+     * table that decides when it actually shows up. A hardcoded list of "level 3
+     * is Yeak" was correct at Medium and a lie on every other tier, because the
+     * tier shifts the unlocks — and a banner that promises the wrong monster is
+     * worse than one that promises nothing.
+     */
+    static List<EnemyType> newlyUnlockedAt(int wave, Difficulty difficulty) {
+        if (wave <= 1) {
+            return List.of();
+        }
+        List<EnemyType> before = available(wave - 1, difficulty);
+        List<EnemyType> now = available(wave, difficulty);
+
+        List<EnemyType> fresh = new ArrayList<>();
+        for (EnemyType type : now) {
+            if (!before.contains(type)) {
+                fresh.add(type);
+            }
+        }
+        return fresh;
+    }
+
+    /** Picks a type for {@code wave} on the reference tier. */
     static EnemyType pick(int wave, Random random) {
-        List<EnemyType> pool = available(wave);
+        return pick(wave, Difficulty.reference(), random);
+    }
+
+    /** Picks a type for {@code wave}, respecting the tier and the weight table. */
+    static EnemyType pick(int wave, Difficulty difficulty, Random random) {
+        List<EnemyType> pool = available(wave, difficulty);
 
         int total = 0;
         for (EnemyType type : pool) {

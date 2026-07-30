@@ -185,11 +185,48 @@ class WaveManagerTest {
         WaveManager waves = newManager();
 
         for (Enemy enemy : collectSpawns(waves, 6000)) {
-            if (enemy.getType() != EnemyType.NAGA) {
-                assertEquals(1, enemy.getChainLength(),
-                        enemy.getType().getDisplayName() + " should die to one word");
+            // Bosses are the exception by definition — the roster's chained
+            // types and whatever monster the tier saves for its finale.
+            if (enemy.getType() == EnemyType.NAGA
+                    || enemy.getType() == Difficulty.MEDIUM.getFinalBossType()) {
+                continue;
             }
+            assertEquals(1, enemy.getChainLength(),
+                    enemy.getType().getDisplayName() + " should die to one word");
         }
+    }
+
+    @Test
+    @DisplayName("a finite tier stops once its last level is cleared")
+    void finiteTiersEnd() {
+        WaveManager waves = newManager();
+        waves.resumeAtLevel(Difficulty.MEDIUM.getFinalLevel() - 1);
+
+        List<Enemy> field = new ArrayList<>();
+        for (int tick = 0; tick < 20_000; tick++) {
+            waves.update(field);
+            field.clear();
+        }
+
+        assertEquals(Difficulty.MEDIUM.getFinalLevel(), waves.getLevel(),
+                "a finite tier must not roll on past its finale");
+        assertTrue(waves.isRunComplete(), "the run should report itself finished");
+    }
+
+    @Test
+    @DisplayName("Endless never reports itself finished")
+    void endlessNeverCompletes() {
+        WaveManager waves = new WaveManager(new WordBank(Language.ENGLISH, new Random(8)),
+                Difficulty.ENDLESS, new Random(8));
+        waves.resumeAtLevel(40);
+
+        List<Enemy> field = new ArrayList<>();
+        for (int tick = 0; tick < 4000; tick++) {
+            waves.update(field);
+            field.clear();
+            assertFalse(waves.isRunComplete(), "Endless ended, which is its one job not to do");
+        }
+        assertTrue(waves.getLevel() > 40, "Endless should keep climbing");
     }
 
     @Test

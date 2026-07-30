@@ -4,6 +4,7 @@ import com.guardiansofangkor.entities.ApproachPath;
 import com.guardiansofangkor.entities.Enemy;
 import com.guardiansofangkor.entities.EnemyType;
 import com.guardiansofangkor.i18n.WordBank;
+import com.guardiansofangkor.i18n.WordPolicy;
 import com.guardiansofangkor.util.GameConfig;
 
 import java.util.ArrayList;
@@ -76,6 +77,12 @@ public class WaveManager {
         List<Enemy> spawned = new ArrayList<>();
 
         if (!levelInProgress) {
+            // The tier's last level has been cleared. Stop here rather than
+            // rolling into level 16 — a finite tier that keeps spawning after
+            // its boss dies has no ending, which is the one thing it is for.
+            if (isRunComplete()) {
+                return spawned;
+            }
             if (intermissionCooldown > 0) {
                 intermissionCooldown--;
                 return spawned;
@@ -107,7 +114,7 @@ public class WaveManager {
     private void beginLevel(int newLevel) {
         this.level = newLevel;
         this.levelInProgress = true;
-        this.remainingToSpawn = DifficultyCurve.enemyCount(newLevel);
+        this.remainingToSpawn = DifficultyCurve.enemyCount(newLevel, difficulty);
         this.spawnCooldown = 0;
     }
 
@@ -123,19 +130,14 @@ public class WaveManager {
             inPlay.addAll(enemy.getAllWords());
         }
 
-        // The tier shifts every word's length window; the final boss gets a
-        // further push, so even a gentle tier's boss demands its hardest typing.
-        int minShift = difficulty.getWordMinShift();
-        int maxShift = difficulty.getWordMaxShift();
-        if (isFinalBoss) {
-            minShift += difficulty.getBossWordLengthBonus();
-            maxShift += difficulty.getBossWordLengthBonus();
-        }
+        // What this tier is allowed to say at this point in the run. Resolved
+        // per spawn rather than cached, because a level can tick over mid-wave.
+        WordPolicy policy = currentPolicy();
 
         List<String> words = new ArrayList<>();
         int chainLength = chainLengthFor(type, isFinalBoss);
         for (int i = 0; i < chainLength; i++) {
-            String word = wordBank.wordFor(type, inPlay, minShift, maxShift);
+            String word = wordFor(type, isFinalBoss, inPlay, policy);
             words.add(word);
             inPlay.add(word);
         }
@@ -158,6 +160,38 @@ public class WaveManager {
         double speed = DifficultyCurve.speedFor(type, level, difficulty);
 
         return new Enemy(type, path, words, run, direction, speed);
+    }
+
+    /**
+     * The vocabulary this tier may draw on at the current level.
+     *
+     * <p>Resolved from the word bank's own JSON, so which levels get which words
+     * is a data question. Nothing here decides it.
+     */
+    public WordPolicy currentPolicy() {
+        return wordBank.policyFor(difficulty.getWordBankKey(), Math.max(1, level));
+    }
+
+    /**
+     * Picks one word for a spawn.
+     *
+     * <p>Bosses come from their own ranked pools rather than from the regular
+     * vocabulary with a length bonus bolted on. Two reasons: a boss word can then
+     * never have already turned up on an ordinary enemy earlier in the run, and
+     * the rank climbs with both the tier and the level band, so an Easy Naga and
+     * a Hard Naga are genuinely different fights rather than the same fight with
+     * two more letters.
+     */
+    private String wordFor(EnemyType type, boolean isFinalBoss,
+                           List<String> inPlay, WordPolicy policy) {
+        if (isFinalBoss) {
+            return wordBank.finalBossWord(inPlay, policy);
+        }
+        if (type.isChainedType()) {
+            return wordBank.bossWord(inPlay, policy);
+        }
+        return wordBank.wordFor(type, inPlay, policy,
+                difficulty.getWordMinShift(), difficulty.getWordMaxShift());
     }
 
     /**
@@ -193,7 +227,25 @@ public class WaveManager {
         if (level % MINI_BOSS_INTERVAL == 0 && remainingToSpawn == 1) {
             return EnemyType.NAGA;
         }
-        return WaveWeights.pick(level, random);
+        return WaveWeights.pick(level, difficulty, random);
+    }
+
+    /**
+     * True once the tier's last level has been cleared — the run is won.
+     *
+     * <p>Asked after a level finishes, not during it. A tier with no final boss
+     * (Endless) never returns true here, which is the whole of what "endless"
+     * means mechanically.
+     */
+    public boolean isRunComplete() {
+        return difficulty.isWinnable()
+                && !levelInProgress
+                && level >= difficulty.getFinalLevel();
+    }
+
+    /** The last level of a run on this tier, or {@code Integer.MAX_VALUE}. */
+    public int getFinalLevel() {
+        return difficulty.getFinalLevel();
     }
 
     /** The tier this manager is running, for the HUD and the boss banner. */

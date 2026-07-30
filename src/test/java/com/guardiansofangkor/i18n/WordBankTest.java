@@ -9,28 +9,91 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-@DisplayName("WordBank — word supply and graceful fallback")
+@DisplayName("WordBank — word supply, difficulty banding and graceful fallback")
 class WordBankTest {
 
-    @Test
-    @DisplayName("falls back to the built-in list when the JSON resource is absent")
-    void fallsBackWhenResourceMissing() {
-        WordBank bank = new WordBank(Language.ENGLISH, new Random(1));
-
-        assertTrue(bank.isUsingFallback(),
-                "words_en.json has not been added yet, so the fallback should be active");
-        assertTrue(bank.size() > 0, "the fallback list must not be empty");
+    private static WordBank bank(long seed) {
+        return new WordBank(Language.ENGLISH, new Random(seed));
     }
+
+    // ---- loading -----------------------------------------------------------
+
+    @Test
+    @DisplayName("loads the real word list rather than the built-in fallback")
+    void loadsTheShippedList() {
+        WordBank bank = bank(1);
+
+        // This asserts the resource is actually reachable. It has silently not
+        // been once already — the file was named wordBankEng.json while Language
+        // asked for words_en.json, so every run quietly used the ~80-word
+        // fallback and nobody noticed.
+        assertFalse(bank.isUsingFallback(),
+                "words_en.json should be on the classpath and parseable");
+        assertTrue(bank.size() > 300,
+                "expected the full vocabulary, got " + bank.size() + " words");
+    }
+
+    @Test
+    @DisplayName("every declared pool has words in it")
+    void everyPoolIsPopulated() {
+        WordBank bank = bank(2);
+
+        for (String pool : List.of("tiny", "short", "medium", "long", "epic")) {
+            assertFalse(bank.getPool(pool).isEmpty(), "pool '" + pool + "' is empty");
+        }
+        for (String rank : List.of("novice", "adept", "master", "legend")) {
+            assertFalse(bank.getBossPool(rank).isEmpty(), "boss rank '" + rank + "' is empty");
+        }
+    }
+
+    @Test
+    @DisplayName("pools stay inside the length band they are named for")
+    void poolsRespectTheirLengthBands() {
+        WordBank bank = bank(3);
+
+        assertLengthsWithin(bank.getPool("tiny"), 2, 3);
+        assertLengthsWithin(bank.getPool("short"), 4, 5);
+        assertLengthsWithin(bank.getPool("medium"), 6, 7);
+        assertLengthsWithin(bank.getPool("long"), 8, 10);
+        assertLengthsWithin(bank.getPool("epic"), 11, 99);
+    }
+
+    @Test
+    @DisplayName("boss ranks climb in length, novice through legend")
+    void bossRanksClimb() {
+        WordBank bank = bank(4);
+
+        assertLengthsWithin(bank.getBossPool("novice"), 5, 7);
+        assertLengthsWithin(bank.getBossPool("adept"), 8, 10);
+        assertLengthsWithin(bank.getBossPool("master"), 11, 13);
+        assertLengthsWithin(bank.getBossPool("legend"), 14, 99);
+    }
+
+    @Test
+    @DisplayName("boss vocabulary never leaks into the ordinary spawn pool")
+    void bossWordsAreReserved() {
+        WordBank bank = bank(5);
+
+        // Otherwise the climactic word could already have turned up on a
+        // Beisach in level two, which costs the fight all of its weight.
+        for (String rank : List.of("novice", "adept", "master", "legend")) {
+            for (String word : bank.getBossPool(rank)) {
+                assertFalse(bank.getWords().contains(word),
+                        "'" + word + "' is both a boss word and an ordinary one");
+            }
+        }
+    }
+
+    // ---- selection ---------------------------------------------------------
 
     @Test
     @DisplayName("never returns null or empty, for any enemy type")
     void alwaysReturnsAWord() {
-        WordBank bank = new WordBank(Language.ENGLISH, new Random(7));
+        WordBank bank = bank(7);
 
         for (EnemyType type : EnemyType.values()) {
             String word = bank.wordFor(type, List.of());
@@ -42,7 +105,7 @@ class WordBankTest {
     @Test
     @DisplayName("respects the requested word-length tier when it can")
     void respectsTierWhenPossible() {
-        WordBank bank = new WordBank(Language.ENGLISH, new Random(3));
+        WordBank bank = bank(3);
 
         for (int i = 0; i < 50; i++) {
             String word = bank.wordFor(EnemyType.AHP, List.of());
@@ -54,7 +117,7 @@ class WordBankTest {
     @Test
     @DisplayName("avoids words already in play")
     void avoidsExcludedWords() {
-        WordBank bank = new WordBank(Language.ENGLISH, new Random(11));
+        WordBank bank = bank(11);
 
         List<String> inPlay = new ArrayList<>();
         for (int i = 0; i < 10; i++) {
@@ -64,36 +127,143 @@ class WordBankTest {
         }
     }
 
+    // ---- policy ------------------------------------------------------------
+
     @Test
-    @DisplayName("parses the documented JSON shape")
-    void parsesJsonArray() {
-        String json = "{ \"language\": \"en\", \"words\": [\"temple\", \"stone\", \"naga\"] }";
+    @DisplayName("resolves a level to the band that covers it")
+    void resolvesBands() {
+        WordBank bank = bank(13);
 
-        List<String> words = WordBank.parseWordArray(json);
+        WordPolicy early = bank.policyFor("easy", 1);
+        WordPolicy late = bank.policyFor("easy", 15);
 
-        assertEquals(List.of("temple", "stone", "naga"), words);
+        assertTrue(early.restrictsPools(), "Easy level 1 should be banded");
+        assertTrue(early.getPoolNames().contains("tiny"));
+        assertFalse(early.getPoolNames().contains("long"),
+                "Easy must not open with eight-letter words");
+        assertFalse(late.getPoolNames().contains("tiny"),
+                "by the finale the tiny pool should have been left behind");
     }
 
     @Test
-    @DisplayName("parses unicode escapes so Khmer survives the round trip")
-    void parsesUnicodeEscapes() {
-        // Codepoint 1782 (hex) is the Khmer letter KO. Written escaped here so
-        // the test proves the parser decodes it, rather than the file carrying
-        // the literal glyph.
-        String json = "{ \"words\": [\"\\u1782\"] }";
+    @DisplayName("a level past the last band still resolves, rather than falling off")
+    void unboundedLevelsUseTheLastBand() {
+        WordBank bank = bank(17);
 
-        List<String> words = WordBank.parseWordArray(json);
+        WordPolicy far = bank.policyFor("endless", 900);
 
-        assertEquals(1, words.size());
-        assertEquals("\u1782", words.get(0));
+        assertNotNull(far);
+        assertTrue(far.restrictsPools(), "Endless must keep a band at any depth");
     }
 
     @Test
-    @DisplayName("malformed JSON yields no words rather than throwing")
-    void malformedJsonIsSafe() {
-        assertTrue(WordBank.parseWordArray(null).isEmpty());
-        assertTrue(WordBank.parseWordArray("").isEmpty());
-        assertTrue(WordBank.parseWordArray("{ \"other\": [1,2] }").isEmpty());
-        assertTrue(WordBank.parseWordArray("{ \"words\": ").isEmpty());
+    @DisplayName("an unknown tier widens rather than empties")
+    void unknownTiersAreUnrestricted() {
+        WordBank bank = bank(19);
+
+        // A typo in the tuning table should make the game generic, not
+        // unplayable — an empty vocabulary would stall every spawn.
+        WordPolicy nonsense = bank.policyFor("brutal", 3);
+
+        assertFalse(nonsense.restrictsPools());
+        assertFalse(bank.vocabularyFor(nonsense).isEmpty());
+    }
+
+    @Test
+    @DisplayName("a banded pick never leaves its band")
+    void bandedPicksStayInTheBand() {
+        WordBank bank = bank(23);
+        WordPolicy easyEarly = bank.policyFor("easy", 1);
+        List<String> allowed = bank.vocabularyFor(easyEarly);
+
+        for (int i = 0; i < 120; i++) {
+            String word = bank.wordFor(EnemyType.BEISACH, null, easyEarly, 0, 0);
+            assertTrue(allowed.contains(word),
+                    "'" + word + "' is outside the Easy level 1 band");
+        }
+    }
+
+    @Test
+    @DisplayName("a heavy enemy in a gentle band gets the band's longest, not a long word")
+    void heavyTypesAreClampedToTheBand() {
+        WordBank bank = bank(29);
+        WordPolicy easyEarly = bank.policyFor("easy", 1);
+
+        // A Pret asks for 8-12 letters. Easy's opening band tops out at 5. It
+        // must take the longest thing the band has rather than reaching outside
+        // it, which is precisely the "too hard, too early" problem.
+        for (int i = 0; i < 60; i++) {
+            String word = bank.wordFor(EnemyType.PRET, null, easyEarly, 0, 0);
+            assertTrue(GraphemeCounter.count(word) <= 5,
+                    "Easy level 1 served a " + GraphemeCounter.count(word)
+                            + "-letter word to a Pret: " + word);
+        }
+    }
+
+    @Test
+    @DisplayName("a boss word comes from the rank the policy names")
+    void bossWordsFollowTheRank() {
+        WordBank bank = bank(31);
+        WordPolicy easyEarly = bank.policyFor("easy", 5);
+
+        String word = bank.bossWord(null, easyEarly);
+
+        assertTrue(bank.getBossPool("novice").contains(word),
+                "Easy's early Naga should draw a novice word, got: " + word);
+    }
+
+    @Test
+    @DisplayName("the final boss word is the longest unused one in its rank")
+    void finalBossTakesTheHardestWord() {
+        WordBank bank = bank(37);
+        WordPolicy hardLate = bank.policyFor("hard", 15);
+
+        String word = bank.finalBossWord(null, hardLate);
+
+        assertTrue(bank.getBossPool("legend").contains(word),
+                "Hard's finale should draw a legend word, got: " + word);
+        for (String other : bank.getBossPool("legend")) {
+            assertTrue(GraphemeCounter.count(word) >= GraphemeCounter.count(other),
+                    "'" + word + "' is not the longest in its rank; '" + other + "' is longer");
+        }
+    }
+
+    @Test
+    @DisplayName("a boss rank exhausted mid-run widens instead of stalling")
+    void exhaustedBossRankWidens() {
+        WordBank bank = bank(41);
+        WordPolicy policy = bank.policyFor("easy", 5);
+
+        // Drain the novice rank several times over. Every call must still
+        // produce something — a wave that cannot spawn is far worse than a
+        // repeated word.
+        for (int i = 0; i < bank.getBossPool("novice").size() * 3 + 10; i++) {
+            String word = bank.bossWord(null, policy);
+            assertNotNull(word);
+            assertFalse(word.isBlank());
+        }
+    }
+
+    // ---- projectiles and pickups -------------------------------------------
+
+    @Test
+    @DisplayName("projectile and pickup words stay very short")
+    void shortWordsForShortDeadlines() {
+        WordBank bank = bank(43);
+
+        for (int i = 0; i < 60; i++) {
+            assertTrue(GraphemeCounter.count(bank.projectileWord(null)) <= 3);
+            assertTrue(GraphemeCounter.count(bank.pickupWord(null)) <= 3);
+        }
+    }
+
+    // ---- helpers -----------------------------------------------------------
+
+    private static void assertLengthsWithin(List<String> pool, int min, int max) {
+        for (String word : pool) {
+            int length = GraphemeCounter.count(word);
+            assertTrue(length >= min && length <= max,
+                    "'" + word + "' is " + length + " long, outside " + min + "-" + max);
+        }
     }
 }

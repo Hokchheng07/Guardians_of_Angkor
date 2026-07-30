@@ -27,6 +27,19 @@ public final class DifficultyCurve {
         return Math.min(4 + (Math.max(1, level) - 1) * 2, 20);
     }
 
+    /**
+     * Enemies in a level on a given tier.
+     *
+     * <p>The most direct lever there is on how hard a level feels, and the one
+     * that was missing: slowing Easy down and shortening its words still left a
+     * beginner facing twenty monsters on level fifteen, which no amount of extra
+     * time per monster makes reasonable. Floored at two so no level is empty.
+     */
+    public static int enemyCount(int level, Difficulty difficulty) {
+        double scaled = enemyCount(level) * scaleOf(difficulty).getEnemyCountScale();
+        return Math.max(2, (int) Math.round(scaled));
+    }
+
     /** Ticks between spawns at the reference tuning. */
     public static int spawnIntervalTicks(int level) {
         int base = 130 - (Math.max(1, level) * 7);

@@ -73,8 +73,14 @@ public class Enemy implements WordTarget {
     // ---- ranged attack state ----------------------------------------------
 
     private AttackPhase attackPhase = AttackPhase.NONE;
-    private int attackPhaseTicks;
-    private int throwCooldown;
+
+    /**
+     * Attack timers are fractional rather than whole ticks so Slow Tide slows
+     * the wind-up too. An int here would round a 0.45 scale to either 0 or 1 and
+     * leave a slowed Yeak throwing at full speed.
+     */
+    private double attackPhaseTicks;
+    private double throwCooldown;
     private boolean projectileDue;
 
     /** Single-word constructor, for ordinary enemies. */
@@ -134,8 +140,24 @@ public class Enemy implements WordTarget {
         this.throwCooldown = type.getThrowIntervalTicks();
     }
 
-    /** Advances one tick. Called by GameState, never by the renderer. */
+    /** Advances one tick at full pace. Called by GameState, never by the renderer. */
     public void update() {
+        update(1.0);
+    }
+
+    /**
+     * Advances one tick, scaled by how fast the world is currently running.
+     *
+     * <p>{@code timeScale} is 0 while Time Freeze holds and a fraction while Slow
+     * Tide does. Only the <em>threatening</em> half of a tick is scaled — the
+     * march and the attack wind-up. Hit flashes, stagger recoil and the death
+     * fade keep running at real time on purpose: they are feedback about what
+     * the player just did, and freezing them would make a Time Freeze look like
+     * the game had hung rather than like the enemies had stopped.
+     */
+    public void update(double timeScale) {
+        double scale = Math.max(0.0, timeScale);
+
         ticksAlive++;
         projectileDue = false;
 
@@ -155,20 +177,24 @@ public class Enemy implements WordTarget {
             return;
         }
 
-        advanceAttack();
+        if (scale <= 0.0001) {
+            return;
+        }
+
+        advanceAttack(scale);
 
         // A throwing enemy plants itself to wind up rather than walking through
         // the animation — otherwise the throw reads as a stumble.
         if (attackPhase == AttackPhase.NONE) {
-            march();
+            march(scale);
         }
     }
 
-    private void march() {
-        x += direction * speed * unitX;
+    private void march(double scale) {
+        x += direction * speed * unitX * scale;
 
         if (y < targetY) {
-            y = Math.min(targetY, y + speed * unitY);
+            y = Math.min(targetY, y + speed * unitY * scale);
         }
     }
 
@@ -228,14 +254,14 @@ public class Enemy implements WordTarget {
 
     // ---- ranged attacks ----------------------------------------------------
 
-    private void advanceAttack() {
+    private void advanceAttack(double scale) {
         if (!type.canThrow()) {
             return;
         }
 
         if (attackPhase == AttackPhase.NONE) {
             if (throwCooldown > 0) {
-                throwCooldown--;
+                throwCooldown -= scale;
             } else if (isOnScreen()) {
                 // Only start a throw once actually visible, so the player can
                 // see the telegraph rather than being hit from off-screen.
@@ -245,7 +271,7 @@ public class Enemy implements WordTarget {
             return;
         }
 
-        attackPhaseTicks++;
+        attackPhaseTicks += scale;
         if (attackPhaseTicks < attackPhase.durationTicks()) {
             return;
         }
@@ -409,7 +435,7 @@ public class Enemy implements WordTarget {
     /** Progress through the current attack phase, 0 to 1. For the renderer's lean. */
     public double getAttackPhaseProgress() {
         int duration = attackPhase.durationTicks();
-        return duration <= 0 ? 0 : Math.min(1.0, attackPhaseTicks / (double) duration);
+        return duration <= 0 ? 0 : Math.min(1.0, attackPhaseTicks / duration);
     }
 
     public long getTicksAlive() {

@@ -18,7 +18,13 @@ public class VisualEffect {
         ARROW,
 
         /** Burst where an arrow connects. */
-        IMPACT
+        IMPACT,
+
+        /** A Naga Shield charge turning aside something that reached the temple. */
+        WARD_BREAK,
+
+        /** Flourish where a power-up is claimed. */
+        BOON_CLAIMED
     }
 
     private final Kind kind;

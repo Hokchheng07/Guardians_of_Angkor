@@ -3,6 +3,7 @@ package com.guardiansofangkor.engine;
 import com.guardiansofangkor.entities.ApproachPath;
 import com.guardiansofangkor.entities.Enemy;
 import com.guardiansofangkor.entities.EnemyType;
+import com.guardiansofangkor.entities.Projectile;
 import com.guardiansofangkor.entities.VisualEffect;
 import com.guardiansofangkor.i18n.Language;
 import com.guardiansofangkor.matching.MatchStatus;
@@ -340,6 +341,73 @@ class GameStateTest {
         assertFalse(state.togglePause(),
                 "a pause overlay would hide the restart prompt");
         assertFalse(state.isPaused());
+    }
+
+    // ---- winning -----------------------------------------------------------
+
+    /**
+     * Kills everything on the field, including bolts in flight.
+     *
+     * <p>The bolts matter: Yeak throws on the later levels, and a run that
+     * reaches the finale only to lose its last life to an un-intercepted bolt
+     * would fail these tests for a reason that has nothing to do with winning.
+     */
+    private static void clearTheField(GameState state) {
+        for (Enemy enemy : List.copyOf(state.getEnemies())) {
+            enemy.defeat();
+        }
+        for (Projectile bolt : List.copyOf(state.getProjectiles())) {
+            bolt.intercept();
+        }
+    }
+
+    @Test
+    @DisplayName("clearing the tier's last level wins the run")
+    void clearingTheFinalLevelWins() {
+        GameState state = playing();
+        state.getWaveManager().resumeAtLevel(state.getFinalLevel() - 1);
+
+        // Nothing is typed, so the only way this ends is by the level being
+        // cleared — enemies are removed as fast as they arrive.
+        for (int tick = 0; tick < 60_000 && !state.isGameOver(); tick++) {
+            state.update();
+            clearTheField(state);
+        }
+
+        assertTrue(state.isVictory(), "the run should have been won, not lost");
+        assertTrue(state.isGameOver(), "a won run is still a finished one");
+        assertEquals(state.getFinalLevel(), state.getLevel());
+    }
+
+    @Test
+    @DisplayName("running out of lives is a loss, not a win")
+    void runningOutOfLivesIsNotAVictory() {
+        GameState state = playing();
+        for (int i = 0; i < GameConfig.STARTING_LIVES; i++) {
+            state.loseLife();
+        }
+
+        assertTrue(state.isGameOver());
+        assertFalse(state.isVictory(),
+                "congratulating a player who just died would be the one "
+                        + "unforgivable bug on this screen");
+    }
+
+    @Test
+    @DisplayName("a restart clears the victory flag")
+    void restartClearsVictory() {
+        GameState state = playing();
+        state.getWaveManager().resumeAtLevel(state.getFinalLevel() - 1);
+        for (int tick = 0; tick < 60_000 && !state.isGameOver(); tick++) {
+            state.update();
+            clearTheField(state);
+        }
+        assertTrue(state.isVictory());
+
+        state.restart();
+
+        assertFalse(state.isVictory());
+        assertFalse(state.isGameOver());
     }
 
     @Test

@@ -1,6 +1,7 @@
 package com.guardiansofangkor.renderer;
 
 import com.guardiansofangkor.entities.EnemyType;
+import com.guardiansofangkor.entities.PowerUpType;
 
 import javax.imageio.ImageIO;
 import java.awt.Graphics2D;
@@ -47,6 +48,11 @@ public class SpriteCache {
     private final Map<EnemyType, BufferedImage> sprites = new EnumMap<>(EnemyType.class);
     private final Map<EnemyType, BufferedImage> silhouettes = new EnumMap<>(EnemyType.class);
     private final Map<EnemyType, Boolean> loadAttempted = new EnumMap<>(EnemyType.class);
+
+    private final Map<PowerUpType, BufferedImage> powerUpIcons =
+            new EnumMap<>(PowerUpType.class);
+    private final Map<PowerUpType, Boolean> powerUpAttempted =
+            new EnumMap<>(PowerUpType.class);
 
     private BufferedImage background;
     private boolean backgroundAttempted;
@@ -96,6 +102,40 @@ public class SpriteCache {
         }
         sprites.put(type, trimmed);
         return trimmed;
+    }
+
+    /**
+     * The icon for a power-up, or null when its art has not been drawn yet.
+     *
+     * <p>None of it has been, at time of writing. That is fine and deliberate:
+     * the renderer draws a glyph in the boon's palette colour instead, exactly
+     * as it already does for the enemy types still awaiting art. Dropping a
+     * {@code powerup_*.png} into {@code resources/images} is all it takes to
+     * replace one — there is no registration step and no code to change.
+     */
+    public BufferedImage powerUpIcon(PowerUpType type) {
+        if (type == null) {
+            return null;
+        }
+        if (Boolean.TRUE.equals(powerUpAttempted.get(type))) {
+            return powerUpIcons.get(type);
+        }
+        powerUpAttempted.put(type, Boolean.TRUE);
+
+        BufferedImage raw = read(type.getSpritePath());
+        if (raw == null) {
+            System.out.println("[SpriteCache] No art for " + type.getDisplayName()
+                    + " (" + type.getSpritePath() + ") — drawing a placeholder.");
+            return null;
+        }
+        BufferedImage trimmed = safeTrim(raw);
+        powerUpIcons.put(type, trimmed);
+        return trimmed;
+    }
+
+    /** True when this boon has real art, as opposed to a placeholder glyph. */
+    public boolean hasPowerUpIcon(PowerUpType type) {
+        return powerUpIcon(type) != null;
     }
 
     /** The temple backdrop, or null when it is missing. */

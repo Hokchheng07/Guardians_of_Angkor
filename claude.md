@@ -18,6 +18,90 @@ Java char count — a Khmer visual character can be multiple chars.
 Khmer text requires the bundled Noto Sans Khmer font; do not assume
 default Swing fonts render it.
 
+FILENAMES MUST MATCH `Language.getWordListPath()`. The file was once
+named wordBankEng.json while Language asked for words_en.json, so every
+run silently used the ~80-word built-in fallback and nobody noticed for
+weeks. WordBankTest now asserts `!isUsingFallback()` to catch a repeat.
+
+## Word bank shape
+words_en.json holds vocabulary ONCE, in `pools` (tiny 2-3, short 4-5,
+medium 6-7, long 8-10, epic 11+) and `bossPools` (novice 5-7, adept
+8-10, master 11-13, legend 14+), plus a curated `projectile` pool of
+2-3 letter words shared with power-up pickups.
+
+`difficulties` is the tuning table, NOT more word lists: per tier, a
+list of level bands saying which pools that stretch of the run may draw
+from and which boss rank its bosses use. Bands match by `throughLevel`
+in order; the last band also covers everything past it, which is what
+keeps Endless from running off the end of its own table. Making an
+early level gentler is an edit here, never in Java.
+
+Boss words are RESERVED — never in the regular pools — so a climactic
+word can't already have appeared on a Beisach in level two. The rank
+climbs with both the tier and the level band, which is what makes an
+Easy Naga and a Hard Naga different fights rather than the same fight
+with two more letters.
+
+WordPolicy is the resolved answer to "tier X, level Y: what may
+appear?". EnemyType still asks for a length window, but the policy is
+the ceiling over it: a Pret wants 8-12 letters and Easy's opening band
+tops out at 5, so it takes the LONGEST word the band has rather than
+reaching outside it. That clamp is the whole fix for "Easy is too hard"
+— without it, level one served eight-letter words to beginners.
+
+WordBank talks to the engine through a lower-case String key
+(`Difficulty.getWordBankKey()`), not the enum. `engine` already imports
+`i18n`; making that mutual to pass one identifier would be a package
+cycle.
+
+util/Json is a small hand-rolled parser, added because the old loader
+scanned for `"key"` and grabbed the bracketed run after it. That worked
+only while every key in the file was unique, which stopped being true
+the moment both a pool list and each level band had a `pools` key.
+
+## Power-ups
+Collected by TYPING, like everything else: a defeated enemy may drop a
+PowerUp carrying a short word, and typing it claims the boon. Not an
+inventory with a hotkey — the typing field legitimately consumes every
+letter, so any activation key would have to be a modifier chord, which
+is a second control scheme bolted onto a game whose whole proposition
+is that you only ever type.
+
+PowerUp implements WordTarget and is fed to TargetResolver BETWEEN
+projectiles and enemies. Tiers are ordered by time budget, shortest
+first: a bolt lands in a second, a drop fades in seven, an enemy takes
+as long as it walks. That ordering is also what makes grabbing one a
+real decision — it breaks off the word you were part-way through.
+
+Five boons, all with placeholder glyphs until art arrives (SpriteCache
+falls back exactly as it does for the unfinished enemy roster):
+Time Freeze, Slow Tide, Purge, Mend, Naga Shield.
+
+PowerUpState owns only the DURABLE half — timed effects and banked
+shield charges. Purge and Mend act on the field and the life count,
+which are GameState's, and putting them in the state holder too would
+leave two objects able to decide what a Purge does.
+
+Freeze and Slow work by ONE timeScale read once per tick and passed to
+Enemy.update(scale) / Projectile.update(scale). Reading it per entity
+would let a boon expire mid-frame and advance the back half of the
+field further than the front. Only the threatening half of a tick
+scales — hit flashes, stagger and death fades stay on real time, or a
+Time Freeze looks like a hang rather than like enemies stopping.
+Enemy's attack timers are DOUBLE, not int, or a 0.45 scale rounds to
+0 or 1 and a slowed Yeak throws at full speed.
+
+Drop rate rises as lives run out (PowerUpDrops), capped. That mercy
+curve is the difficulty valve that needs no curve retuning: a run going
+badly quietly gets more to reach for, a run going well never notices.
+Mend is withheld at full health and the ward at full charges rather
+than rolled and wasted — a drop that does nothing teaches the player to
+ignore drops.
+
+Breaches and landed bolts both route through
+GameState.absorbOrLoseLife, so a shield can never be honoured for one
+and forgotten for the other.
+
 ## Enemy roster (see bestiary for word-length tiers)
 Beisach, Yeak, Ahp, Pret, Stec Kantoab, Naga, Krong Reap
 
@@ -273,18 +357,41 @@ EASY and MEDIUM are playable. HARD and ENDLESS are listed but
 implemented=false; MenuState refuses START_RUN for them. Their
 multipliers are already recorded so the intended balance is not lost.
 
-Easy is not merely slower — it also shortens words
-(getWordMinShift/getWordMaxShift), because a beginner's problem is
-finding the letters rather than the clock. Per-type speed multipliers are
-deliberately tier-INDEPENDENT: the tier scales the base speed, so the
-relationship between light and heavy types survives at every tier.
+Easy is not merely slower — the word bank's Easy bands hold back the
+long vocabulary for ten levels, and WaveWeights delays the heavier
+types by two levels, because a beginner's problem is finding the
+letters rather than the clock and meeting five monsters in six levels
+is a lot to learn at once. Per-type speed multipliers are deliberately
+tier-INDEPENDENT: the tier scales the base speed, so the relationship
+between light and heavy types survives at every tier.
 
-Each tier names its own finale (finalBossType / finalBossLevel /
-finalBossChainLength). Easy ends with a 3-word Naga at level 10; Medium
-with Krong Reap at 15. getBossWordLengthBonus stacks on top of the tier
-shift, so Easy's boss still demands the hardest typing in an Easy run.
-LevelPreview is tier-aware for the same reason — announcing the wrong
-finale is worse than announcing nothing.
+EASY, MEDIUM and HARD ALL END ON LEVEL 15. A tier changes how hard the
+same run is, not how long it is, and a player moving up from Easy
+should recognise the shape of what they are attempting. Endless is the
+exception by definition. Each tier still names its own finale
+(finalBossType / finalBossChainLength): Easy a 3-word Naga, Medium and
+Hard Krong Reap. Boss VOCABULARY is not set here — it comes from the
+ranked boss pools the tier's band points at.
+
+getFinalLevel() and getFinalBossLevel() are the same number today and
+are separate methods anyway, because they answer different questions:
+when the boss arrives, and when the game stops.
+
+## Winning
+Clearing the final level ends the run as a VICTORY. GameState.victory
+is tracked separately from gameOver rather than inferred from "finished
+with lives left" — they are different events with different screens,
+and the inference breaks the moment anything else can end a run.
+HUDRenderer checks isVictory() FIRST; congratulating a player in the
+defeat colour is the one mistake on that screen nobody would forgive.
+WaveManager.isRunComplete() stops it rolling into level 16.
+
+## Level hints
+LevelPreview derives everything — the finale from Difficulty, arrivals
+from WaveWeights.newlyUnlockedAt. A hardcoded "level 3 is Yeak" was
+correct at Medium and a lie on every other tier, because the tier
+shifts the unlocks. When a mini-boss level and an arrival collide the
+banner says BOTH rather than silently dropping one.
 
 Difficulty is settable on GameState/WaveManager but ONLY between runs, via
 GameState.restartWith(). The tier decides speeds, word lengths and which
@@ -315,5 +422,16 @@ one place or the two silhouettes drift apart.
 
 ## Build phases
 Phases 1-6 are implemented (engine, prefix matching, input, waves, HUD,
-projectiles, save/autosave, player, game over). Phase 9 (Khmer) needs
-words_km.json and NotoSansKhmer-Regular.ttf added to resources.
+projectiles, save/autosave, player, game over), plus power-ups, the
+banded word bank and the level-15 finale. Phase 9 (Khmer) needs
+words_km.json and NotoSansKhmer-Regular.ttf added to resources —
+words_km.json must use the same pools / bossPools / difficulties shape
+as words_en.json.
+
+## Art still outstanding
+Everything below draws a placeholder and needs no code change when the
+PNG lands in src/main/resources/images:
+beisach_transparent.png, pret_transparent.png,
+stec_kantoab_transparent.png, and the five power-up icons
+(powerup_time_freeze.png, powerup_slow_tide.png, powerup_purge.png,
+powerup_mend.png, powerup_naga_shield.png).

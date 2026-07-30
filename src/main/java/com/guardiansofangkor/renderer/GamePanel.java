@@ -5,6 +5,8 @@ import com.guardiansofangkor.entities.AttackPhase;
 import com.guardiansofangkor.entities.Enemy;
 import com.guardiansofangkor.entities.EnemyType;
 import com.guardiansofangkor.entities.Player;
+import com.guardiansofangkor.entities.PowerUp;
+import com.guardiansofangkor.entities.PowerUpType;
 import com.guardiansofangkor.entities.Projectile;
 import com.guardiansofangkor.entities.VisualEffect;
 import com.guardiansofangkor.i18n.FontManager;
@@ -97,6 +99,18 @@ public class GamePanel extends JPanel {
     /** Strength of the halo behind Preah Ream. Subtle by design. */
     private static final float RIM_LIGHT_ALPHA = 0.18f;
 
+    /** Bob amplitude for a power-up waiting on the plaza. */
+    private static final double BOON_BOB = 5.0;
+
+    /**
+     * Fraction of a pickup's life after which it starts blinking.
+     *
+     * <p>Late enough that the warning means something, early enough to still act
+     * on. Without it a boon simply vanishes and the player learns nothing about
+     * why they missed it.
+     */
+    private static final double BOON_WARN_AT = 0.62;
+
     private static final int LOCK_CHIP_HEIGHT = 48;
     private static final int LOCK_CHIP_MIN_WIDTH = 180;
 
@@ -113,6 +127,7 @@ public class GamePanel extends JPanel {
     private final Font wordFont;
     private final Font boltFont;
     private final Font lockFont;
+    private final Font boonFont;
 
     /** Set by Main each tick so the HUD can show the restart prompt. */
     private boolean restartArmed;
@@ -143,6 +158,7 @@ public class GamePanel extends JPanel {
         this.wordFont = FontManager.wordFont(language, 20, Font.BOLD);
         this.boltFont = FontManager.wordFont(language, 17, Font.BOLD);
         this.lockFont = FontManager.wordFont(language, 26, Font.BOLD);
+        this.boonFont = FontManager.wordFont(language, 18, Font.BOLD);
 
         setPreferredSize(new Dimension(GameConfig.SCREEN_WIDTH, GameConfig.SCREEN_HEIGHT));
         setBackground(COLOR_SKY_TOP);
@@ -241,8 +257,20 @@ public class GamePanel extends JPanel {
                         highlighted.contains(projectile), locked == projectile);
             }
 
+            // Boons are drawn after the monsters and the hero so a drop is never
+            // buried behind the thing that dropped it — it has seconds to be
+            // seen and read, and being occluded costs the player the pickup.
+            for (PowerUp powerUp : state.getPowerUps()) {
+                drawPowerUp(g2, powerUp, typed,
+                        highlighted.contains(powerUp), locked == powerUp);
+            }
+
             drawEffects(g2, VisualEffect.Kind.ARROW);
             drawEffects(g2, VisualEffect.Kind.IMPACT);
+            drawEffects(g2, VisualEffect.Kind.WARD_BREAK);
+            drawEffects(g2, VisualEffect.Kind.BOON_CLAIMED);
+
+            drawBoonFlash(g2);
 
             if (!state.isGameOver()) {
                 drawLockChip(g2);
@@ -772,6 +800,19 @@ public class GamePanel extends JPanel {
             g2.fill(new RoundRectangle2D.Double(x, y, size, size, 6, 6));
             return;
         }
+        if (locked instanceof PowerUp powerUp) {
+            // A boon shows its own glyph, so the chip says what claiming it
+            // would actually get you — not just that something is locked.
+            BufferedImage icon = sprites.powerUpIcon(powerUp.getType());
+            if (icon != null) {
+                g2.drawImage(icon, x, y, size, size, null);
+                return;
+            }
+            drawBoonPlaceholder(g2, powerUp.getType(),
+                    x + size / 2, y + size / 2, size,
+                    Palette.powerUp(powerUp.getType()));
+            return;
+        }
         // Projectiles get the bolt glyph rather than a monster portrait.
         g2.setColor(COLOR_BOLT_EDGE);
         g2.fill(new Ellipse2D.Double(x + size * 0.1, y + size * 0.1,
@@ -843,6 +884,180 @@ public class GamePanel extends JPanel {
         }
     }
 
+    // ---- power-ups ---------------------------------------------------------
+
+    /**
+     * One boon lying on the plaza, with its claim word beneath it.
+     *
+     * <p>Real artwork is used when it exists and a drawn glyph stands in when it
+     * does not — the same arrangement the unfinished enemy roster uses. The
+     * placeholder is not a grey box: it is the boon's palette colour in a shape
+     * that suggests what it does, because a player has about seven seconds to
+     * decide whether the drop is worth breaking off their current word for, and
+     * five identical grey boxes would make that decision impossible.
+     */
+    private void drawPowerUp(Graphics2D g2, PowerUp powerUp, String typed,
+                             boolean isCandidate, boolean isLocked) {
+        double life = powerUp.getProgress();
+        double bob = Math.sin(powerUp.getTicks() * 0.10) * BOON_BOB;
+
+        int cx = (int) Math.round(powerUp.getX());
+        int cy = (int) Math.round(powerUp.getY() + bob);
+        int size = GameConfig.POWERUP_ICON_SIZE;
+
+        float alpha = 1f;
+        if (powerUp.isClaimed()) {
+            // Claimed: swells and fades out over the flourish.
+            double t = powerUp.getClaimTicks()
+                    / (double) Math.max(1, GameConfig.DEFEAT_ANIMATION_TICKS);
+            alpha = (float) Math.max(0, 1.0 - t);
+            size = (int) Math.round(size * (1.0 + t * 0.6));
+        } else if (life > BOON_WARN_AT) {
+            // Running out: blink, so it is obvious it is about to go.
+            double urgency = (life - BOON_WARN_AT) / (1.0 - BOON_WARN_AT);
+            double blink = 0.55 + 0.45 * Math.cos(powerUp.getTicks() * (0.18 + urgency * 0.3));
+            alpha = (float) Math.max(0.25, blink);
+        }
+
+        Graphics2D pg = (Graphics2D) g2.create();
+        try {
+            pg.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
+
+            Color accent = Palette.powerUp(powerUp.getType());
+            drawBoonHalo(pg, cx, cy, size, accent, isLocked || isCandidate);
+
+            BufferedImage icon = sprites.powerUpIcon(powerUp.getType());
+            if (icon != null) {
+                pg.drawImage(icon, cx - size / 2, cy - size / 2, size, size, null);
+            } else {
+                drawBoonPlaceholder(pg, powerUp.getType(), cx, cy, size, accent);
+            }
+
+            if (!powerUp.isClaimed()) {
+                drawWord(pg, powerUp.getWord(), typed, isCandidate,
+                        cx, cy + size / 2 + 24, boonFont);
+            }
+        } finally {
+            pg.dispose();
+        }
+    }
+
+    /** Soft disc behind a boon so it separates from the plaza it is lying on. */
+    private void drawBoonHalo(Graphics2D g2, int cx, int cy, int size,
+                              Color accent, boolean emphasised) {
+        double radius = size * (emphasised ? 0.92 : 0.78);
+
+        Graphics2D hg = (Graphics2D) g2.create();
+        try {
+            hg.setComposite(AlphaComposite.getInstance(
+                    AlphaComposite.SRC_OVER, emphasised ? 0.42f : 0.24f));
+            hg.setColor(accent);
+            hg.fill(new Ellipse2D.Double(cx - radius, cy - radius, radius * 2, radius * 2));
+        } finally {
+            hg.dispose();
+        }
+
+        g2.setColor(Palette.alpha(accent, emphasised ? 0.95 : 0.7));
+        g2.setStroke(new BasicStroke(2.2f));
+        double r = size * 0.5;
+        g2.draw(new Ellipse2D.Double(cx - r, cy - r, r * 2, r * 2));
+    }
+
+    /**
+     * The stand-in glyph for a boon with no artwork yet.
+     *
+     * <p>Each is a silhouette rather than a letter: a stopped dial, a wave, a
+     * burst, a lotus, a coiled ward. Legible at 54 pixels and distinguishable
+     * from each other at a glance, which is the entire job until real icons
+     * arrive.
+     */
+    private void drawBoonPlaceholder(Graphics2D g2, PowerUpType type,
+                                     int cx, int cy, int size, Color accent) {
+        Graphics2D bg = (Graphics2D) g2.create();
+        try {
+            bg.setColor(accent);
+            bg.setStroke(new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+            double r = size * 0.30;
+
+            switch (type) {
+                case TIME_FREEZE -> {
+                    // A dial with its hands stopped.
+                    bg.draw(new Ellipse2D.Double(cx - r, cy - r, r * 2, r * 2));
+                    bg.drawLine(cx, cy, cx, (int) Math.round(cy - r * 0.72));
+                    bg.drawLine(cx, cy, (int) Math.round(cx + r * 0.58), cy);
+                }
+                case SLOW_TIDE -> {
+                    // Three slack waves.
+                    for (int i = -1; i <= 1; i++) {
+                        Path2D wave = new Path2D.Double();
+                        double y = cy + i * r * 0.62;
+                        wave.moveTo(cx - r, y);
+                        wave.curveTo(cx - r * 0.4, y - r * 0.42,
+                                cx + r * 0.4, y + r * 0.42, cx + r, y);
+                        bg.draw(wave);
+                    }
+                }
+                case PURGE -> {
+                    // A radiating burst.
+                    for (int i = 0; i < 8; i++) {
+                        double angle = i * Math.PI / 4;
+                        bg.drawLine(
+                                (int) Math.round(cx + Math.cos(angle) * r * 0.34),
+                                (int) Math.round(cy + Math.sin(angle) * r * 0.34),
+                                (int) Math.round(cx + Math.cos(angle) * r),
+                                (int) Math.round(cy + Math.sin(angle) * r));
+                    }
+                }
+                case MEND -> {
+                    // A lotus bud, borrowed from the life pips it restores.
+                    bg.fill(Ornament.budPath(cx, cy + r, r * 1.5, r * 2.0));
+                }
+                case NAGA_SHIELD -> {
+                    // A ward: shield outline with a coil inside it.
+                    Path2D ward = new Path2D.Double();
+                    ward.moveTo(cx, cy - r);
+                    ward.lineTo(cx + r * 0.86, cy - r * 0.5);
+                    ward.lineTo(cx + r * 0.7, cy + r * 0.5);
+                    ward.lineTo(cx, cy + r);
+                    ward.lineTo(cx - r * 0.7, cy + r * 0.5);
+                    ward.lineTo(cx - r * 0.86, cy - r * 0.5);
+                    ward.closePath();
+                    bg.draw(ward);
+                    bg.setStroke(new BasicStroke(2f));
+                    bg.draw(new Ellipse2D.Double(
+                            cx - r * 0.3, cy - r * 0.3, r * 0.6, r * 0.6));
+                }
+            }
+        } finally {
+            bg.dispose();
+        }
+    }
+
+    /**
+     * A brief wash of the boon's colour across the play area when one fires.
+     *
+     * <p>Kept very faint. A Time Freeze changes nothing visible on its own —
+     * things simply stop — and without a moment of colour the player cannot tell
+     * their boon worked from the game having hung.
+     */
+    private void drawBoonFlash(Graphics2D g2) {
+        double strength = state.getPowerUpState().getFlashStrength();
+        PowerUpType fired = state.getPowerUpState().getLastFired();
+        if (strength <= 0.01 || fired == null) {
+            return;
+        }
+
+        Graphics2D fg = (Graphics2D) g2.create();
+        try {
+            fg.setComposite(AlphaComposite.getInstance(
+                    AlphaComposite.SRC_OVER, (float) (strength * 0.16)));
+            fg.setColor(Palette.powerUp(fired));
+            fg.fillRect(0, 0, GameConfig.SCREEN_WIDTH, GameConfig.SCREEN_HEIGHT);
+        } finally {
+            fg.dispose();
+        }
+    }
+
     // ---- effects -----------------------------------------------------------
 
     private void drawEffects(Graphics2D g2, VisualEffect.Kind kind) {
@@ -854,7 +1069,54 @@ public class GamePanel extends JPanel {
                 case SPAWN_POOF -> drawPoof(g2, effect);
                 case ARROW -> drawArrow(g2, effect);
                 case IMPACT -> drawImpact(g2, effect);
+                case WARD_BREAK -> drawWardBreak(g2, effect);
+                case BOON_CLAIMED -> drawBoonClaimed(g2, effect);
             }
+        }
+    }
+
+    /** Expanding gold ring where a Naga Shield turned something aside. */
+    private void drawWardBreak(Graphics2D g2, VisualEffect effect) {
+        double t = effect.getProgress();
+        float alpha = (float) Math.max(0, 0.9 * (1.0 - t));
+        double radius = 20 + t * 120;
+
+        Graphics2D wg = (Graphics2D) g2.create();
+        try {
+            wg.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
+            wg.setColor(Palette.powerUp(PowerUpType.NAGA_SHIELD));
+            wg.setStroke(new BasicStroke((float) (5 * (1 - t) + 1)));
+            wg.draw(new Ellipse2D.Double(
+                    effect.getX() - radius, effect.getY() - radius, radius * 2, radius * 2));
+            // A second, tighter ring so it reads as a shell rather than a ripple.
+            double inner = radius * 0.62;
+            wg.setStroke(new BasicStroke(2f));
+            wg.draw(new Ellipse2D.Double(
+                    effect.getX() - inner, effect.getY() - inner, inner * 2, inner * 2));
+        } finally {
+            wg.dispose();
+        }
+    }
+
+    /** Rising sparks where a boon was claimed. */
+    private void drawBoonClaimed(Graphics2D g2, VisualEffect effect) {
+        double t = effect.getProgress();
+        float alpha = (float) Math.max(0, 1.0 - t);
+
+        Graphics2D cg = (Graphics2D) g2.create();
+        try {
+            cg.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
+            cg.setColor(Palette.BOON);
+            for (int i = 0; i < 7; i++) {
+                double angle = i * (Math.PI * 2 / 7) + t * 1.4;
+                double spread = 16 + t * 46;
+                double px = effect.getX() + Math.cos(angle) * spread;
+                double py = effect.getY() + Math.sin(angle) * spread * 0.6 - t * 26;
+                double r = 3.4 * (1 - t) + 1;
+                cg.fill(new Ellipse2D.Double(px - r, py - r, r * 2, r * 2));
+            }
+        } finally {
+            cg.dispose();
         }
     }
 

@@ -2,6 +2,7 @@ package com.guardiansofangkor.i18n;
 
 import com.guardiansofangkor.entities.EnemyType;
 import com.guardiansofangkor.util.GraphemeCounter;
+import com.guardiansofangkor.util.Json;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -10,69 +11,156 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 
 /**
- * Supplies words for spawning enemies, bucketed by difficulty tier.
+ * Supplies words for spawning enemies, filtered by difficulty and by how far
+ * into the run the player is.
  *
- * <p>Loads {@code /words/words_en.json} or {@code /words/words_km.json} from the
- * classpath when present. Those files do not exist yet, so the bank falls back
- * to a built-in English list rather than crashing — per dev brief Section 5.4,
- * every I/O boundary fails gracefully to a default. Dropping the JSON files into
- * {@code src/main/resources/words/} later needs no code change.
+ * <p>All vocabulary lives in {@code /words/words_en.json} and
+ * {@code /words/words_km.json} on the classpath — this class only loads and
+ * selects, it never stores content. Expanding or re-theming the word bank is a
+ * JSON edit, not a code change. If a resource is missing, unreadable, or empty,
+ * the bank falls back to a small built-in list rather than crashing.
  *
- * <p>Expected JSON shape (deliberately simple, no parser dependency needed):
+ * <p>Expected JSON shape:
  * <pre>
- * { "language": "en", "words": ["temple", "stone", "guardian"] }
+ * {
+ *   "language": "en",
+ *   "pools":     { "tiny": [...], "short": [...], "medium": [...],
+ *                  "long": [...], "epic": [...] },
+ *   "bossPools": { "novice": [...], "adept": [...],
+ *                  "master": [...], "legend": [...] },
+ *   "projectile": [...],
+ *   "difficulties": {
+ *     "easy": { "bands": [
+ *       { "throughLevel": 5,  "pools": ["tiny","short"],  "boss": "novice" },
+ *       ...
+ *     ]},
+ *     ...
+ *   }
+ * }
  * </pre>
  *
- * <p>Tier bucketing counts <em>grapheme clusters</em>, not Java chars, so Khmer
- * words land in the right tier (Section 5.1).
+ * <p>The split between {@code pools} and {@code difficulties} is the important
+ * part. Pools hold the words once; the difficulties table says which pools a
+ * given tier may draw from at a given level. So making Easy gentler, or stopping
+ * level one handing out ten-letter words, is a change to the table — the
+ * vocabulary itself never needs touching, and no tier can accidentally be
+ * retuned while editing another.
+ *
+ * <p>Bosses have their own ranked pools ({@code novice} → {@code legend}) rather
+ * than sharing the regular tiers, so a boss word can never turn up on an
+ * ordinary enemy first, and so a boss fight scales with the tier independently
+ * of what the rank and file are typing.
+ *
+ * <p>Length bucketing counts <em>grapheme clusters</em>, not Java chars, so
+ * Khmer words land in the right pool.
  */
 public class WordBank {
 
-    /** Used whenever the word list resource is missing or unreadable. */
-    private static final List<String> FALLBACK_WORDS = List.of(
-            // short (Ahp / swarm) — 100 words
-            "bone", "gold", "iron", "leaf", "palm", "reed", "root", "rope", "rust", "salt",
-            "sand", "silk", "silt", "soil", "star", "wind", "rain", "fire", "frog", "toad",
-            "newt", "worm", "wolf", "bear", "deer", "hawk", "wren", "lark", "dove", "hare",
-            "mole", "rice", "corn", "bean", "herb", "seed", "husk", "jade", "ruby", "coal",
-            "clay", "rock", "cave", "pond", "lake", "peak", "hill", "dale", "glen", "path",
-            "road", "gate", "wall", "roof", "door", "lamp", "monk", "idol", "lore", "rune",
-            "omen", "doom", "pyre", "vale", "tomb", "sage", "moss", "vine", "bark", "bird",
-            "crow", "wasp", "moth", "oak", "elm", "fern", "ice", "fog", "mud", "webs",
-            "cat", "pig", "cow", "hen", "egg", "ink", "rat", "orb", "urn", "key","sun",
-            "sky", "owl", "ash", "mist", "moon", "fang", "claw", "dusk", "veil",
+    // ---- fallback content --------------------------------------------------
+    // Small, hand-picked safety net used only when the JSON resource for a
+    // language is missing, unreadable, or empty. The real word bank lives in
+    // JSON; this is deliberately compact rather than a duplicate of it.
 
-            // medium (Beisach / Stec Kantoab) — 70 words
+    private static final List<String> FALLBACK_TINY = List.of(
+            "sun", "sky", "owl", "ash", "orb", "urn", "axe", "bow", "fog", "ice",
+            "mud", "oak", "elm", "gem", "pit", "map", "imp", "hex", "dew", "bog");
 
-            "altar", "amber", "ashes", "blade", "chant", "chime", "cloak", "crown", "crypt", "demon",
-            "draft", "dream", "ember", "faith", "feast", "flare", "flock", "frost", "glyph", "grave",
-            "groan", "grove", "haunt", "karma", "magic", "mango", "marsh", "mirth", "nectar", "omens",
-            "orbit", "plume", "prayer", "quest", "raven", "realm", "relic", "ritual", "sacred", "scroll",
-            "shrine", "sigil", "skull", "smoke", "sound", "spell", "spore", "stalk", "storm", "swamp",
-            "sword", "totem", "trance", "valor", "venom", "vigil", "wisdom", "wrath","stone", "spire",
-            "shade", "curse", "flame", "night", "ghost", "wraith", "temple", "shadow", "spirit", "hollow",
+    private static final List<String> FALLBACK_SHORT = List.of(
+            "mist", "moon", "fang", "claw", "dusk", "veil", "bone", "gold", "iron",
+            "leaf", "palm", "reed", "root", "rope", "rust", "salt", "sand", "silk",
+            "stone", "spire", "shade", "curse", "flame", "night", "ghost", "altar");
 
-            // longer (Yeak / Naga) — 40 words
-            "amethyst", "ancestor", "blossoms", "cinnamon", "crescent", "darkness", "doorways", "dreamers",
-            "elephant", "festival", "footpath", "fountain", "fragment", "gargoyle", "gateways", "graveyard",
-            "hallways", "harvests", "highland", "ironwood", "jungles", "lakeside", "labyrinth", "marigold",
-            "medicine", "midnight", "monolith", "mountains", "mudbrick", "mythical", "nightfall", "obelisks",
-            "outpost", "pagodas",  "lantern", "monsoon", "obsidian", "sandstone", "moonlight", "guardian",
+    private static final List<String> FALLBACK_MEDIUM = List.of(
+            "temple", "shadow", "spirit", "hollow", "wraith", "banner", "beacon",
+            "cinder", "ritual", "shrine", "statue", "thunder", "lantern", "monsoon");
 
-            // long (Pret / boss) — 30 words
-            "monastery", "catacombs", "excavation", "expedition", "foundation", "hieroglyph",
-            "inheritance", "inscription", "lamentation", "malediction", "manuscript", "mausoleum",
-            "necropolis", "overgrowth", "pilgrimage", "possession", "premonition", "resurrection",
-            "sarcophagus", "stronghold", "subterranean", "wilderness", "monument", "sanctuary",
-            "incantation", "reliquary", "procession","labyrinthine", "invocation", "apparition");
+    private static final List<String> FALLBACK_LONG = List.of(
+            "obsidian", "sandstone", "moonlight", "guardian", "ancestor", "crescent",
+            "darkness", "festival", "monument", "sanctuary", "reliquary");
+
+    private static final List<String> FALLBACK_EPIC = List.of(
+            "procession", "battlements", "inheritance", "restoration", "remembrance");
+
+    /** Offline builds still get reserved words for elite fights, ranked as usual. */
+    private static final Map<String, List<String>> FALLBACK_BOSS_POOLS = Map.of(
+            "novice", List.of("curse", "demon", "ghoul", "shade", "wraith", "terror"),
+            "adept", List.of("apparition", "invocation", "necropolis", "cataclysm"),
+            "master", List.of("incantation", "malediction", "abomination"),
+            "legend", List.of("transmigration", "transfiguration", "disintegration"));
+
+    private static final List<String> FALLBACK_PROJECTILE =
+            List.of("ka", "om", "ra", "ox", "urn", "orb", "axe", "sun", "ivy", "hex");
+
+    /**
+     * Band tables for the built-in fallback, mirroring the real file's shape so
+     * a missing resource still produces gentle early levels rather than a flat
+     * pool where level one can serve an eleven-letter word.
+     */
+    private static final Map<String, List<Band>> FALLBACK_BANDS = Map.of(
+            "easy", List.of(
+                    new Band(5, List.of("tiny", "short"), "novice"),
+                    new Band(10, List.of("tiny", "short", "medium"), "novice"),
+                    new Band(15, List.of("short", "medium"), "adept")),
+            "medium", List.of(
+                    new Band(4, List.of("tiny", "short", "medium"), "novice"),
+                    new Band(9, List.of("short", "medium", "long"), "adept"),
+                    new Band(15, List.of("short", "medium", "long"), "master")),
+            "hard", List.of(
+                    new Band(4, List.of("short", "medium", "long"), "adept"),
+                    new Band(9, List.of("short", "medium", "long", "epic"), "master"),
+                    new Band(15, List.of("medium", "long", "epic"), "legend")),
+            "endless", List.of(
+                    new Band(4, List.of("tiny", "short", "medium"), "novice"),
+                    new Band(9, List.of("short", "medium", "long"), "adept"),
+                    new Band(19, List.of("short", "medium", "long", "epic"), "master"),
+                    new Band(99, List.of("medium", "long", "epic"), "legend")));
+
+    private static final WordData FALLBACK = new WordData(
+            orderedMap(
+                    "tiny", FALLBACK_TINY,
+                    "short", FALLBACK_SHORT,
+                    "medium", FALLBACK_MEDIUM,
+                    "long", FALLBACK_LONG,
+                    "epic", FALLBACK_EPIC),
+            new LinkedHashMap<>(FALLBACK_BOSS_POOLS),
+            FALLBACK_PROJECTILE,
+            new LinkedHashMap<>(FALLBACK_BANDS));
+
+    // ---- repeat-cap tuning --------------------------------------------------
+
+    /** Words at or under this length count as short/medium for repeat purposes. */
+    private static final int MEDIUM_MAX_LEN = 6;
+    /** Short & medium words may appear twice before being retired for the run. */
+    private static final int SHORT_MEDIUM_MAX_REPEATS = 2;
+    /** Longer/long-tier words only appear once — rarer enemies, rarer words. */
+    private static final int LONGER_LONG_MAX_REPEATS = 1;
+
+    /** Ranked worst-to-best, so a missing boss pool can widen to a nearby one. */
+    private static final List<String> BOSS_RANKS =
+            List.of("novice", "adept", "master", "legend");
 
     private final Language language;
-    private final List<String> words;
     private final Random random;
+    private final boolean usingFallback;
+
+    private final Map<String, List<String>> pools;
+    private final Map<String, List<String>> bossPools;
+    private final List<String> projectileWords;
+    private final Map<String, List<Band>> bands;
+
+    /** Union of every regular pool — the unrestricted spawn vocabulary. */
+    private final List<String> words;
+
+    /** How many times each word has been handed out so far this run. */
+    private final Map<String, Integer> usageCount = new HashMap<>();
 
     public WordBank(Language language) {
         this(language, new Random());
@@ -82,131 +170,491 @@ public class WordBank {
     public WordBank(Language language, Random random) {
         this.language = language == null ? Language.ENGLISH : language;
         this.random = random == null ? new Random() : random;
-        this.words = loadWords(this.language);
+
+        WordData data = loadWords(this.language);
+        this.usingFallback = data == FALLBACK;
+        this.pools = data.pools();
+        this.bossPools = data.bossPools();
+        this.projectileWords = data.projectileWords();
+        this.bands = data.bands();
+
+        // Deduped so a word listed in two pools cannot be twice as likely.
+        LinkedHashSet<String> combined = new LinkedHashSet<>();
+        for (List<String> pool : pools.values()) {
+            combined.addAll(pool);
+        }
+        this.words = List.copyOf(combined);
+    }
+
+    // ---- policy ------------------------------------------------------------
+
+    /**
+     * Resolves what a given tier may use at a given level.
+     *
+     * <p>Bands are matched in file order by {@code throughLevel}; the last band
+     * also covers everything past it, so Endless never runs off the end of its
+     * own table. An unknown tier resolves to {@link WordPolicy#UNRESTRICTED}
+     * rather than to nothing, because a typo in the table should widen the
+     * vocabulary, not empty it.
+     *
+     * @param tierKey lower-case difficulty name, e.g. {@code "easy"}
+     */
+    public WordPolicy policyFor(String tierKey, int level) {
+        if (tierKey == null) {
+            return WordPolicy.UNRESTRICTED;
+        }
+        List<Band> table = bands.get(tierKey.toLowerCase(java.util.Locale.ROOT));
+        if (table == null || table.isEmpty()) {
+            return WordPolicy.UNRESTRICTED;
+        }
+        int effectiveLevel = Math.max(1, level);
+        for (Band band : table) {
+            if (effectiveLevel <= band.throughLevel()) {
+                return new WordPolicy(tierKey, effectiveLevel, band.pools(), band.boss());
+            }
+        }
+        Band last = table.get(table.size() - 1);
+        return new WordPolicy(tierKey, effectiveLevel, last.pools(), last.boss());
+    }
+
+    /** Every word a policy permits, in pool order. Never empty. */
+    public List<String> vocabularyFor(WordPolicy policy) {
+        if (policy == null || !policy.restrictsPools()) {
+            return words;
+        }
+        LinkedHashSet<String> allowed = new LinkedHashSet<>();
+        for (String poolName : policy.getPoolNames()) {
+            allowed.addAll(pools.getOrDefault(poolName, List.of()));
+        }
+        return allowed.isEmpty() ? words : List.copyOf(allowed);
+    }
+
+    // ---- regular enemy words -----------------------------------------------
+
+    /** A word sized for the given enemy tier, drawing on the whole bank. */
+    public String wordFor(EnemyType type, List<String> exclude) {
+        return wordFor(type, exclude, WordPolicy.UNRESTRICTED, 0, 0);
+    }
+
+    /** A word sized for the enemy tier with the length window shifted. */
+    public String wordFor(EnemyType type, List<String> exclude, int minShift, int maxShift) {
+        return wordFor(type, exclude, WordPolicy.UNRESTRICTED, minShift, maxShift);
+    }
+
+    /** A word for the given enemy tier, restricted to what {@code policy} allows. */
+    public String wordFor(EnemyType type, List<String> exclude, WordPolicy policy) {
+        return wordFor(type, exclude, policy, 0, 0);
     }
 
     /**
-     * A word sized for the given enemy tier.
+     * A word for the given enemy tier, restricted to what {@code policy} allows
+     * and with the type's length window shifted by the difficulty.
      *
-     * <p>Falls back progressively rather than failing: if no word matches the
-     * tier exactly, the closest available length is used, and if the bank is
-     * somehow empty a hardcoded word is returned. A missing word must never stop
-     * a wave from spawning.
+     * <p>Selection degrades in steps rather than ever failing: the exact window
+     * inside the band, then the band ignoring repeat caps, then the
+     * <em>closest</em> lengths the band has, then the whole bank. A wave must
+     * never stall for want of a word.
+     *
+     * <p>The third step is what makes a heavy enemy work on an early level. A
+     * Pret asks for eight to twelve letters; Easy's opening band only holds
+     * words up to five. Rather than reaching outside the band — which is exactly
+     * the "too hard, too early" problem — it takes the longest words the band
+     * does have, so the Pret is still visibly the hardest thing on screen
+     * without being unfair.
      *
      * @param exclude words already in play, to avoid two enemies sharing a word
      */
-    public String wordFor(EnemyType type, List<String> exclude) {
-        return wordFor(type, exclude, 0, 0);
-    }
-
-    /**
-     * A word sized for the given enemy tier, with the length window shifted.
-     *
-     * <p>The shifts are how difficulty tiers change the typing load without
-     * needing separate word lists — Easy pulls the maximum down a character,
-     * a boss pushes it up. Both bounds are clamped so a large negative shift
-     * cannot invert the window or ask for zero-length words.
-     *
-     * @param minShift adjustment to the type's minimum length
-     * @param maxShift adjustment to the type's maximum length
-     */
-    public String wordFor(EnemyType type, List<String> exclude,
+    public String wordFor(EnemyType type, List<String> exclude, WordPolicy policy,
                           int minShift, int maxShift) {
+        if (type == null) {
+            return anyWord(exclude);
+        }
         int min = Math.max(2, type.getMinWordLength() + minShift);
         int max = Math.max(min, type.getMaxWordLength() + maxShift);
+        int maxRepeats = maxRepeatsFor(type);
 
-        List<String> inTier = new ArrayList<>();
-        for (String word : words) {
+        List<String> allowed = vocabularyFor(policy);
+
+        String chosen = pickInWindow(allowed, exclude, min, max, maxRepeats);
+        if (chosen == null) {
+            chosen = pickInWindow(allowed, exclude, min, max, Integer.MAX_VALUE);
+        }
+        if (chosen == null) {
+            chosen = pickClosestToWindow(allowed, exclude, min, max);
+        }
+        if (chosen == null && allowed != words) {
+            chosen = pickClosestToWindow(words, exclude, min, max);
+        }
+        if (chosen == null) {
+            chosen = anyWord(exclude);
+        }
+        recordUsage(chosen);
+        return chosen;
+    }
+
+    /** A random allowed word whose length falls inside the window, or null. */
+    private String pickInWindow(List<String> pool, List<String> exclude,
+                                int min, int max, int maxRepeats) {
+        List<String> candidates = new ArrayList<>();
+        for (String word : pool) {
             if (GraphemeCounter.isWithin(word, min, max)
-                    && (exclude == null || !exclude.contains(word))) {
-                inTier.add(word);
+                    && (exclude == null || !exclude.contains(word))
+                    && usageCount.getOrDefault(word, 0) < maxRepeats) {
+                candidates.add(word);
             }
         }
-        if (!inTier.isEmpty()) {
-            return inTier.get(random.nextInt(inTier.size()));
-        }
-
-        // Nothing in tier — widen to anything unused.
-        List<String> unused = new ArrayList<>();
-        for (String word : words) {
-            if (exclude == null || !exclude.contains(word)) {
-                unused.add(word);
-            }
-        }
-        if (!unused.isEmpty()) {
-            return unused.get(random.nextInt(unused.size()));
-        }
-        return words.isEmpty() ? "temple" : words.get(random.nextInt(words.size()));
+        return candidates.isEmpty() ? null : candidates.get(random.nextInt(candidates.size()));
     }
 
     /**
-     * A very short word for a thrown projectile (dev brief Section 5.2).
+     * The allowed words whose length sits nearest the window, picked at random
+     * among equals. Used when the band simply has nothing that long (or short).
+     */
+    private String pickClosestToWindow(List<String> pool, List<String> exclude,
+                                       int min, int max) {
+        List<String> best = new ArrayList<>();
+        int bestDistance = Integer.MAX_VALUE;
+        for (String word : pool) {
+            if (exclude != null && exclude.contains(word)) {
+                continue;
+            }
+            int length = GraphemeCounter.count(word);
+            int distance = length < min ? min - length : Math.max(0, length - max);
+            if (distance < bestDistance) {
+                bestDistance = distance;
+                best.clear();
+                best.add(word);
+            } else if (distance == bestDistance) {
+                best.add(word);
+            }
+        }
+        return best.isEmpty() ? null : best.get(random.nextInt(best.size()));
+    }
+
+    /** Absolute last resort — a reused word still beats no word at all. */
+    private String anyWord(List<String> exclude) {
+        List<String> candidates = new ArrayList<>();
+        for (String word : words) {
+            if (exclude == null || !exclude.contains(word)) {
+                candidates.add(word);
+            }
+        }
+        if (candidates.isEmpty()) {
+            candidates = words;
+        }
+        return candidates.isEmpty() ? "temple" : candidates.get(random.nextInt(candidates.size()));
+    }
+
+    /** Short/medium tiers tolerate 2 repeats; longer/long tiers only 1. */
+    private int maxRepeatsFor(EnemyType type) {
+        return type.getMaxWordLength() <= MEDIUM_MAX_LEN
+                ? SHORT_MEDIUM_MAX_REPEATS
+                : LONGER_LONG_MAX_REPEATS;
+    }
+
+    private void recordUsage(String word) {
+        usageCount.merge(word, 1, Integer::sum);
+    }
+
+    // ---- boss words --------------------------------------------------------
+
+    /** A mini-boss word from the whole reserved pool. */
+    public String bossWord(List<String> exclude) {
+        return bossWord(exclude, WordPolicy.UNRESTRICTED);
+    }
+
+    /**
+     * A word for a mini-boss, drawn from the rank {@code policy} names rather
+     * than from the regular tiers.
      *
-     * <p>Kept to 2-3 characters deliberately: projectiles have a short time
-     * budget, so a long word here would be impossible to intercept rather than
-     * merely tense.
+     * <p>Ranks climb with the difficulty and with the level band, which is what
+     * makes an Easy Naga and a Hard Naga genuinely different fights even though
+     * they are the same monster. Repeats are capped as tightly as the long
+     * tiers; when a rank is exhausted the search widens to the neighbouring
+     * ranks and finally to the regular vocabulary, rather than stalling.
+     */
+    public String bossWord(List<String> exclude, WordPolicy policy) {
+        for (List<String> pool : bossPoolsFor(policy)) {
+            String chosen = pickUnderCap(pool, exclude, LONGER_LONG_MAX_REPEATS);
+            if (chosen != null) {
+                recordUsage(chosen);
+                return chosen;
+            }
+        }
+        String chosen = anyWord(exclude);
+        recordUsage(chosen);
+        return chosen;
+    }
+
+    /** A final-boss word from the whole reserved pool. */
+    public String finalBossWord(List<String> exclude) {
+        return finalBossWord(exclude, WordPolicy.UNRESTRICTED);
+    }
+
+    /**
+     * A word for the final boss — the longest never-used word in this tier's
+     * boss rank, so the climactic fight is both the hardest typing in the run
+     * and something the player has not already typed.
+     *
+     * <p>Falls back to any never-used word, then to whichever has been used
+     * least, so the fight always gets a word.
+     */
+    public String finalBossWord(List<String> exclude, WordPolicy policy) {
+        for (List<String> pool : bossPoolsFor(policy)) {
+            String fresh = pickNeverUsed(pool, exclude);
+            if (fresh != null) {
+                recordUsage(fresh);
+                return fresh;
+            }
+        }
+
+        String fromAnywhere = pickNeverUsed(words, exclude);
+        if (fromAnywhere != null) {
+            recordUsage(fromAnywhere);
+            return fromAnywhere;
+        }
+
+        for (List<String> pool : bossPoolsFor(policy)) {
+            String leastUsed = pickLeastUsed(pool, exclude);
+            if (leastUsed != null) {
+                recordUsage(leastUsed);
+                return leastUsed;
+            }
+        }
+        String leastUsed = pickLeastUsed(words, exclude);
+        if (leastUsed != null) {
+            recordUsage(leastUsed);
+            return leastUsed;
+        }
+        return "temple";
+    }
+
+    /**
+     * The boss pools to try, best match first.
+     *
+     * <p>The policy's own rank leads; the remaining ranks follow in descending
+     * order of prestige, so exhausting {@code master} widens to {@code legend}
+     * and then down, never to something that would read as an anticlimax before
+     * it has to.
+     */
+    private List<List<String>> bossPoolsFor(WordPolicy policy) {
+        List<List<String>> ordered = new ArrayList<>();
+        String preferred = policy == null ? "" : policy.getBossPoolName();
+
+        List<String> exact = bossPools.get(preferred);
+        if (exact != null && !exact.isEmpty()) {
+            ordered.add(exact);
+        }
+        for (int i = BOSS_RANKS.size() - 1; i >= 0; i--) {
+            String rank = BOSS_RANKS.get(i);
+            if (rank.equals(preferred)) {
+                continue;
+            }
+            List<String> pool = bossPools.get(rank);
+            if (pool != null && !pool.isEmpty()) {
+                ordered.add(pool);
+            }
+        }
+        // Any rank the file invented that is not in BOSS_RANKS still gets a turn.
+        for (Map.Entry<String, List<String>> entry : bossPools.entrySet()) {
+            if (!BOSS_RANKS.contains(entry.getKey())
+                    && !entry.getKey().equals(preferred)
+                    && !entry.getValue().isEmpty()) {
+                ordered.add(entry.getValue());
+            }
+        }
+        return ordered;
+    }
+
+    private String pickUnderCap(List<String> pool, List<String> exclude, int maxRepeats) {
+        List<String> candidates = new ArrayList<>();
+        for (String word : pool) {
+            if ((exclude == null || !exclude.contains(word))
+                    && usageCount.getOrDefault(word, 0) < maxRepeats) {
+                candidates.add(word);
+            }
+        }
+        return candidates.isEmpty() ? null : candidates.get(random.nextInt(candidates.size()));
+    }
+
+    /** The longest never-used word in {@code pool}, or {@code null} if none. */
+    private String pickNeverUsed(List<String> pool, List<String> exclude) {
+        List<String> candidates = new ArrayList<>();
+        for (String word : pool) {
+            if (usageCount.getOrDefault(word, 0) == 0
+                    && (exclude == null || !exclude.contains(word))) {
+                candidates.add(word);
+            }
+        }
+        if (candidates.isEmpty()) {
+            return null;
+        }
+        candidates.sort((a, b) -> GraphemeCounter.count(b) - GraphemeCounter.count(a));
+        return candidates.get(0);
+    }
+
+    /** The least-used word in {@code pool}, or {@code null} if none available. */
+    private String pickLeastUsed(List<String> pool, List<String> exclude) {
+        String best = null;
+        int lowest = Integer.MAX_VALUE;
+        for (String word : pool) {
+            if (exclude != null && exclude.contains(word)) {
+                continue;
+            }
+            int count = usageCount.getOrDefault(word, 0);
+            if (count < lowest) {
+                lowest = count;
+                best = word;
+            }
+        }
+        return best;
+    }
+
+    /** Clears repeat-tracking — call at the start of a new run/level. */
+    public void resetUsage() {
+        usageCount.clear();
+    }
+
+    // ---- projectiles -------------------------------------------------------
+
+    /**
+     * A very short word for a thrown projectile.
+     *
+     * <p>Drawn from the curated {@code projectile} pool — words picked for
+     * visual distinctness under pressure, not just length. Falls back to any 2-3
+     * character word from the main bank, then to a fixed emergency set, so an
+     * attack never fails to spawn for lack of a short word. Repeats are
+     * intentionally uncapped: projectiles are thrown constantly and read for
+     * under a second, so tracking their repeats adds bookkeeping with no payoff.
      */
     public String projectileWord(List<String> exclude) {
         List<String> candidates = new ArrayList<>();
-        for (String word : words) {
-            int length = GraphemeCounter.count(word);
-            if (length >= 2 && length <= 3
-                    && (exclude == null || !exclude.contains(word))) {
+        for (String word : projectileWords) {
+            if (exclude == null || !exclude.contains(word)) {
                 candidates.add(word);
             }
         }
         if (!candidates.isEmpty()) {
             return candidates.get(random.nextInt(candidates.size()));
         }
-        // The loaded list may have no words this short — fall back to a fixed
-        // set rather than letting an attack fail to spawn.
-        List<String> emergency = new ArrayList<>(
-                List.of("ka", "om", "ra", "sok", "vy", "nak", "sar"));
+
+        List<String> fallbackCandidates = new ArrayList<>();
+        for (String word : words) {
+            int length = GraphemeCounter.count(word);
+            if (length >= 2 && length <= 3
+                    && (exclude == null || !exclude.contains(word))) {
+                fallbackCandidates.add(word);
+            }
+        }
+        if (!fallbackCandidates.isEmpty()) {
+            return fallbackCandidates.get(random.nextInt(fallbackCandidates.size()));
+        }
+
+        List<String> emergency = new ArrayList<>(FALLBACK_PROJECTILE);
         if (exclude != null) {
             emergency.removeAll(exclude);
         }
         return emergency.isEmpty() ? "ka" : emergency.get(random.nextInt(emergency.size()));
     }
 
+    /**
+     * A short word to label a power-up pickup.
+     *
+     * <p>Shares the projectile pool on purpose: both are things the player has
+     * a few seconds to grab, and both need to be legible at a glance beside
+     * whatever longer word they are already mid-way through.
+     */
+    public String pickupWord(List<String> exclude) {
+        return projectileWord(exclude);
+    }
+
+    // ---- accessors ---------------------------------------------------------
+
     public Language getLanguage() {
         return language;
     }
 
-    /** Immutable view of every loaded word. */
+    /** Immutable view of every regular-tier word, across all pools. */
     public List<String> getWords() {
         return Collections.unmodifiableList(words);
+    }
+
+    /** Immutable view of one named pool, e.g. {@code "short"}. Never null. */
+    public List<String> getPool(String name) {
+        return Collections.unmodifiableList(pools.getOrDefault(name, List.of()));
+    }
+
+    /** Immutable view of one boss rank, e.g. {@code "master"}. Never null. */
+    public List<String> getBossPool(String rank) {
+        return Collections.unmodifiableList(bossPools.getOrDefault(rank, List.of()));
+    }
+
+    /** Names of every regular pool, in file order. */
+    public List<String> getPoolNames() {
+        return List.copyOf(pools.keySet());
     }
 
     public int size() {
         return words.size();
     }
 
-    /** True when the JSON resource was missing and the built-in list is in use. */
+    /** True when the JSON resource was missing/empty and the built-in list is in use. */
     public boolean isUsingFallback() {
-        return words == FALLBACK_WORDS;
+        return usingFallback;
     }
 
-    // ---- loading ---------------------------------------------------------
+    // ---- loading -----------------------------------------------------------
 
-    private static List<String> loadWords(Language language) {
+    /** One row of a tier's tuning table: "up to this level, use these pools". */
+    record Band(int throughLevel, List<String> pools, String boss) {
+        Band {
+            pools = pools == null ? List.of() : List.copyOf(pools);
+            boss = boss == null ? "" : boss;
+        }
+    }
+
+    /** Plain holder for a language's loaded (or fallback) content. */
+    private record WordData(Map<String, List<String>> pools,
+                            Map<String, List<String>> bossPools,
+                            List<String> projectileWords,
+                            Map<String, List<Band>> bands) {
+
+        /** True when no regular pool loaded anything usable. */
+        boolean isEmpty() {
+            for (List<String> pool : pools.values()) {
+                if (!pool.isEmpty()) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
+
+    private static WordData loadWords(Language language) {
         try (InputStream in = WordBank.class.getResourceAsStream(language.getWordListPath())) {
             if (in == null) {
                 System.out.println("[WordBank] " + language.getWordListPath()
                         + " not found — using built-in fallback word list.");
-                return FALLBACK_WORDS;
+                return FALLBACK;
             }
-            String json = readAll(in);
-            List<String> parsed = parseWordArray(json);
+            Object root = Json.parse(readAll(in));
+            if (!(root instanceof Map)) {
+                System.err.println("[WordBank] " + language.getWordListPath()
+                        + " is not a JSON object — using built-in fallback.");
+                return FALLBACK;
+            }
+            @SuppressWarnings("unchecked")
+            WordData parsed = parseWordData((Map<String, Object>) root);
             if (parsed.isEmpty()) {
                 System.err.println("[WordBank] " + language.getWordListPath()
                         + " contained no words — using built-in fallback.");
-                return FALLBACK_WORDS;
+                return FALLBACK;
             }
-            return List.copyOf(parsed);
+            return parsed;
         } catch (IOException | RuntimeException e) {
             System.err.println("[WordBank] Failed to read " + language.getWordListPath()
                     + " (" + e.getMessage() + ") — using built-in fallback.");
-            return FALLBACK_WORDS;
+            return FALLBACK;
         }
     }
 
@@ -222,80 +670,50 @@ public class WordBank {
         return sb.toString();
     }
 
-    /**
-     * Extracts the string entries of the {@code "words"} array.
-     *
-     * <p>Hand-rolled rather than pulling in a JSON dependency, because the shape
-     * is fixed and tiny. It scans for the {@code "words"} key, then reads quoted
-     * strings until the closing bracket, honouring backslash escapes so
-     * Khmer codepoint escapes (backslash-u followed by four hex digits) survive.
-     */
-    static List<String> parseWordArray(String json) {
-        List<String> result = new ArrayList<>();
-        if (json == null) {
-            return result;
-        }
-        int keyIndex = json.indexOf("\"words\"");
-        if (keyIndex < 0) {
-            return result;
-        }
-        int open = json.indexOf('[', keyIndex);
-        int close = json.indexOf(']', open + 1);
-        if (open < 0 || close < 0) {
-            return result;
+    private static WordData parseWordData(Map<String, Object> root) {
+        Map<String, List<String>> pools = readStringLists(Json.objectAt(root, "pools"));
+        Map<String, List<String>> bossPools = readStringLists(Json.objectAt(root, "bossPools"));
+        List<String> projectile = Json.stringsAt(root, "projectile");
+
+        Map<String, List<Band>> bands = new LinkedHashMap<>();
+        Map<String, Object> difficulties = Json.objectAt(root, "difficulties");
+        for (String tierKey : difficulties.keySet()) {
+            Map<String, Object> tier = Json.objectAt(difficulties, tierKey);
+            List<Band> table = new ArrayList<>();
+            for (Map<String, Object> row : Json.objectsAt(tier, "bands")) {
+                table.add(new Band(
+                        Json.intAt(row, "throughLevel", Integer.MAX_VALUE),
+                        Json.stringsAt(row, "pools"),
+                        Json.stringAt(row, "boss", "")));
+            }
+            if (!table.isEmpty()) {
+                bands.put(tierKey.toLowerCase(java.util.Locale.ROOT), table);
+            }
         }
 
-        String body = json.substring(open + 1, close);
-        StringBuilder current = new StringBuilder();
-        boolean inString = false;
-        boolean escaped = false;
+        return new WordData(pools, bossPools,
+                projectile.isEmpty() ? FALLBACK_PROJECTILE : projectile, bands);
+    }
 
-        for (int i = 0; i < body.length(); i++) {
-            char c = body.charAt(i);
-            if (escaped) {
-                current.append(unescape(c, body, i));
-                if (c == 'u') {
-                    i += 4;
-                }
-                escaped = false;
-            } else if (c == '\\') {
-                escaped = true;
-            } else if (c == '"') {
-                if (inString) {
-                    String word = current.toString().trim();
-                    if (!word.isEmpty()) {
-                        result.add(word);
-                    }
-                    current.setLength(0);
-                }
-                inString = !inString;
-            } else if (inString) {
-                current.append(c);
+    /** Reads every {@code "name": ["a","b"]} entry of an object into a map. */
+    private static Map<String, List<String>> readStringLists(Map<String, Object> source) {
+        Map<String, List<String>> result = new LinkedHashMap<>();
+        for (String key : source.keySet()) {
+            List<String> values = Json.stringsAt(source, key);
+            if (!values.isEmpty()) {
+                result.put(key, values);
             }
         }
         return result;
     }
 
-    private static String unescape(char c, String body, int index) {
-        switch (c) {
-            case 'n':
-                return "\n";
-            case 't':
-                return "\t";
-            case 'r':
-                return "\r";
-            case 'u':
-                if (index + 5 <= body.length()) {
-                    try {
-                        return String.valueOf(
-                                (char) Integer.parseInt(body.substring(index + 1, index + 5), 16));
-                    } catch (NumberFormatException e) {
-                        return "";
-                    }
-                }
-                return "";
-            default:
-                return String.valueOf(c);
+    private static Map<String, List<String>> orderedMap(Object... pairs) {
+        Map<String, List<String>> map = new LinkedHashMap<>();
+        for (int i = 0; i + 1 < pairs.length; i += 2) {
+            @SuppressWarnings("unchecked")
+            List<String> value = (List<String>) pairs[i + 1];
+            map.put((String) pairs[i], value);
         }
+        return map;
     }
 }

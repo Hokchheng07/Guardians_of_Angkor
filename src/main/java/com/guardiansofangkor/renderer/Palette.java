@@ -1,6 +1,10 @@
 package com.guardiansofangkor.renderer;
 
+import com.guardiansofangkor.entities.PowerUpType;
+
 import java.awt.Color;
+import java.util.EnumMap;
+import java.util.Map;
 
 /**
  * The one place UI chrome colours are defined.
@@ -56,6 +60,44 @@ public final class Palette {
 
     /** Warm glow used for the hero rim-light and lock highlights. */
     public static final Color GLOW = HUD_TEXT_GOLD;
+
+    /** Success accent — a won run, a claimed boon. */
+    public static final Color BOON = new Color(0x8F, 0xD6, 0xA6);
+
+    // ---- power-ups ---------------------------------------------------------
+
+    /**
+     * One accent colour per boon.
+     *
+     * <p>Lives here rather than on {@link PowerUpType} because that is an
+     * entities class and entities must not import AWT. Keeping the mapping on
+     * this side is also what stops a boon's icon, its HUD pip and its screen
+     * flash drifting to three different greens.
+     *
+     * <p>Every colour is a desaturated jewel tone rather than a primary: the
+     * play area is warm sandstone, and a saturated icon on it reads as a UI
+     * element pasted over the game instead of a thing lying on the plaza.
+     */
+    private static final Map<PowerUpType, Color> POWERUP_COLOURS =
+            new EnumMap<>(PowerUpType.class);
+
+    static {
+        // Cold pale blue — the field has stopped.
+        POWERUP_COLOURS.put(PowerUpType.TIME_FREEZE, new Color(0x8F, 0xCF, 0xE8));
+        // Green-jade — the tide, slowed.
+        POWERUP_COLOURS.put(PowerUpType.SLOW_TIDE, new Color(0x7F, 0xC4, 0xA0));
+        // Ember orange — the causeway swept.
+        POWERUP_COLOURS.put(PowerUpType.PURGE, new Color(0xE8, 0x92, 0x54));
+        // Lotus red — a life returned.
+        POWERUP_COLOURS.put(PowerUpType.MEND, new Color(0xE0, 0x76, 0x90));
+        // Temple gold — the naga ward, matching the life pips it stands in for.
+        POWERUP_COLOURS.put(PowerUpType.NAGA_SHIELD, HUD_DIVIDER);
+    }
+
+    /** The accent colour for a boon. Falls back to gold for anything unmapped. */
+    public static Color powerUp(PowerUpType type) {
+        return POWERUP_COLOURS.getOrDefault(type, HUD_TEXT_GOLD);
+    }
 
     private Palette() {
         // Constants only.

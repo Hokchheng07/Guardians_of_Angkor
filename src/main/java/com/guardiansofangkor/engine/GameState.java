@@ -2,6 +2,8 @@ package com.guardiansofangkor.engine;
 
 import com.guardiansofangkor.entities.Enemy;
 import com.guardiansofangkor.entities.Player;
+import com.guardiansofangkor.entities.PowerUp;
+import com.guardiansofangkor.entities.PowerUpType;
 import com.guardiansofangkor.entities.Projectile;
 import com.guardiansofangkor.entities.VisualEffect;
 import com.guardiansofangkor.i18n.Language;
@@ -16,6 +18,7 @@ import com.guardiansofangkor.util.GraphemeCounter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Random;
 
 /**
  * All mutable gameplay state for a run, plus the per-tick update.
@@ -28,12 +31,19 @@ public class GameState {
 
     private final List<Enemy> enemies = new ArrayList<>();
     private final List<Projectile> projectiles = new ArrayList<>();
+    private final List<PowerUp> powerUps = new ArrayList<>();
     private final List<VisualEffect> effects = new ArrayList<>();
     private final TargetResolver resolver = new TargetResolver();
     private final WaveManager waveManager;
     private final WordBank wordBank;
     private final Language language;
     private final Player player = new Player();
+
+    /** Timed boons and banked shield charges. */
+    private final PowerUpState powerUpState = new PowerUpState();
+
+    /** Drives drop rolls. Seedable so wave-and-drop composition is reproducible. */
+    private final Random random;
 
     /**
      * Not final: chosen in the menu after this state exists, and a new run can
@@ -55,6 +65,19 @@ public class GameState {
     private long elapsedTicks;
     private boolean running = true;
     private boolean gameOver;
+
+    /**
+     * True when the run ended by clearing the tier's last level rather than by
+     * running out of lives.
+     *
+     * <p>Kept separate from {@link #gameOver} rather than inferred from "game
+     * over with lives remaining". They are different events with different
+     * screens, and the inference breaks the moment anything else can end a run.
+     */
+    private boolean victory;
+
+    /** Boons collected this run, for the end-of-run summary. */
+    private int powerUpsCollected;
 
     /**
      * True while the player has paused.
@@ -101,10 +124,16 @@ public class GameState {
     }
 
     public GameState(Language language, Difficulty difficulty) {
+        this(language, difficulty, new Random());
+    }
+
+    /** Seeded constructor so waves and drops are reproducible in tests. */
+    public GameState(Language language, Difficulty difficulty, Random random) {
         this.language = language == null ? Language.ENGLISH : language;
         this.difficulty = difficulty == null ? Difficulty.defaultChoice() : difficulty;
-        this.wordBank = new WordBank(this.language);
-        this.waveManager = new WaveManager(this.wordBank, this.difficulty);
+        this.random = random == null ? new Random() : random;
+        this.wordBank = new WordBank(this.language, this.random);
+        this.waveManager = new WaveManager(this.wordBank, this.difficulty, this.random);
         this.intro = new IntroSequence(this.difficulty);
     }
 
@@ -126,12 +155,19 @@ public class GameState {
 
         elapsedTicks++;
 
+        // One scale for the whole tick, read once. Asking the power-up state
+        // per entity would let a boon expire half way through a frame and
+        // advance the back half of the field further than the front half.
+        double timeScale = powerUpState.getTimeScale();
+
+        powerUpState.update();
         player.update();
         updateEffects();
-        updateEnemies();
-        updateProjectiles();
+        updatePowerUps();
+        updateEnemies(timeScale);
+        updateProjectiles(timeScale);
 
-        if (!gameOver) {
+        if (!gameOver && !victory) {
             spawnFromWaveManager();
         }
 
@@ -148,9 +184,9 @@ public class GameState {
         effects.removeIf(VisualEffect::isExpired);
     }
 
-    private void updateEnemies() {
+    private void updateEnemies(double timeScale) {
         for (Enemy enemy : enemies) {
-            enemy.update();
+            enemy.update(timeScale);
             if (enemy.isProjectileDue()) {
                 throwProjectileFrom(enemy);
             }
@@ -168,26 +204,64 @@ public class GameState {
             if (resolver.getLockedTarget() == enemy) {
                 resolver.reset();
             }
-            loseLife();
+            absorbOrLoseLife(enemy.getX(), enemy.getAnchorY());
         }
 
         enemies.removeIf(e -> e.isExpired(GameConfig.DEFEAT_ANIMATION_TICKS));
     }
 
-    private void updateProjectiles() {
+    private void updateProjectiles(double timeScale) {
         for (Projectile projectile : projectiles) {
-            projectile.update();
+            projectile.update(timeScale);
             if (projectile.hasJustLanded()) {
                 if (resolver.getLockedTarget() == projectile) {
                     resolver.reset();
                 }
-                loseLife();
+                absorbOrLoseLife(projectile.getX(), projectile.getY());
             }
         }
         projectiles.removeIf(p -> p.isExpired(GameConfig.DEFEAT_ANIMATION_TICKS));
     }
 
+    private void updatePowerUps() {
+        for (PowerUp powerUp : powerUps) {
+            powerUp.update();
+            if (powerUp.hasJustLapsed() && resolver.getLockedTarget() == powerUp) {
+                // The player was mid-way through claiming it when it faded.
+                // Clearing the lock stops the next keystroke reading as a typo
+                // against a target that no longer exists.
+                resolver.reset();
+            }
+        }
+        powerUps.removeIf(p -> p.isExpired(GameConfig.DEFEAT_ANIMATION_TICKS));
+    }
+
+    /**
+     * Something reached the temple. Spends a Naga Shield if one is banked, and
+     * only charges a life when none is.
+     *
+     * <p>Routed through one method so the shield can never be honoured for a
+     * breach and forgotten for a bolt.
+     */
+    private void absorbOrLoseLife(double x, double y) {
+        if (powerUpState.consumeShield()) {
+            powerUpState.markFired(PowerUpType.NAGA_SHIELD);
+            effects.add(new VisualEffect(
+                    VisualEffect.Kind.WARD_BREAK, x, y, GameConfig.POWERUP_FLASH_TICKS, 1.0));
+            return;
+        }
+        loseLife();
+    }
+
     private void spawnFromWaveManager() {
+        // A finite tier stops once its last level is cleared. Checked before the
+        // wave manager ticks so victory lands on the frame the field empties,
+        // not an intermission later.
+        if (waveManager.isRunComplete() && enemies.isEmpty() && projectiles.isEmpty()) {
+            declareVictory();
+            return;
+        }
+
         List<Enemy> spawned = waveManager.update(enemies);
         for (Enemy enemy : spawned) {
             enemies.add(enemy);
@@ -217,10 +291,13 @@ public class GameState {
     private List<String> collectWordsInPlay() {
         List<String> words = new ArrayList<>();
         for (Enemy enemy : enemies) {
-            words.add(enemy.getWord());
+            words.addAll(enemy.getAllWords());
         }
         for (Projectile projectile : projectiles) {
             words.add(projectile.getWord());
+        }
+        for (PowerUp powerUp : powerUps) {
+            words.add(powerUp.getWord());
         }
         return words;
     }
@@ -237,9 +314,9 @@ public class GameState {
             return ResolveResult.EMPTY_RESULT;
         }
 
-        // Projectiles are passed as the priority list — they preempt enemies as
-        // the active target because their time budget is far shorter.
-        ResolveResult result = resolver.submit(typedSoFar, projectiles, enemies);
+        // Tiers are passed shortest-time-budget first: a bolt preempts a dropped
+        // boon, which preempts an enemy. See TargetResolver.submit.
+        ResolveResult result = resolver.submit(typedSoFar, projectiles, powerUps, enemies);
         lastResult = result;
 
         switch (result.status()) {
@@ -267,12 +344,16 @@ public class GameState {
                 enemy.defeat();
                 enemiesDefeated++;
                 resolvedThisLevel++;
+                maybeDropPowerUp(enemy);
             }
         } else if (target instanceof Projectile projectile) {
             projectile.intercept();
             projectilesIntercepted++;
             charactersTyped += GraphemeCounter.count(projectile.getWord());
             score += scoreForProjectile(projectile);
+        } else if (target instanceof PowerUp powerUp) {
+            charactersTyped += GraphemeCounter.count(powerUp.getWord());
+            claimPowerUp(powerUp);
         }
 
         // A kill always looses an arrow, regardless of the shot cooldown — the
@@ -309,6 +390,9 @@ public class GameState {
         if (target instanceof Projectile projectile) {
             return projectile.getX();
         }
+        if (target instanceof PowerUp powerUp) {
+            return powerUp.getX();
+        }
         return GameConfig.TEMPLE_CENTER_X;
     }
 
@@ -321,7 +405,120 @@ public class GameState {
         if (target instanceof Projectile projectile) {
             return projectile.getY();
         }
+        if (target instanceof PowerUp powerUp) {
+            return powerUp.getY();
+        }
         return GameConfig.GROUND_LINE_Y;
+    }
+
+    // ---- power-ups ---------------------------------------------------------
+
+    /**
+     * Rolls whether a defeated enemy leaves a boon behind, and drops it where
+     * it fell.
+     *
+     * <p>Only ordinary kills roll. Chained mini-bosses drop on their final word
+     * like anything else, but a word cleared mid-chain does not — the enemy is
+     * still standing, and a boon falling out of something that has not died
+     * would read as a bug.
+     */
+    private void maybeDropPowerUp(Enemy enemy) {
+        if (!PowerUpDrops.shouldDrop(difficulty, getLevel(), lives, random)) {
+            return;
+        }
+        boolean shieldsFull =
+                powerUpState.getShieldCharges() >= GameConfig.MAX_SHIELD_CHARGES;
+        PowerUpType type = PowerUpDrops.roll(lives, shieldsFull, random);
+
+        String word = wordBank.pickupWord(collectWordsInPlay());
+        double dropY = enemy.getAnchorY()
+                - enemy.getType().getTargetHeight() * enemy.depthScale() * 0.55;
+
+        powerUps.add(new PowerUp(type, word, enemy.getX(), dropY));
+    }
+
+    /** Claims a pickup the player has typed and applies what it does. */
+    private void claimPowerUp(PowerUp powerUp) {
+        powerUp.claim();
+        powerUpsCollected++;
+        score += GameConfig.TARGET_FPS;
+
+        effects.add(new VisualEffect(
+                VisualEffect.Kind.BOON_CLAIMED,
+                powerUp.getX(), powerUp.getY(),
+                GameConfig.POWERUP_FLASH_TICKS, 1.0));
+
+        applyPowerUp(powerUp.getType());
+    }
+
+    /**
+     * Applies a boon.
+     *
+     * <p>Timed and charge boons are handed to {@link PowerUpState}, which owns
+     * anything that outlives the moment of collection. The instant two act on
+     * the field and the life count, which are this class's to change — putting
+     * them in the state holder as well would leave two objects able to decide
+     * what a Purge does.
+     */
+    void applyPowerUp(PowerUpType type) {
+        if (type == null) {
+            return;
+        }
+        switch (type) {
+            case TIME_FREEZE, SLOW_TIDE -> powerUpState.activate(type, difficulty);
+            case NAGA_SHIELD -> powerUpState.addShield();
+            case PURGE -> {
+                purgeField();
+                powerUpState.markFired(type);
+            }
+            case MEND -> {
+                lives = Math.min(GameConfig.STARTING_LIVES, lives + 1);
+                powerUpState.markFired(type);
+            }
+        }
+    }
+
+    /**
+     * Sweeps every enemy and bolt currently on the field.
+     *
+     * <p>Scores and counts them as kills, because from the player's side they
+     * were killed — awarding nothing would make the strongest boon in the game
+     * cost them their score, which is a strange thing to punish. Progress
+     * advances too, so the level bar does not stall after a Purge.
+     */
+    private void purgeField() {
+        for (Enemy enemy : enemies) {
+            if (!enemy.isActive()) {
+                continue;
+            }
+            score += scoreForEnemy(enemy);
+            enemy.defeat();
+            enemiesDefeated++;
+            resolvedThisLevel++;
+            effects.add(new VisualEffect(
+                    VisualEffect.Kind.IMPACT,
+                    enemy.getX(),
+                    enemy.getAnchorY() - enemy.getType().getTargetHeight()
+                            * enemy.depthScale() * 0.5,
+                    GameConfig.ARROW_FLIGHT_TICKS + 10, enemy.depthScale()));
+        }
+        for (Projectile projectile : projectiles) {
+            if (projectile.isActive()) {
+                projectile.intercept();
+                projectilesIntercepted++;
+            }
+        }
+        resolver.reset();
+    }
+
+    /** Ends the run as a win. */
+    private void declareVictory() {
+        if (victory) {
+            return;
+        }
+        victory = true;
+        gameOver = true;
+        resolver.reset();
     }
 
     private void spawnArrowAt(double targetX, double targetY) {
@@ -356,10 +553,15 @@ public class GameState {
 
         enemies.clear();
         projectiles.clear();
+        powerUps.clear();
         effects.clear();
         resolver.resetAll();
         waveManager.reset();
         player.reset();
+        powerUpState.reset();
+        // Repeat tracking is per-run, so a fresh run gets the whole vocabulary
+        // back rather than starting where the last one left off.
+        wordBank.resetUsage();
 
         score = 0;
         lives = GameConfig.STARTING_LIVES;
@@ -367,8 +569,10 @@ public class GameState {
         charactersTyped = 0;
         enemiesDefeated = 0;
         projectilesIntercepted = 0;
+        powerUpsCollected = 0;
         resolvedThisLevel = 0;
         lastLevelSeen = 0;
+        victory = false;
         // A restart earns the same countdown, so the player is never dropped
         // straight back into a wave already in motion.
         beginIntro();
@@ -394,6 +598,23 @@ public class GameState {
 
     public List<Projectile> getProjectiles() {
         return Collections.unmodifiableList(projectiles);
+    }
+
+    /** Power-up drops currently on the field. Read-only view for the renderer. */
+    public List<PowerUp> getPowerUps() {
+        return Collections.unmodifiableList(powerUps);
+    }
+
+    /** Running boons and banked shield charges, for the HUD. */
+    public PowerUpState getPowerUpState() {
+        return powerUpState;
+    }
+
+    /** Drops a boon on the field directly. For tests and for scripted moments. */
+    public void addPowerUp(PowerUp powerUp) {
+        if (powerUp != null) {
+            powerUps.add(powerUp);
+        }
     }
 
     public List<VisualEffect> getEffects() {
@@ -448,6 +669,27 @@ public class GameState {
         return gameOver;
     }
 
+    /**
+     * True when the run ended by clearing the tier's last level.
+     *
+     * <p>{@link #isGameOver()} is also true then — a won run is still a finished
+     * one — so anything drawing the end screen must check this first or it will
+     * congratulate the player with a defeat banner.
+     */
+    public boolean isVictory() {
+        return victory;
+    }
+
+    /** Boons claimed this run. */
+    public int getPowerUpsCollected() {
+        return powerUpsCollected;
+    }
+
+    /** The last level of a run on the current tier. */
+    public int getFinalLevel() {
+        return waveManager.getFinalLevel();
+    }
+
     /** True for exactly one tick after a level is cleared. Drives the autosave. */
     public boolean isLevelJustCleared() {
         return levelJustCleared;
@@ -486,9 +728,9 @@ public class GameState {
         return resolvedThisLevel;
     }
 
-    /** Total enemies the current level will send. */
+    /** Total enemies the current level will send, on the current tier. */
     public int getEnemiesInLevel() {
-        return DifficultyCurve.enemyCount(getLevel());
+        return DifficultyCurve.enemyCount(getLevel(), difficulty);
     }
 
     /**
