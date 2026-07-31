@@ -2,6 +2,7 @@ package com.guardiansofangkor.renderer;
 
 import com.guardiansofangkor.entities.EnemyType;
 import com.guardiansofangkor.entities.PowerUpType;
+import com.guardiansofangkor.util.GameConfig;
 
 import javax.imageio.ImageIO;
 import java.awt.Graphics2D;
@@ -31,6 +32,28 @@ import java.util.Map;
  * would float grounded monsters above the plaza by however much transparent
  * padding sat below their feet. Trimming to the opaque bounding box first fixes
  * both problems at once.
+ *
+ * <p><b>Everything is converted to a display-compatible copy at working size.</b>
+ * Two separate reasons, both of which cost real frame time on Windows and very
+ * little on macOS, which is why the game ran slowly on one and not the other:
+ *
+ * <ol>
+ *   <li>{@link BufferedImage#getSubimage} returns a <em>view</em> onto the
+ *       parent's raster. Java2D will not treat a view as a managed image, so it
+ *       can never be cached in video memory and every single blit of it falls
+ *       back to a software loop. Trimming therefore has to produce a real copy,
+ *       not a window onto the original.</li>
+ *   <li>{@code ImageIO} decodes PNGs to whatever the file says, usually
+ *       {@code TYPE_4BYTE_ABGR} or {@code TYPE_CUSTOM}. Neither matches the
+ *       screen, so each draw pays a per-pixel format conversion.
+ *       {@code TYPE_INT_ARGB_PRE} is the format the pipeline actually wants.</li>
+ * </ol>
+ *
+ * <p>They are also scaled down once, on load, to the largest size they are ever
+ * drawn at. The art is delivered at up to 1216x1200; a monster on screen is
+ * around two hundred pixels tall. Rescaling from the full source sixty times a
+ * second is most of a frame's work thrown away, and the pixels beyond the
+ * display size cannot be seen by definition.
  */
 public class SpriteCache {
 
@@ -100,8 +123,23 @@ public class SpriteCache {
                     + type.getDisplayName() + " (" + e + ") — using it untrimmed.");
             trimmed = raw;
         }
-        sprites.put(type, trimmed);
-        return trimmed;
+
+        BufferedImage ready = toWorkingCopy(trimmed, workingHeightFor(type));
+        sprites.put(type, ready);
+        return ready;
+    }
+
+    /**
+     * The tallest this type is ever drawn, and therefore the only resolution
+     * worth keeping.
+     *
+     * <p>Takes the boss height into account for every type rather than only for
+     * the two that currently end a run — the roster's final boss is a tier
+     * setting, and a cache that silently degraded the day someone pointed a
+     * tier at a different monster would be a nasty thing to debug.
+     */
+    private static int workingHeightFor(EnemyType type) {
+        return Math.max(type.getTargetHeight(), GameConfig.BOSS_HEIGHT);
     }
 
     /**
@@ -128,9 +166,10 @@ public class SpriteCache {
                     + " (" + type.getSpritePath() + ") — drawing a placeholder.");
             return null;
         }
-        BufferedImage trimmed = safeTrim(raw);
-        powerUpIcons.put(type, trimmed);
-        return trimmed;
+        BufferedImage ready =
+                toWorkingCopy(safeTrim(raw), GameConfig.POWERUP_ICON_SIZE);
+        powerUpIcons.put(type, ready);
+        return ready;
     }
 
     /** True when this boon has real art, as opposed to a placeholder glyph. */
@@ -144,7 +183,7 @@ public class SpriteCache {
             return background;
         }
         backgroundAttempted = true;
-        background = read(BACKGROUND_PATH);
+        background = toBackdrop(read(BACKGROUND_PATH));
         if (background == null) {
             System.out.println("[SpriteCache] No background at " + BACKGROUND_PATH
                     + " — falling back to a painted gradient.");
@@ -164,7 +203,7 @@ public class SpriteCache {
             return menuBackground;
         }
         menuBackgroundAttempted = true;
-        menuBackground = read(MENU_BACKGROUND_PATH);
+        menuBackground = toBackdrop(read(MENU_BACKGROUND_PATH));
         if (menuBackground == null) {
             System.out.println("[SpriteCache] No menu art at " + MENU_BACKGROUND_PATH
                     + " — falling back to a painted gradient.");
@@ -185,8 +224,10 @@ public class SpriteCache {
             playerAttempted = true;
             BufferedImage idle = read(PLAYER_IDLE_PATH);
             BufferedImage action = read(PLAYER_ACTION_PATH);
-            playerIdle = safeTrim(idle);
-            playerAction = safeTrim(action);
+            // Preah Ream is the biggest source in the game at 896x1200 and is
+            // redrawn every frame, twice over once the rim light is counted.
+            playerIdle = toWorkingCopy(safeTrim(idle), GameConfig.PLAYER_HEIGHT);
+            playerAction = toWorkingCopy(safeTrim(action), GameConfig.PLAYER_HEIGHT);
 
             if (playerIdle == null && playerAction == null) {
                 System.out.println("[SpriteCache] No Preah Ream art found — "
@@ -404,6 +445,85 @@ public class SpriteCache {
         } catch (RuntimeException e) {
             System.err.println("[SpriteCache] Could not trim an image ("
                     + e + ") — using it untrimmed.");
+            return source;
+        }
+    }
+
+    /**
+     * A display-compatible copy, scaled down to at most {@code maxHeight}.
+     *
+     * <p>See the class comment: this is what makes a sprite cacheable in video
+     * memory instead of re-converted and re-scaled from the full-resolution
+     * source on every frame. Never upscales — a sprite smaller than its display
+     * size is left alone, since inventing pixels here would only bake in
+     * blurring the renderer can do just as well on the fly.
+     */
+    private static BufferedImage toWorkingCopy(BufferedImage source, int maxHeight) {
+        if (source == null) {
+            return null;
+        }
+        int sourceHeight = Math.max(1, source.getHeight());
+        double scale = Math.min(1.0, maxHeight / (double) sourceHeight);
+
+        int width = Math.max(1, (int) Math.round(source.getWidth() * scale));
+        int height = Math.max(1, (int) Math.round(sourceHeight * scale));
+
+        try {
+            BufferedImage copy = new BufferedImage(
+                    width, height, BufferedImage.TYPE_INT_ARGB_PRE);
+            Graphics2D g = copy.createGraphics();
+            try {
+                // Quality is affordable here in a way it is not per-frame: this
+                // runs once per sprite for the life of the process.
+                g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                        RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                g.setRenderingHint(RenderingHints.KEY_RENDERING,
+                        RenderingHints.VALUE_RENDER_QUALITY);
+                g.drawImage(source, 0, 0, width, height, null);
+            } finally {
+                g.dispose();
+            }
+            return copy;
+        } catch (RuntimeException | OutOfMemoryError e) {
+            // A failed conversion costs speed, never the sprite itself.
+            System.err.println("[SpriteCache] Could not prepare an image ("
+                    + e + ") — using it as decoded.");
+            return source;
+        }
+    }
+
+    /**
+     * An opaque, screen-sized copy of a full-bleed backdrop.
+     *
+     * <p>The delivered art is 1672x941 and the window is 1280x720, so drawing it
+     * directly means rescaling one and a half million pixels every frame to
+     * produce the one image on screen guaranteed never to change. Opaque rather
+     * than ARGB because it is the bottom layer: there is nothing behind it to
+     * blend with, and skipping the alpha channel skips the blend.
+     */
+    private static BufferedImage toBackdrop(BufferedImage source) {
+        if (source == null) {
+            return null;
+        }
+        try {
+            BufferedImage copy = new BufferedImage(
+                    GameConfig.SCREEN_WIDTH, GameConfig.SCREEN_HEIGHT,
+                    BufferedImage.TYPE_INT_RGB);
+            Graphics2D g = copy.createGraphics();
+            try {
+                g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                        RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                g.setRenderingHint(RenderingHints.KEY_RENDERING,
+                        RenderingHints.VALUE_RENDER_QUALITY);
+                g.drawImage(source, 0, 0,
+                        GameConfig.SCREEN_WIDTH, GameConfig.SCREEN_HEIGHT, null);
+            } finally {
+                g.dispose();
+            }
+            return copy;
+        } catch (RuntimeException | OutOfMemoryError e) {
+            System.err.println("[SpriteCache] Could not prepare a backdrop ("
+                    + e + ") — drawing it scaled every frame instead.");
             return source;
         }
     }

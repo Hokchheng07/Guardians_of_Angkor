@@ -21,10 +21,30 @@ public final class GameConfig {
      */
     public static final double DIAGONAL = Math.sqrt(0.5);
 
-    /** Target frames (ticks) per second for the Swing timer game loop. */
+    /**
+     * Simulation ticks per second.
+     *
+     * <p>This is a <em>fixed</em> rate that the loop guarantees against the wall
+     * clock — it is not "however often the timer happens to fire". Every speed,
+     * duration and cooldown in this file is written in ticks, so if the machine
+     * delivered fewer of them per second the whole game would run in slow
+     * motion. See {@code GameLoop}, which is what keeps that promise.
+     */
     public static final int TARGET_FPS = 60;
 
-    /** Milliseconds between ticks, derived from {@link #TARGET_FPS}. */
+    /** Exact length of one tick in nanoseconds. The loop's unit of account. */
+    public static final long NANOS_PER_TICK = 1_000_000_000L / TARGET_FPS;
+
+    /**
+     * How often the Swing timer is asked to wake the loop up.
+     *
+     * <p>Deliberately floor division — 16ms rather than the exact 16.67 — so the
+     * timer fires marginally <em>early</em> rather than late. It is only a
+     * heartbeat: how much simulation actually runs is decided by the clock in
+     * {@code GameLoop}, not by how many times this fires. Windows rounds timer
+     * requests to its ~15.6ms scheduler granularity, so asking for anything
+     * finer here buys nothing.
+     */
     public static final int TICK_INTERVAL_MS = 1000 / TARGET_FPS;
 
     /** Lives the player starts a run with. */

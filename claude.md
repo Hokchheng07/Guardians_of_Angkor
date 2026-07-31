@@ -163,6 +163,30 @@ GameConfig and are referenced by both engine and renderer. Do not
 redeclare them locally — if the cull timer and the fade timer disagree,
 sprites pop out mid-fade or linger invisible.
 
+## Tick rate is a promise, not a hope
+Every speed, duration and cooldown in the game is expressed in TICKS and
+assumes exactly TARGET_FPS of them per second. GameLoop is what makes
+that true: it accumulates REAL nanoseconds and runs however many whole
+ticks have come due — none on a fast machine, several on a slow one.
+
+This is not premature engineering. The loop used to run exactly one tick
+per Swing timer callback, and the result was that the entire game played
+in smooth uniform SLOW MOTION on Windows while being correct on macOS.
+Windows rounds Swing timer requests to its ~15.6ms scheduler
+granularity, so a 16ms request can land on 31ms — half rate, half speed.
+A slow machine must lose FRAMES, never simulation speed.
+
+Catch-up is capped (MAX_CATCHUP_TICKS 5). Uncapped it is the spiral of
+death — an overrunning frame asks for more ticks, which makes the next
+frame overrun further. The cap doubles as the laptop-lid guard: after a
+sleep or a breakpoint the clock has jumped by seconds and the game must
+not fast-forward through them.
+
+Never reintroduce per-callback stepping, and do not add
+`System.nanoTime()` reads inside entity update methods either — the
+fixed timestep is what keeps the simulation deterministic and the tests
+meaningful.
+
 ## Play field layout
 Enemies materialise in a smoke puff and converge on TEMPLE_CENTER_X /
 GROUND_LINE_Y. Reaching BREACH_RADIUS of that point costs a life.
@@ -246,6 +270,25 @@ delivered art has wildly uneven transparent padding (Yeak ~25% per side,
 Krong Reap under 4%), so untrimmed scaling both mis-sizes monsters and
 floats grounded ones above the plaza. EnemyType specifies targetHeight
 only; width is derived from the trimmed aspect ratio.
+
+Every loaded image is then converted ONCE to a display-compatible copy
+at working size (toWorkingCopy / toBackdrop). Both halves matter and
+both cost frame time on Windows but not macOS:
+
+- trim() ends in getSubimage, which returns a VIEW onto the parent
+  raster. Java2D refuses to treat a view as a managed image, so it can
+  never live in video memory and every blit of it is a software loop.
+  The copy is what makes it cacheable. Do not hand a raw getSubimage
+  result to the renderer.
+- ImageIO decodes to whatever the PNG declares, usually TYPE_4BYTE_ABGR
+  or TYPE_CUSTOM. Neither matches the screen, so each draw pays a
+  per-pixel conversion. TYPE_INT_ARGB_PRE is what the pipeline wants.
+
+Sources are up to 1216x1200 and monsters are drawn around 200px, so they
+are also downscaled on load to the tallest size they are ever drawn at
+(never upscaled). The 1672x941 backdrops are pre-scaled to the exact
+1280x720 window and kept OPAQUE — nothing sits behind them, so the alpha
+blend is pure waste. Backdrops then blit 1:1, which is the fast path.
 
 ## Failure containment
 Anything Swing calls repeatedly is wrapped in util/CrashGuard. This is
