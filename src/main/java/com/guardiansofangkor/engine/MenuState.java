@@ -191,19 +191,15 @@ public class MenuState {
     /**
      * Decides what pressing a difficulty does.
      *
-     * <p>The two ways a tier can refuse are reported separately on purpose. "Not
-     * ready yet" means nobody can play it; "clear Medium first" means the player
-     * can, once they have earned it. Collapsing them into one message would tell
-     * a player who is one run away from Hard that it does not exist.
+     * <p>There is now exactly one way a tier can refuse: it has not been built.
+     * The second reason — "clear Medium first" — is gone, because every built
+     * tier is open from the start. {@link DifficultyProgress} still records what
+     * has been cleared; it simply no longer decides what may be played.
      */
     private Outcome resolveDifficulty() {
         Difficulty difficulty = getSelectedDifficulty();
         if (!difficulty.isImplemented()) {
             flashLocked(difficulty.getDisplayName() + " is not ready yet.");
-            return Outcome.NONE;
-        }
-        if (!progress.isUnlocked(difficulty)) {
-            flashLocked(progress.lockReason(difficulty));
             return Outcome.NONE;
         }
         return Outcome.START_RUN;
@@ -271,9 +267,16 @@ public class MenuState {
      * and earned. This is what greys the button out.
      */
     public boolean isEnabled(Difficulty difficulty) {
-        return difficulty != null
-                && difficulty.isImplemented()
-                && progress.isUnlocked(difficulty);
+        // Built is the only requirement. Tiers used to also have to be EARNED —
+        // clear Easy to open Medium, and so on — and that gate is gone: a
+        // player who wants Hard on their first run can have it, and anyone
+        // marking or demonstrating this does not have to play through two
+        // tiers to see the third.
+        //
+        // {@link DifficultyProgress} is deliberately still tracked. It is no
+        // longer a lock, but it is still the record of what has actually been
+        // beaten, which the end-of-run card and the save file both want.
+        return difficulty != null && difficulty.isImplemented();
     }
 
     /** Which tiers the player has earned. */

@@ -534,26 +534,33 @@ public class BossRenderer {
         g2.setStroke(new BasicStroke(1.4f));
         g2.draw(chip);
 
+        // The phase ends when its objective is met, not when a clock runs out,
+        // so the chip says what is left to DO. A countdown here would be a
+        // countdown to nothing — and worse, it would tell the player to wait
+        // when the thing that ends the phase is them acting.
         g2.setFont(labelFont);
         FontMetrics fm = g2.getFontMetrics();
         String name = boss.getAttackPhase().getDisplayName()
                 .toUpperCase(java.util.Locale.ROOT);
+        int outstanding = boss.objectiveRemaining();
+        String label = outstanding > 0 ? name + "  ·  " + outstanding + " LEFT" : name;
+
         g2.setColor(Palette.HUD_TEXT_GOLD);
-        g2.drawString(name,
-                GameConfig.TEMPLE_CENTER_X - fm.stringWidth(name) / 2,
+        g2.drawString(label,
+                GameConfig.TEMPLE_CENTER_X - fm.stringWidth(label) / 2,
                 y + 15 + fm.getAscent() / 2 - 2);
 
-        // Drains left to right, so "nearly over" is legible at a glance without
-        // reading anything.
+        // Fills left to right as the objective is cleared, so the bar grows
+        // toward release rather than draining toward an arbitrary deadline.
         int trackWidth = PHASE_CHIP_W - 24;
         int trackX = x + 12;
         int trackY = y + height - 9;
-        double remaining = Math.max(0.0, 1.0 - boss.getAttackPhaseProgress());
+        double done = Math.max(0.0, Math.min(1.0, boss.getAttackPhaseProgress()));
 
         g2.setColor(Palette.LIFE_LOST);
         g2.fillRect(trackX, trackY, trackWidth, 4);
         g2.setColor(Palette.DANGER);
-        g2.fillRect(trackX, trackY, (int) Math.round(trackWidth * remaining), 4);
+        g2.fillRect(trackX, trackY, (int) Math.round(trackWidth * done), 4);
     }
 
     // ---- the paragraph -----------------------------------------------------

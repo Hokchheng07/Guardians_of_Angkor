@@ -163,28 +163,47 @@ public class BossFight implements WordTarget {
     /** Grace after the briefing before the first spit, so verse one is readable. */
     private static final int FIRST_VENOM_DELAY = GameConfig.TARGET_FPS * 3;
 
-    /** Shortest an attack phase runs before the boss changes what it is doing. */
-    public static final int PHASE_MIN_TICKS = GameConfig.TARGET_FPS * 7;
+    /**
+     * How long a phase may run before the fight declares it stuck.
+     *
+     * <p><b>This is a bug guard, not pacing.</b> A phase ends when its objective
+     * is met — everything scheduled has been sent and everything sent has been
+     * resolved — and nothing about normal play should ever reach this. Both
+     * halves of the objective self-resolve: an untyped summon walks in and
+     * breaches, an unanswered bolt lands, and either way the thing leaves the
+     * field and costs a life. A player who simply stops typing runs out of
+     * lives long before a minute passes.
+     *
+     * <p>So if this ever fires, something is genuinely wrong — a summon stuck
+     * off its path, a miscounted census — and it says so on the console rather
+     * than leaving the run hanging with no explanation.
+     */
+    public static final int PHASE_STUCK_TICKS = GameConfig.TARGET_FPS * 60;
 
     /**
-     * Longest an attack phase runs.
+     * Monsters a summoning phase calls up, at the reference tuning, in its
+     * first phase.
      *
-     * <p>Seven to ten seconds. Short enough that the fight keeps turning over,
-     * long enough that a phase is a stretch of play with its own shape rather
-     * than a flicker — under about five seconds the summoning phase cannot get
-     * its monsters across the plaza before it is over, which makes the whole
-     * phase read as decoration.
+     * <p>Lower than the six a timed phase used to manage, because the phase now
+     * lasts until the last one is dealt with rather than until a clock runs out
+     * — six summons that all have to be answered is a much longer stretch of
+     * play than six summons that might simply expire.
      */
-    public static final int PHASE_MAX_TICKS = GameConfig.TARGET_FPS * 10;
+    private static final int MINIONS_PER_PHASE = 3;
+
+    /** Bolts a barrage launches, at the reference tuning, in its first phase. */
+    private static final int VENOM_PER_PHASE = 3;
 
     /**
-     * Monsters a summoning phase calls up at the reference tuning.
+     * Extra attacks each successive phase adds.
      *
-     * <p>Scaled by the tier's enemy-count scale like an ordinary wave, so the
-     * finale gets lighter on Easy for the same reason every other level does
-     * rather than needing its own table.
+     * <p>This is where the fight escalates now that duration cannot. Phase one
+     * asks for three, phase two four, phase three five.
      */
-    private static final int MINIONS_PER_PHASE = 6;
+    private static final int ATTACKS_ADDED_PER_PHASE = 1;
+
+    /** Ceiling on that escalation, so a long fight cannot become unplayable. */
+    private static final int MAX_ATTACKS_PER_PHASE = 8;
 
     /** How long the boss flashes when a verse lands. */
     private static final int HIT_FLASH_TICKS = GameConfig.TARGET_FPS / 2;
@@ -250,10 +269,30 @@ public class BossFight implements WordTarget {
     /** True for exactly one tick, when a phase has just finished. */
     private boolean phaseJustEnded;
 
+    /** Ticks the current phase has run. Watched only by the stuck guard. */
     private double attackPhaseTicks;
 
-    /** Length rolled for the current phase, in ticks. */
-    private int attackPhaseDuration = PHASE_MIN_TICKS;
+    /**
+     * How many attacks this phase will send before it stops sending.
+     *
+     * <p>Replaces the rolled duration. A phase is now a quota, not a stretch of
+     * time: it ends when the quota is spent AND the field it filled is empty
+     * again, so its length is set by how fast the player deals with it.
+     */
+    private int attacksScheduled;
+
+    /** How many of that quota have actually been sent. */
+    private int attacksSent;
+
+    /**
+     * What is still live on the field, as last reported by {@link GameState}.
+     *
+     * <p>{@code BossFight} knows what it scheduled; only {@code GameState} owns
+     * the enemy and projectile lists. So the world is reported in and the boss
+     * decides — which keeps the phase-end rule here, beside the scheduling it
+     * belongs to, without this class reaching into lists it does not own.
+     */
+    private int liveAttacks;
 
     /** Phases finished so far, for the renderer and for tests. */
     private int phasesElapsed;
@@ -405,8 +444,28 @@ public class BossFight implements WordTarget {
      */
     private void updateAttackPhase(double scale) {
         attackPhaseTicks += scale;
-        if (attackPhaseTicks >= attackPhaseDuration) {
+
+        // The objective: everything scheduled has been sent, and everything
+        // sent has been dealt with. Checked before scheduling so a phase whose
+        // last summon just died ends on that tick rather than a frame later.
+        if (attacksSent >= attacksScheduled && liveAttacks <= 0) {
             endAttackPhase();
+            return;
+        }
+
+        if (attackPhaseTicks >= PHASE_STUCK_TICKS) {
+            // Cannot happen in normal play — see PHASE_STUCK_TICKS. Say so
+            // loudly and let the fight continue rather than hang on it.
+            System.err.println("[BossFight] " + attackPhase + " ran "
+                    + (int) (attackPhaseTicks / GameConfig.TARGET_FPS) + "s with "
+                    + attacksSent + "/" + attacksScheduled + " sent and "
+                    + liveAttacks + " still live — ending it to unstick the run.");
+            endAttackPhase();
+            return;
+        }
+
+        // Nothing left to send; the phase is just waiting for the field to clear.
+        if (attacksSent >= attacksScheduled) {
             return;
         }
 
@@ -415,6 +474,7 @@ public class BossFight implements WordTarget {
                 venomCooldown -= scale;
                 if (venomCooldown <= 0) {
                     venomDue = true;
+                    attacksSent++;
                     venomCooldown = venomIntervalTicks();
                 }
             }
@@ -422,6 +482,7 @@ public class BossFight implements WordTarget {
                 minionCooldown -= scale;
                 if (minionCooldown <= 0) {
                     minionDue = true;
+                    attacksSent++;
                     minionCooldown = minionIntervalTicks();
                 }
             }
@@ -429,12 +490,25 @@ public class BossFight implements WordTarget {
     }
 
     /**
+     * How much of the field this phase put there is still live.
+     *
+     * <p>Reported by {@link GameState} once a tick, before {@link #update}.
+     * Must count only ACTIVE entities: a defeated summon lingers through its
+     * death fade and a deflected bolt through its dissolve, and counting those
+     * would stall every phase by a second per kill.
+     */
+    public void reportField(int liveAttacks) {
+        this.liveAttacks = Math.max(0, liveAttacks);
+    }
+
+    /**
      * The boss stops attacking and hands the floor back to the player.
      *
-     * <p>{@link #isPhaseJustEnded()} goes true for one tick so {@link GameState}
-     * can clear whatever is still on the field. That sweep is what makes the
-     * typing window safe, and it is a deliberate, reversible choice rather than
-     * a rule of the design — see that method.
+     * <p>The field is empty by the time this runs — that is the phase's exit
+     * condition, not a side effect. {@link #isPhaseJustEnded()} still goes true
+     * for one tick so {@link GameState} can sweep, but that sweep is now a
+     * safety net rather than the thing that makes the typing window safe. What
+     * makes it safe is that the player cleared the field themselves.
      */
     private void endAttackPhase() {
         phasesElapsed++;
@@ -442,26 +516,32 @@ public class BossFight implements WordTarget {
         lastAttackPhase = attackPhase;
         attackPhase = null;
         attackPhaseTicks = 0;
+        attacksScheduled = 0;
+        attacksSent = 0;
+        liveAttacks = 0;
         phaseJustEnded = true;
     }
 
     /**
-     * Starts an attack phase: rolls its length and resets what it attacks with.
+     * Starts an attack phase: sets its quota and resets what it attacks with.
      *
      * <p>Called when a paragraph is finished, never on a timer — the paragraph
-     * is what provokes the boss.
+     * is what provokes the boss. The phase then runs until the quota is spent
+     * and the field it filled is clear again, so its length belongs to the
+     * player rather than to a countdown.
      */
     private void beginAttackPhase() {
         stance = Stance.ATTACKING;
         attackPhase = BossPhase.rollAfter(lastAttackPhase, random);
         attackPhaseTicks = 0;
-        attackPhaseDuration = rollPhaseDuration();
+        attacksSent = 0;
+        liveAttacks = 0;
+        attacksScheduled = attacksFor(attackPhase);
 
         // Both cooldowns start short so a phase attacks almost immediately.
-        // Rolling a full interval here would let a seven-second phase pass with
-        // nothing in it, which reads as the boss having skipped its turn — and
-        // now that the paragraph is off screen for the duration, an empty phase
-        // is simply the game doing nothing at all.
+        // Waiting a full interval here would open every phase with a second of
+        // nothing, and with the paragraph off screen that is the game visibly
+        // doing nothing at all.
         double opening = GameConfig.TARGET_FPS / 2.0;
 
         venomCooldown = attackPhase == BossPhase.PROJECTILE
@@ -472,16 +552,48 @@ public class BossFight implements WordTarget {
                 : minionIntervalTicks();
     }
 
-    /** A fresh seven-to-ten seconds. */
-    private int rollPhaseDuration() {
-        int span = PHASE_MAX_TICKS - PHASE_MIN_TICKS;
-        return PHASE_MIN_TICKS + random.nextInt(Math.max(1, span + 1));
+    /**
+     * How many attacks the phase about to start will send.
+     *
+     * <p>Scaled three ways, which is where all the difficulty now lives:
+     * by the kind of attack, by the tier, and by how many phases have already
+     * run. Duration used to carry escalation and cannot any more, so this does.
+     */
+    private int attacksFor(BossPhase kind) {
+        int base = kind == BossPhase.MINIONS ? MINIONS_PER_PHASE : VENOM_PER_PHASE;
+        double scaled = base * difficulty.getEnemyCountScale();
+        int escalated = (int) Math.round(scaled) + phasesElapsed * ATTACKS_ADDED_PER_PHASE;
+        return Math.max(2, Math.min(MAX_ATTACKS_PER_PHASE, escalated));
     }
 
-    /** How many monsters one summoning phase calls up on this tier. */
+    /**
+     * How many monsters the current summoning phase calls up.
+     *
+     * <p>Kept as a method rather than folded into {@link #attacksFor} because
+     * the renderer and the tests both ask, and asking must not roll a different
+     * answer than the phase is actually running to.
+     */
     public int minionsPerPhase() {
-        double scaled = MINIONS_PER_PHASE * difficulty.getEnemyCountScale();
-        return Math.max(2, (int) Math.round(scaled));
+        return attackPhase == BossPhase.MINIONS && attacksScheduled > 0
+                ? attacksScheduled
+                : attacksFor(BossPhase.MINIONS);
+    }
+
+    /** How many bolts the current barrage will launch. */
+    public int venomPerPhase() {
+        return attackPhase == BossPhase.PROJECTILE && attacksScheduled > 0
+                ? attacksScheduled
+                : attacksFor(BossPhase.PROJECTILE);
+    }
+
+    /** Attacks this phase still has to send. Zero once it is only waiting. */
+    public int attacksRemaining() {
+        return Math.max(0, attacksScheduled - attacksSent);
+    }
+
+    /** What the phase is still waiting on: unsent attacks plus live ones. */
+    public int objectiveRemaining() {
+        return attacksRemaining() + Math.max(0, liveAttacks);
     }
 
     /**
@@ -489,7 +601,10 @@ public class BossFight implements WordTarget {
      * rather than all on the first frame.
      */
     public int minionIntervalTicks() {
-        return Math.max(GameConfig.TARGET_FPS / 2, PHASE_MIN_TICKS / minionsPerPhase());
+        // A flat cadence now that the phase has no length to divide up. Brisk
+        // enough that the summons feel called rather than trickled, slow enough
+        // that they do not arrive as one indistinguishable clump of words.
+        return GameConfig.TARGET_FPS * 3 / 2;
     }
 
     /** True for exactly one tick, when a monster should be summoned. */
@@ -532,12 +647,21 @@ public class BossFight implements WordTarget {
         return attackPhase;
     }
 
-    /** Progress through the current attack phase, 0 to 1. For the renderer. */
+    /**
+     * How far through its OBJECTIVE the phase is, 0 to 1. For the renderer.
+     *
+     * <p>Used to be elapsed time over rolled duration, which told the player
+     * how long they had left to endure. It now counts attacks dealt with over
+     * attacks coming, which tells them how much is left to do — the same bar,
+     * reporting something they can actually change.
+     */
     public double getAttackPhaseProgress() {
-        if (attackPhase == null || attackPhaseDuration <= 0) {
+        if (attackPhase == null || attacksScheduled <= 0) {
             return 0;
         }
-        return Math.min(1.0, attackPhaseTicks / attackPhaseDuration);
+        int outstanding = objectiveRemaining();
+        int total = Math.max(attacksScheduled, outstanding);
+        return Math.min(1.0, 1.0 - outstanding / (double) total);
     }
 
     /** How many attack phases have ended so far. */
@@ -546,16 +670,22 @@ public class BossFight implements WordTarget {
     }
 
     /**
-     * How long until the next spit, in ticks.
+     * Ticks between one bolt leaving and the next, in ticks.
      *
-     * <p>A fresh random five to ten seconds each time rather than a metronome.
-     * A fixed cadence turns into a rhythm the player memorises and stops
-     * reacting to; an unpredictable one keeps them watching the sky, which is
-     * the whole reason the venom is there.
+     * <p><b>This is spawn spacing, not a phase clock.</b> It used to be five to
+     * ten seconds, which was right when it decided how often a bolt appeared
+     * across a seven-second phase — roughly one or two a phase. A phase is now
+     * a quota of three to eight, and at the old spacing a barrage would have
+     * spent twenty-five to fifty seconds simply launching, with the player
+     * standing about between bolts. Two to three seconds is what makes a
+     * barrage read as a barrage.
      *
-     * <p>Not scaled by the tier. The window is generous enough at both ends
-     * that stretching it further on Easy would leave the boss barely attacking
-     * at all, and the difficulty already lives in the length of the paragraph.
+     * <p>Still random rather than fixed: a metronome becomes a rhythm the
+     * player memorises and stops reacting to.
+     *
+     * <p>Not scaled by the tier. The tier already sets how many bolts come and
+     * how long each takes to arrive, and scaling the spacing too would compound
+     * three ways at once.
      */
     public int venomIntervalTicks() {
         int span = GameConfig.VENOM_INTERVAL_MAX_TICKS
@@ -575,15 +705,12 @@ public class BossFight implements WordTarget {
     public int venomFlightTicks() {
         double scaled = GameConfig.VENOM_FLIGHT_TICKS * difficulty.getSpawnIntervalScale();
 
-        // Capped to land inside the phase that threw it. Bolts used to outlive
-        // their own phase on the gentler tiers — Easy stretches the flight to
-        // over eight seconds and a phase can end after seven — so the sweep
-        // that clears the field for the next paragraph was quietly disarming
-        // most of the barrage. A threat the player never has to answer is not a
-        // threat, and worse, it teaches them to ignore the one that follows.
-        int mustLandBy = PHASE_MIN_TICKS - GameConfig.TARGET_FPS;
-        int capped = Math.min((int) Math.round(scaled), mustLandBy);
-        return Math.max(GameConfig.TARGET_FPS * 2, capped);
+        // No longer capped to the phase length. That cap existed because phases
+        // ended on a clock, so a slow bolt on a gentle tier could outlive the
+        // phase that threw it and be swept away unanswered — a threat the
+        // player never had to deal with. A phase now waits for its own bolts,
+        // so the flight time is free to be whatever the tier says it is.
+        return Math.max(GameConfig.TARGET_FPS * 2, (int) Math.round(scaled));
     }
 
     /** True for exactly one tick, when a venom bolt should be spawned. */

@@ -322,10 +322,10 @@ public final class GameConfig {
     public static final int VENOM_FLIGHT_TICKS = TARGET_FPS * 5 + TARGET_FPS / 2;
 
     /** Shortest gap between boss attacks. */
-    public static final int VENOM_INTERVAL_MIN_TICKS = TARGET_FPS * 5;
+    public static final int VENOM_INTERVAL_MIN_TICKS = TARGET_FPS * 2;
 
     /** Longest gap between boss attacks. */
-    public static final int VENOM_INTERVAL_MAX_TICKS = TARGET_FPS * 10;
+    public static final int VENOM_INTERVAL_MAX_TICKS = TARGET_FPS * 3;
 
     /** Height of the boss health bar under the HUD. */
     public static final int BOSS_BAR_HEIGHT = 14;

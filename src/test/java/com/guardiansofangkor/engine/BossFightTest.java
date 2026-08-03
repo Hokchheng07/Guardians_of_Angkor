@@ -483,31 +483,35 @@ class BossFightTest {
     }
 
     @Test
-    @DisplayName("a bolt always lands inside the phase that threw it")
-    void venomOutlivesNothing() {
-        // The field is swept when a phase ends. A bolt slower than its own
-        // phase would be cleared away unanswered on every tier that stretches
-        // the flight, which teaches the player to ignore the barrage entirely.
+    @DisplayName("a bolt is answerable on every tier")
+    void venomIsAlwaysAnswerable() {
+        // Flight time used to be capped to the shortest phase, because a phase
+        // ended on a clock and a slow bolt could be swept away unanswered. A
+        // phase now waits for its own bolts, so the only remaining rule is that
+        // a bolt is never too fast to read.
         for (Difficulty tier : Difficulty.values()) {
             BossFight boss = new BossFight(EnemyType.KRONG_REAP, VERSES, tier);
-            assertTrue(boss.venomFlightTicks() < BossFight.PHASE_MIN_TICKS,
-                    tier + " throws bolts that outlive the shortest phase");
             assertTrue(boss.venomFlightTicks() >= GameConfig.TARGET_FPS * 2,
                     tier + " throws bolts too fast to read");
         }
     }
 
     @Test
-    @DisplayName("the attack gap is a random five to ten seconds")
+    @DisplayName("bolts are spaced closely enough to read as a barrage")
     void venomIntervalStaysInItsWindow() {
+        // Spacing, not a phase clock. A phase now launches a quota of three to
+        // eight, so the old five-to-ten-second gap would have meant half a
+        // minute of standing about between bolts.
         BossFight boss = fighting();
 
         for (int i = 0; i < 500; i++) {
             int gap = boss.venomIntervalTicks();
             assertTrue(gap >= GameConfig.VENOM_INTERVAL_MIN_TICKS
                             && gap <= GameConfig.VENOM_INTERVAL_MAX_TICKS,
-                    "gap of " + gap + " ticks is outside five to ten seconds");
+                    "gap of " + gap + " ticks is outside its window");
         }
+        assertTrue(GameConfig.VENOM_INTERVAL_MAX_TICKS <= GameConfig.TARGET_FPS * 4,
+                "spacing this wide turns a barrage back into a trickle");
     }
 
     @Test
@@ -607,9 +611,20 @@ class BossFightTest {
         return boss;
     }
 
+    /**
+     * Types a whole paragraph, which is what provokes an attack phase.
+     *
+     * <p>{@link #paragraphBoss()} runs two sentences to the paragraph, so this
+     * is two verses — a single verse leaves the boss still typing.
+     */
+    private static void typeParagraph(BossFight boss) {
+        typeVerse(boss);
+        typeVerse(boss);
+    }
+
     /** Ticks until the current attack phase has run out. */
     private static void waitOutThePhase(BossFight boss) {
-        for (int i = 0; i <= BossFight.PHASE_MAX_TICKS && boss.isAttacking(); i++) {
+        for (int i = 0; i <= BossFight.PHASE_STUCK_TICKS && boss.isAttacking(); i++) {
             boss.update();
         }
     }
@@ -628,10 +643,92 @@ class BossFightTest {
     }
 
     @Test
-    @DisplayName("a phase lasts seven to ten seconds")
-    void phasesRunSevenToTenSeconds() {
-        assertEquals(GameConfig.TARGET_FPS * 7, BossFight.PHASE_MIN_TICKS);
-        assertEquals(GameConfig.TARGET_FPS * 10, BossFight.PHASE_MAX_TICKS);
+    @DisplayName("a phase ends on its objective, not on a clock")
+    void phasesEndOnTheirObjective() {
+        // The whole point of the redesign. A phase sends a fixed number of
+        // attacks and then waits for the field to clear — so a player who deals
+        // with them quickly gets the paragraph back quickly, and one who does
+        // not is not rescued by a timer.
+        BossFight boss = paragraphBoss();
+        typeParagraph(boss);
+        assertTrue(boss.isAttacking(), "a finished paragraph should provoke a phase");
+
+        int scheduled = boss.objectiveRemaining();
+        assertTrue(scheduled >= 2, "a phase must actually ask for something");
+
+        // Nothing is reported live, so the phase ends once its quota is sent.
+        for (int i = 0; i < BossFight.PHASE_STUCK_TICKS && boss.isAttacking(); i++) {
+            boss.update();
+        }
+        assertFalse(boss.isAttacking(), "the phase never met its objective");
+    }
+
+    @Test
+    @DisplayName("a phase will not end while its attacks are still live")
+    void phaseWaitsForTheFieldToClear() {
+        // The field is what ends the phase. While something the boss sent is
+        // still on the plaza, the paragraph stays away however long it takes.
+        BossFight boss = paragraphBoss();
+        typeParagraph(boss);
+
+        for (int i = 0; i < GameConfig.TARGET_FPS * 30; i++) {
+            boss.reportField(1);
+            boss.update();
+        }
+        assertTrue(boss.isAttacking(),
+                "the phase ended while one of its own attacks was still alive");
+
+        // Clear the field and it should finish promptly.
+        for (int i = 0; i < GameConfig.TARGET_FPS * 5 && boss.isAttacking(); i++) {
+            boss.reportField(0);
+            boss.update();
+        }
+        assertFalse(boss.isAttacking(), "the phase did not end once the field cleared");
+    }
+
+    @Test
+    @DisplayName("the stuck guard is a bug guard, not a pacing timer")
+    void stuckGuardIsGenerous() {
+        // If this ever fires in play, something is broken. It has to be far
+        // longer than any honest phase so that it never becomes the thing that
+        // ends one.
+        assertTrue(BossFight.PHASE_STUCK_TICKS >= GameConfig.TARGET_FPS * 45,
+                "too tight to be a bug guard — it would start pacing the fight");
+    }
+
+    @Test
+    @DisplayName("a phase that jams is broken out of rather than hanging the run")
+    void stuckPhaseIsBrokenOut() {
+        // Simulates the failure the guard exists for: something the boss sent
+        // never resolves. Without the guard the run would hang here forever.
+        BossFight boss = paragraphBoss();
+        typeParagraph(boss);
+
+        for (int i = 0; i <= BossFight.PHASE_STUCK_TICKS + 2; i++) {
+            boss.reportField(1);
+            boss.update();
+        }
+        assertFalse(boss.isAttacking(), "a jammed phase hung the fight");
+    }
+
+    @Test
+    @DisplayName("each phase asks for more than the last")
+    void phasesEscalate() {
+        // Escalation used to live in the phase length. Length now belongs to
+        // the player, so the quota is where the fight gets harder.
+        BossFight boss = paragraphBoss();
+
+        typeParagraph(boss);
+        int first = boss.objectiveRemaining();
+        for (int i = 0; i < BossFight.PHASE_STUCK_TICKS && boss.isAttacking(); i++) {
+            boss.update();
+        }
+
+        typeParagraph(boss);
+        int second = boss.objectiveRemaining();
+
+        assertTrue(second > first,
+                "phase two asked for " + second + ", phase one asked for " + first);
     }
 
     @Test
@@ -706,7 +803,7 @@ class BossFightTest {
         typeVerse(boss);
         typeVerse(boss);
 
-        for (int i = 0; i <= BossFight.PHASE_MAX_TICKS; i++) {
+        for (int i = 0; i <= BossFight.PHASE_STUCK_TICKS; i++) {
             boss.update();
             if (boss.isPhaseJustEnded()) {
                 boss.update();
@@ -767,7 +864,7 @@ class BossFightTest {
             assertTrue(boss.isAttacking());
 
             boolean attacked = false;
-            for (int i = 0; i <= BossFight.PHASE_MAX_TICKS && boss.isAttacking(); i++) {
+            for (int i = 0; i <= BossFight.PHASE_STUCK_TICKS && boss.isAttacking(); i++) {
                 boss.update();
                 attacked |= boss.isVenomDue() || boss.isMinionDue();
             }
@@ -782,7 +879,7 @@ class BossFightTest {
 
         assertTrue(boss.minionsPerPhase() >= 2, "a summon of one is not a phase");
         assertTrue(boss.minionIntervalTicks() * boss.minionsPerPhase()
-                        <= BossFight.PHASE_MAX_TICKS,
+                        <= BossFight.PHASE_STUCK_TICKS,
                 "the phase would end before it finished summoning");
     }
 
@@ -974,16 +1071,22 @@ class BossFightTest {
     }
 
     @Test
-    @DisplayName("venom carries a word of its own")
+    @DisplayName("venom carries an order, not a noun")
     void venomIsTypeable() {
+        // Venom used to draw six-and-seven letter nouns from the medium pool.
+        // It now draws imperatives — `repel`, `shield`, `sever` — because a bolt
+        // gives about five seconds in the middle of a loud fight, and the word
+        // has to read as an instruction at a glance rather than as vocabulary.
+        // Shorter per bolt is deliberate: the pressure comes from how many
+        // arrive, not from how hard each one is.
         GameState state = atTheFinale();
         Projectile venom = waitForVenom(state);
 
         assertNotNull(venom);
         assertTrue(venom.isVenom());
         assertFalse(venom.getWord().isBlank(), "venom must be answerable");
-        assertTrue(venom.getWord().length() >= 5,
-                "a middling word, not a two-letter freebie: " + venom.getWord());
+        assertTrue(state.getWordBank().getActionWords().contains(venom.getWord()),
+                "venom should be an action word, got: " + venom.getWord());
     }
 
     @Test

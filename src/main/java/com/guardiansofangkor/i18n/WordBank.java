@@ -157,6 +157,11 @@ public class WordBank {
                     "epic", FALLBACK_EPIC),
             new LinkedHashMap<>(FALLBACK_BOSS_POOLS),
             FALLBACK_PROJECTILE,
+            // Deliberately empty: with no JSON there is nothing to guarantee
+            // these are disjoint from the fallback vocabulary, and venomWord
+            // falls back to the medium pool rather than risk a bolt and a verse
+            // word colliding.
+            List.of(),
             new LinkedHashMap<>(FALLBACK_BANDS),
             new LinkedHashMap<>(FALLBACK_PARAGRAPHS));
 
@@ -180,6 +185,9 @@ public class WordBank {
     private final Map<String, List<String>> pools;
     private final Map<String, List<String>> bossPools;
     private final List<String> projectileWords;
+
+    /** Imperatives for boss venom. Empty when running on the built-in fallback. */
+    private final List<String> actionWords;
     private final Map<String, List<Band>> bands;
     private final Map<String, List<List<String>>> bossParagraphs;
 
@@ -203,6 +211,7 @@ public class WordBank {
         this.pools = data.pools();
         this.bossPools = data.bossPools();
         this.projectileWords = data.projectileWords();
+        this.actionWords = data.actionWords();
         this.bands = data.bands();
         this.bossParagraphs = data.bossParagraphs();
 
@@ -586,16 +595,32 @@ public class WordBank {
     }
 
     /**
-     * A middling word for a boss venom bolt.
+     * An ACTION WORD for a boss venom bolt — an imperative, not a noun.
      *
-     * <p>Six or seven letters: long enough to be a real interruption to the
-     * verse, short enough to answer in the five and a half seconds a bolt
-     * takes to arrive. Drawn from the {@code medium} pool rather than from the
-     * band the run is in, because the finale is past the last band and its
-     * difficulty is set by the paragraph, not by the bolts.
+     * <p>Drawn from the {@code action} pool, which exists for this one call
+     * site. Four to six letters and always a command the player is being told
+     * to carry out: {@code repel}, {@code shield}, {@code sever}. A bolt gives
+     * about five seconds and arrives while the fight is already loud, so the
+     * word has to read as <em>do this now</em> at a glance. An unfamiliar noun
+     * would be a fine enemy word and a bad order.
+     *
+     * <p>That pool is deliberately disjoint from every other list in the file —
+     * no enemy pool, no thrown-bolt word, no boss word, and nothing that
+     * appears anywhere in a boss paragraph. The exclusions are asserted in
+     * {@code WordBankTest}, not maintained by eye: the paragraph rule alone
+     * quietly rejected {@code ward}, {@code stop}, {@code hold} and {@code wall},
+     * all of which look like obvious action words until you notice the finale
+     * already says them.
+     *
+     * <p>{@code exclude} is therefore belt and braces rather than the guarantee.
+     * It stays because it costs nothing and because the day someone lets venom
+     * fly during the verse, it is the thing that keeps one keystroke from
+     * meaning two different things.
      */
     public String venomWord(List<String> exclude) {
-        List<String> pool = pools.getOrDefault("medium", List.of());
+        List<String> pool = actionWords.isEmpty()
+                ? pools.getOrDefault("medium", List.of())
+                : actionWords;
         List<String> candidates = new ArrayList<>();
         for (String word : pool) {
             if (exclude == null || !exclude.contains(word)) {
@@ -605,15 +630,15 @@ public class WordBank {
         if (!candidates.isEmpty()) {
             return candidates.get(random.nextInt(candidates.size()));
         }
-        // Every medium word is spoken for. Widen rather than repeat a word the
-        // verse also wants, which would make one keystroke mean two things.
+        // Every action word is spoken for. Widen rather than repeat a word
+        // something else already wants.
         for (String word : words) {
             if (exclude == null || !exclude.contains(word)) {
                 candidates.add(word);
             }
         }
         return candidates.isEmpty()
-                ? "shrine"
+                ? "repel"
                 : candidates.get(random.nextInt(candidates.size()));
     }
 
@@ -746,6 +771,33 @@ public class WordBank {
         return Collections.unmodifiableList(words);
     }
 
+    /**
+     * The action words boss venom draws from.
+     *
+     * <p>Exposed so the exclusion rules can be asserted rather than trusted —
+     * these must never overlap the enemy pools, the thrown-bolt pool, the boss
+     * pools, or the text of any boss paragraph.
+     */
+    public List<String> getActionWords() {
+        return Collections.unmodifiableList(actionWords);
+    }
+
+    /** Every sentence of every boss paragraph, for the same assertions. */
+    public List<String> getAllParagraphSentences() {
+        List<String> all = new ArrayList<>();
+        for (List<List<String>> perTier : bossParagraphs.values()) {
+            for (List<String> paragraph : perTier) {
+                all.addAll(paragraph);
+            }
+        }
+        return all;
+    }
+
+    /** Immutable view of the thrown-bolt and pickup pool. */
+    public List<String> getProjectileWords() {
+        return Collections.unmodifiableList(projectileWords);
+    }
+
     /** Immutable view of one named pool, e.g. {@code "short"}. Never null. */
     public List<String> getPool(String name) {
         return Collections.unmodifiableList(pools.getOrDefault(name, List.of()));
@@ -784,6 +836,7 @@ public class WordBank {
     private record WordData(Map<String, List<String>> pools,
                             Map<String, List<String>> bossPools,
                             List<String> projectileWords,
+                            List<String> actionWords,
                             Map<String, List<Band>> bands,
                             Map<String, List<List<String>>> bossParagraphs) {
 
@@ -869,7 +922,8 @@ public class WordBank {
         }
 
         return new WordData(pools, bossPools,
-                projectile.isEmpty() ? FALLBACK_PROJECTILE : projectile, bands,
+                projectile.isEmpty() ? FALLBACK_PROJECTILE : projectile,
+                Json.stringsAt(root, "action"), bands,
                 paragraphs.isEmpty() ? new LinkedHashMap<>(FALLBACK_PARAGRAPHS) : paragraphs);
     }
 

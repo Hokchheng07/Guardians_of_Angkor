@@ -29,11 +29,28 @@ medium 6-7, long 8-10, epic 11+) and `bossPools` (novice 5-7, adept
 8-10, master 11-13, legend 14+), plus a curated `projectile` pool of
 2-3 letter words shared with power-up pickups.
 
-`tricky` is the one pool NOT graded by length. It holds words that are
-awkward to type regardless of size — repeated letters, uncommon
-digraphs, long finger travel (rhythm, sphinx, glyph, quartz, syzygy) —
-and deliberately overlaps the length pools. Later level bands opt into
-it. Do not "fix" it to fit a length band; length is not what it is for.
+`tricky` and `lore` are the two pools NOT graded by length.
+
+`tricky` holds spellings awkward to type at any size — y-as-vowel
+(glyph, lymph, sylph, syzygy), silent letters (psalm, qualm), rare
+digraphs and q/z clusters (sphinx, zephyr, quartz, oblique). `lore`
+holds the game's Khmer and mythological vocabulary (naga, apsara,
+garuda, prasat, baray, reamker). Both are opted into by LATER bands in
+`difficulties`, which is what stages the learning curve. Do not "fix"
+either to fit a length band; length is not what they are for.
+
+A WORD LIVES IN EXACTLY ONE POOL. This is load-bearing and there is a
+test (`poolsDoNotOverlap`) enforcing it. `tricky` used to overlap the
+length pools deliberately, and the result was that it gated nothing:
+every one of its 51 words was also in `short` or `medium`, so glyph,
+myrrh, psalm, lymph, nymph, qualm, sylph and wyrm were all served at
+Easy LEVEL ONE while the pool that was supposed to hold them back sat
+there doing nothing. An overlap silently defeats the gating, because
+the word stays reachable through whichever length pool also has it.
+
+Short is not the same thing as easy. A four-letter word can be the
+hardest thing on screen for a beginner, which is the distinction these
+two pools exist to express.
 
 VOCABULARY IS ANGKOR-FLAVOURED ON PURPOSE and there are tests asserting
 it. Temple and Khmer terms (apsara, prasat, devata, garuda, laterite,
@@ -509,12 +526,25 @@ implemented=false; MenuState refuses START_RUN for them. Their
 multipliers are already recorded so the intended balance is not lost.
 
 Easy is not merely slower — the word bank's Easy bands hold back the
-long vocabulary for ten levels, and WaveWeights delays the heavier
-types by two levels, because a beginner's problem is finding the
-letters rather than the clock and meeting five monsters in six levels
-is a lot to learn at once. Per-type speed multipliers are deliberately
+long vocabulary, and WaveWeights delays the heavier types by two
+levels, because a beginner's problem is finding the letters rather than
+the clock and meeting five monsters in six levels is a lot to learn at
+once.
+
+Easy has FOUR bands where the other tiers have three, and the extra one
+is the point: each step adds exactly one new kind of difficulty rather
+than several at once. L1-3 common short English, L4-7 common longer
+English, L8-11 the Khmer vocabulary arrives, L12-15 the awkward
+spellings arrive. A player should be able to name what got harder. Per-type speed multipliers are deliberately
 tier-INDEPENDENT: the tier scales the base speed, so the relationship
 between light and heavy types survives at every tier.
+
+EVERY BUILT TIER IS OPEN FROM THE FIRST LAUNCH. There is no unlock
+ladder — MenuState.isEnabled(Difficulty) checks isImplemented() and
+nothing else. DifficultyProgress still tracks what has been cleared and
+still has isUnlocked(), but it GATES NOTHING; it is a record for the
+save file and the end card. Do not reintroduce it as a gate without
+deciding that deliberately.
 
 EASY, MEDIUM and HARD ALL END ON LEVEL 15. A tier changes how hard the
 same run is, not how long it is, and a player moving up from Easy
@@ -561,12 +591,46 @@ COMPLETED on `currentWord() + " "`, never on the bare word, so a fully
 typed but unconfirmed word still shows as PROGRESS (want.startsWith(want)
 is trivially true) rather than jumping ahead on its own.
 
+Boss phases are OBJECTIVE-BASED, not timed. A phase sends a quota of
+attacks (BossFight.attacksFor: kind × tier × phases elapsed) and ends
+only when the quota is spent AND the field it filled is clear. Its
+length therefore belongs to the player, not to a countdown.
+
+This cannot softlock, and the reason matters: both attack kinds
+SELF-RESOLVE. An untyped summon walks in and breaches; an unanswered
+bolt lands. Either way it leaves the field and costs a life, so a
+player who stops typing loses the run rather than hanging the phase.
+Never add a boss attack that can sit on the field indefinitely without
+also giving it a resolution path.
+
+BossFight knows what it scheduled; only GameState owns the entity
+lists. So GameState.updateBoss calls boss.reportField(census) and THEN
+boss.update() — both in that method, in that order, so the dependency
+is visible. The census counts ACTIVE entities only: a defeated summon
+lingers through its death fade, and counting it would hold every phase
+open an extra second per kill.
+
+PHASE_STUCK_TICKS (60s) is a BUG GUARD, not pacing. Phases measure
+6-20s; if it ever fires, something is stuck and it logs loudly.
+
+venomIntervalTicks is SPAWN SPACING (2-3s), not a phase clock. It was
+5-10s when it decided how often a bolt appeared across a seven-second
+phase. With a quota of 3-8 that would be half a minute of standing
+about between bolts.
+
 Venom (Projectile.Kind.VENOM, purple) is deflected by typing its word.
 It flies SLOWLY (5.5s, scaled by the tier) and comes every 5-10 seconds
 at random — a fixed cadence becomes a rhythm players stop reacting to.
-Its words come from the medium pool and are excluded against
-BossFight.remainingWords(), so no live bolt can ever share a word with
-the verse. Finishing a verse still fires a counter-volley clearing the
+Its words come from the `action` pool — IMPERATIVES, not nouns
+(repel, shield, sever). A bolt gives about five seconds mid-fight, so
+the word must read as an order at a glance; an unfamiliar noun is a
+fine enemy word and a bad instruction. That pool is disjoint from every
+other list in the file: no enemy pool, no thrown-bolt word, no boss
+word, and nothing appearing in any boss paragraph. Asserted, not
+maintained by eye — the paragraph rule alone rejects ward, stop, hold
+and wall, all of which look like obvious action words until you notice
+the finale already says them. Words are also excluded against
+BossFight.remainingWords() as defence in depth. Finishing a verse still fires a counter-volley clearing the
 sky, which is what makes the paragraph a defence and not just a score.
 A venom word never contains a space, so the confirm-with-space check
 above can never collide with a bolt.

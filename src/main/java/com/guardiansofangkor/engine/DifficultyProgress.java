@@ -52,7 +52,17 @@ public final class DifficultyProgress {
     }
 
     /**
-     * True when a run may be started on {@code tier}.
+     * True when {@code tier}'s predecessor has been cleared.
+     *
+     * <p><b>This no longer gates anything.</b> {@code MenuState} used to require
+     * it before a run could start; every built tier is now open from the first
+     * launch. What survives here is the ladder as a <em>description</em> of how
+     * far a player has got — useful for a badge or an end-of-run line, and kept
+     * because ripping it out would break the save format for no gain.
+     *
+     * <p>Do not reintroduce it as a gate without deciding that deliberately. A
+     * mechanism that looks like it restricts something but does not is how the
+     * word bank ended up with a {@code tricky} pool that held nothing back.
      *
      * <p>Only the immediately preceding rung is checked, not the whole chain
      * below it. Clearing Medium is the only way to reach Hard in normal play, so

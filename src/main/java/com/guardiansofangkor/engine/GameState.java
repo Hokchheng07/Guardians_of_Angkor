@@ -290,6 +290,12 @@ public class GameState {
         if (boss == null) {
             return;
         }
+        // The census first, then the decision. BossFight knows what it
+        // scheduled; only this class owns the enemy and projectile lists, so
+        // the world is reported in and the boss decides whether its phase is
+        // done. Both calls sit here, in this order, so the dependency is
+        // visible rather than an ordering rule someone has to remember.
+        boss.reportField(countLiveBossAttacks());
         boss.update(timeScale);
 
         if (boss.isVenomDue()) {
@@ -304,6 +310,29 @@ public class GameState {
         if (boss.isFinished()) {
             declareVictory();
         }
+    }
+
+    /**
+     * What the boss's current phase put on the field and has not got back.
+     *
+     * <p>Counts ACTIVE entities only. A defeated summon stays in the list
+     * through its death fade and a deflected bolt through its dissolve, and
+     * counting those would hold every phase open for an extra second per kill —
+     * so the player would clear the field and watch nothing happen.
+     */
+    private int countLiveBossAttacks() {
+        int live = 0;
+        for (Enemy enemy : enemies) {
+            if (enemy.isActive()) {
+                live++;
+            }
+        }
+        for (Projectile projectile : projectiles) {
+            if (projectile.isActive() && projectile.getKind() == Projectile.Kind.VENOM) {
+                live++;
+            }
+        }
+        return live;
     }
 
     /**

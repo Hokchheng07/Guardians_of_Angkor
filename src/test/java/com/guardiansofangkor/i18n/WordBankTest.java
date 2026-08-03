@@ -42,7 +42,8 @@ class WordBankTest {
     void everyPoolIsPopulated() {
         WordBank bank = bank(2);
 
-        for (String pool : List.of("tiny", "short", "medium", "long", "epic", "tricky")) {
+        for (String pool : List.of("tiny", "short", "medium", "long", "epic",
+                "tricky", "lore")) {
             assertFalse(bank.getPool(pool).isEmpty(), "pool '" + pool + "' is empty");
         }
         for (String rank : List.of("novice", "adept", "master", "legend")) {
@@ -85,6 +86,135 @@ class WordBankTest {
                 assertFalse(bank.getWords().contains(word),
                         "'" + word + "' is both a boss word and an ordinary one");
             }
+        }
+    }
+
+    @Test
+    @DisplayName("no word lives in two pools")
+    void poolsDoNotOverlap() {
+        // This is the whole reason the difficulty bands work. `tricky` and
+        // `lore` gate their words by being opted into late — and an overlap
+        // silently defeats that, because the word stays reachable through
+        // whichever length pool also holds it.
+        //
+        // It is not hypothetical. Every one of tricky's 51 words was also in a
+        // length pool, so the pool gated nothing and `glyph`, `myrrh`, `psalm`,
+        // `lymph`, `nymph`, `qualm`, `sylph` and `wyrm` were all being served
+        // at Easy level one.
+        WordBank bank = bank(20);
+        List<String> names = List.of("tiny", "short", "medium", "long", "epic",
+                "tricky", "lore");
+
+        for (int i = 0; i < names.size(); i++) {
+            for (int j = i + 1; j < names.size(); j++) {
+                List<String> a = new ArrayList<>(bank.getPool(names.get(i)));
+                a.retainAll(bank.getPool(names.get(j)));
+                assertTrue(a.isEmpty(), names.get(i) + " and " + names.get(j)
+                        + " both contain " + a);
+            }
+        }
+    }
+
+    // ---- action words ------------------------------------------------------
+
+    @Test
+    @DisplayName("action words are an imperative pool of their own")
+    void actionWordsExist() {
+        WordBank bank = bank(30);
+        List<String> action = bank.getActionWords();
+
+        assertFalse(action.isEmpty(), "boss venom has nothing to say");
+        assertTrue(action.size() >= 30,
+                "too few to avoid repeating within one fight: " + action.size());
+        for (String word : action) {
+            assertTrue(word.length() >= 4 && word.length() <= 6,
+                    "'" + word + "' is the wrong size for a five-second order");
+            assertTrue(word.matches("[a-z]+"), "'" + word + "' is not plainly typeable");
+        }
+    }
+
+    @Test
+    @DisplayName("an action word is never anything else in the game")
+    void actionWordsAreExclusive() {
+        // Three separate rules, and none of them can be maintained by eye. The
+        // paragraph rule alone rejects `ward`, `stop`, `hold` and `wall` — all
+        // of which look like obvious action words until you notice the finale
+        // already says them.
+        WordBank bank = bank(31);
+        List<String> action = bank.getActionWords();
+
+        for (String word : action) {
+            assertFalse(bank.getWords().contains(word),
+                    "'" + word + "' is also an enemy word");
+            assertFalse(bank.getProjectileWords().contains(word),
+                    "'" + word + "' is also a thrown-bolt word");
+            for (String rank : List.of("novice", "adept", "master", "legend")) {
+                assertFalse(bank.getBossPool(rank).contains(word),
+                        "'" + word + "' is also a boss word");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("no action word appears inside a boss paragraph")
+    void actionWordsNeverCollideWithTheVerse() {
+        // The stance machine already keeps venom and the verse from being live
+        // at once, so this is defence in depth — but it is the guarantee that
+        // survives someone later letting the two overlap.
+        WordBank bank = bank(32);
+        List<String> action = bank.getActionWords();
+
+        for (String sentence : bank.getAllParagraphSentences()) {
+            for (String word : sentence.split(" ")) {
+                assertFalse(action.contains(word),
+                        "'" + word + "' is both an action word and a verse word");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("venom draws orders, not nouns")
+    void venomDrawsFromTheActionPool() {
+        WordBank bank = bank(33);
+
+        for (int i = 0; i < 200; i++) {
+            String venom = bank.venomWord(List.of());
+            assertTrue(bank.getActionWords().contains(venom),
+                    "'" + venom + "' did not come from the action pool");
+        }
+    }
+
+    @Test
+    @DisplayName("Easy opens on common English, not on spelling puzzles")
+    void easyOpensGently() {
+        // The reported bug: short words are not the same thing as easy words.
+        // These are all four or five letters and all reach the fingers badly.
+        WordBank bank = bank(21);
+        List<String> opening = bank.vocabularyFor(bank.policyFor("easy", 1));
+
+        for (String awkward : List.of("glyph", "myrrh", "psalm", "lymph",
+                "nymph", "qualm", "sylph", "wyrm")) {
+            assertFalse(opening.contains(awkward),
+                    "'" + awkward + "' is too awkward for a beginner's first level");
+        }
+        for (String common : List.of("stone", "fire", "leaf", "wolf", "monk")) {
+            assertTrue(opening.contains(common),
+                    "'" + common + "' is exactly what Easy should open on");
+        }
+    }
+
+    @Test
+    @DisplayName("the world's own vocabulary arrives once the basics are learned")
+    void loreIsStagedNotRemoved() {
+        // The Khmer terms are the game's identity, so they are delayed rather
+        // than dropped — a beginner meets them after they can already type.
+        WordBank bank = bank(22);
+        List<String> opening = bank.vocabularyFor(bank.policyFor("easy", 1));
+        List<String> later = bank.vocabularyFor(bank.policyFor("easy", 11));
+
+        for (String term : List.of("naga", "baray", "bayon", "preah", "stupa")) {
+            assertFalse(opening.contains(term), "'" + term + "' arrives too early");
+            assertTrue(later.contains(term), "'" + term + "' should arrive later, not vanish");
         }
     }
 
