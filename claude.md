@@ -379,14 +379,66 @@ loaded with Font.createFont and registerFont or Khmer draws as tofu.
 Several alternative filenames are accepted so nobody has to rename a
 download.
 
-## Menu wordmark font
-FontManager.displayFont walks a SEPARATE chain for the "ANGKOR" title:
-Cinzel Decorative (bundled), Cinzel (bundled), either already installed
-on the machine, then the plain bold serif the title always used. Same
-optional-asset treatment as Khmer, for the same reason — not committed,
-not required, logged once if missing (resources/fonts/README.md). Unlike
-Khmer this is a styling choice rather than a glyph-coverage one, so the
-uncovered fallback is not tofu, just a plainer title.
+## Interface font chains
+Three chains beyond Khmer, all in FontManager, all optional and all
+degrading to platform serifs (resources/fonts/README.md):
+
+- displayFont — Cinzel Decorative. The ANGKOR wordmark, the modal
+  headline, the stat numbers.
+- uiSerifFont — plain Cinzel. Button labels, stat labels, tracked caps.
+- bodyFont — EB Garamond italic. Subtitles, captions, footnotes.
+
+Cinzel and Cinzel Decorative are SEPARATE chains on purpose. Decorative's
+swash capitals carry a 49px wordmark and turn a 14px tracked button label
+into a smear, so anything small prefers the plain cut. Do not collapse
+them. Unlike Khmer these are styling choices rather than glyph coverage,
+so the uncovered fallback is not tofu, just plainer.
+
+## Front-end visual design
+MenuRenderer and HUDRenderer.drawGameOver are ports of the Figma design
+(Main Menu Screen Illustration). Its responsive clamps are RESOLVED at
+the fixed 1280x720 rather than reimplemented — clamp(28px,3.5vw,52px)
+is written as 45, because a clamp that can only produce one value is
+that value with arithmetic in the way. If the window ever becomes
+resizable these become functions again.
+
+The design's SVG components are ported to Java2D in renderer/Ornament
+(drawNagaDivider, drawLotusFlame, drawStoneTexture, drawGoldRule,
+drawGoldSeam, drawCornerBracket, drawDotRow) rather than shipped as
+images. They are small flat vector marks, so a Path2D is sharper and
+cheaper at the sizes used — and it recolours with the palette, which is
+what lets the end-of-run card draw itself in gold or in danger red from
+one code path.
+
+Palette carries the design's five golds and three stones as named
+tokens. Everything else is expressed in terms of those; do not
+reintroduce hex literals in renderers.
+
+Two deliberate departures from the design, both because the design is a
+mouse-driven web mock and this is a keyboard-driven Swing game:
+
+- The design marks NEW GAME as a permanent primary (gold pill) and
+  animates hover. There is no cursor here, so the pill follows the
+  SELECTED entry instead. Showing what the arrow keys are on matters
+  more than marking one entry special — without it the menu cannot be
+  navigated. A selected but LOCKED entry deliberately does not get the
+  pill: the pill means "press this", and offering it for something that
+  will refuse is a lie the player only discovers by pressing.
+- The modal's three mouse buttons become two key-hinted ones (TAB then
+  ENTER, ESC), matching the controls that actually exist. Drawing a
+  mouse affordance for something the mouse cannot do is worse than
+  drawing no button.
+
+The modal's backdrop blur is dropped for a darker scrim. A full-screen
+convolve every frame is exactly the per-frame cost the render pass was
+rebuilt to avoid, and the blur's job — pushing the play field back — is
+one a scrim does for free.
+
+The card is 620x552 at y=66 and its height is still a CONSTANT, not
+measured. There is a layout arithmetic check in the header comment path:
+content runs 94 to ~574 against a card bottom of 618. Adding a stat row
+or a third line of prose overruns it silently, so re-check the column if
+you change the content.
 
 ## Input field
 TypingInputField is custom-painted (setOpaque(false), paintComponent

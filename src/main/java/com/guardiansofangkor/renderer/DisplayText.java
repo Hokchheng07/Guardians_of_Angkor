@@ -118,10 +118,19 @@ public final class DisplayText {
      * <p>Wide-and-faint through to narrow-and-stronger, which accumulates into a
      * smooth falloff. Stamping the text at offsets instead produces four visible
      * ghosts.
+     *
+     * <p>The bands are deliberately WIDE and FAINT. An earlier version used
+     * narrower, more opaque ones and the result read as a thick coloured outline
+     * traced around every letter rather than as light coming off them — worst on
+     * the end-of-run headline, where the bands merged into a single blob and the
+     * counters of letters like "a" and "e" filled in. Spreading the same total
+     * energy over more distance is what turns an outline back into a bloom, so
+     * if this ever needs to be stronger, raise the strength at the call site
+     * rather than fattening these.
      */
     private static void drawHalo(Graphics2D g2, Shape outline, Color glow, float strength) {
-        float[] widths = {26f, 19f, 13f, 8f, 4f};
-        float[] alphas = {0.10f, 0.13f, 0.17f, 0.22f, 0.28f};
+        float[] widths = {38f, 28f, 20f, 13f, 7f};
+        float[] alphas = {0.045f, 0.055f, 0.07f, 0.085f, 0.11f};
 
         g2.setColor(glow);
         for (int i = 0; i < widths.length; i++) {

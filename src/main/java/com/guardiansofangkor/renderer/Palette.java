@@ -19,6 +19,59 @@ import java.util.Map;
  */
 public final class Palette {
 
+    // ---- design tokens -----------------------------------------------------
+    //
+    // The five golds and three stones the Figma design is written in. Everything
+    // below is expressed in terms of these rather than repeating hex literals,
+    // so retuning the palette is one edit here.
+
+    /** Primary accent — borders, rules, glow. */
+    public static final Color GOLD = new Color(0xD4, 0xAF, 0x37);
+
+    /** Bright highlight and text on dark. */
+    public static final Color GOLD_LIGHT = new Color(0xF7, 0xD1, 0x6E);
+
+    /** Muted flourishes and inactive ornament. */
+    public static final Color GOLD_DIM = new Color(0x9A, 0x7B, 0x3A);
+
+    /** Secondary text and idle button labels. */
+    public static final Color GOLD_MID = new Color(0xC9, 0xA8, 0x4C);
+
+    /** Subtitles and captions. */
+    public static final Color GOLD_WARM = new Color(0xA0, 0x88, 0x40);
+
+    /** Deepest panel background. */
+    public static final Color STONE_DARK = new Color(0x1E, 0x19, 0x14);
+
+    /** Button hover/selected background. */
+    public static final Color STONE_MID = new Color(0x30, 0x20, 0x18);
+
+    /** Modal background, top of the gradient. */
+    public static final Color STONE_LIGHT = new Color(0x24, 0x19, 0x0F);
+
+    /** Modal background, middle of the gradient. */
+    public static final Color STONE_MODAL_MID = new Color(0x1E, 0x15, 0x10);
+
+    /** Modal background, bottom of the gradient. */
+    public static final Color STONE_MODAL_LOW = new Color(0x1A, 0x12, 0x08);
+
+    /** Stat labels and the footer line — gold pushed almost to brown. */
+    public static final Color GOLD_FAINT = new Color(0x7A, 0x60, 0x30);
+
+    /** Stat values that are not the highlighted one. */
+    public static final Color GOLD_VALUE = new Color(0xD4, 0xB8, 0x6A);
+
+    /** The version string under the menu — the quietest text in the game. */
+    public static final Color GOLD_GHOST = new Color(0x6B, 0x55, 0x30);
+
+    /** Mortar lines in the worn-stone texture overlay. */
+    public static final Color STONE_MORTAR = new Color(0x8B, 0x73, 0x55);
+
+    /** Surface cracks in the worn-stone texture overlay. */
+    public static final Color STONE_CRACK = new Color(0x6B, 0x55, 0x40);
+
+    // ---- chrome ------------------------------------------------------------
+
     /** Chrome background — warm stone, near-opaque. */
     public static final Color HUD_BG = new Color(0x1E, 0x19, 0x14, 230);
 
@@ -55,8 +108,27 @@ public final class Palette {
     /** Full-screen dim behind the game over panel. */
     public static final Color SCRIM = new Color(0x14, 0x10, 0x0C, 226);
 
+    /**
+     * The dim behind the end-of-run card.
+     *
+     * <p>Darker and cooler than {@link #SCRIM} — the design pairs it with a
+     * backdrop blur, and without the blur the scrim has to do that separation on
+     * its own.
+     */
+    public static final Color MODAL_SCRIM = new Color(0x08, 0x05, 0x02, 184);
+
     /** Failure accent. */
     public static final Color DANGER = new Color(0xD9, 0x63, 0x54);
+
+    /**
+     * The bright cut of the failure accent.
+     *
+     * <p>Exists so the end-of-run card can be written once and take either
+     * palette: a won run uses gold/gold-light, a lost one danger/danger-light,
+     * and every glow, rule and bracket in that layout reads the pair rather than
+     * branching on the outcome.
+     */
+    public static final Color DANGER_LIGHT = new Color(0xF2, 0x93, 0x86);
 
     /** Warm glow used for the hero rim-light and lock highlights. */
     public static final Color GLOW = HUD_TEXT_GOLD;

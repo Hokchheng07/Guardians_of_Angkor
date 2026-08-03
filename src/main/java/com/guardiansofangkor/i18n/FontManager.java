@@ -92,6 +92,25 @@ public final class FontManager {
         "Cinzel Decorative", "Cinzel",
     };
 
+    /**
+     * The body face — EB Garamond, used for the italic captions, subtitles and
+     * footnotes the design leans on to separate prose from the tracked caps of
+     * the UI face.
+     *
+     * <p>Optional exactly like the others. Without it those lines fall back to
+     * an italic serif, which is the same shape of thing and reads correctly,
+     * just less finely.
+     */
+    private static final String[] BODY_CANDIDATES = {
+        "/fonts/EBGaramond-Regular.ttf",
+        "/fonts/EBGaramond-Italic.ttf",
+        "/fonts/EBGaramond-VariableFont_wght.ttf",
+    };
+
+    private static final String[] BODY_SYSTEM_FALLBACKS = {
+        "EB Garamond", "Garamond", "Adobe Garamond Pro",
+    };
+
     private static Font khmerBase;
     private static String loadedFrom;
     private static boolean loadAttempted;
@@ -99,6 +118,32 @@ public final class FontManager {
     private static Font displayBase;
     private static String displayLoadedFrom;
     private static boolean displayLoadAttempted;
+
+    /**
+     * The UI face — plain Cinzel, for tracked caps on buttons and stat labels.
+     *
+     * <p>Separate from the display chain even though both start at Cinzel,
+     * because the design uses them for different jobs: Cinzel Decorative has
+     * swash capitals that read beautifully at 49px on the wordmark and turn a
+     * 14px button label into a smear. Preferring the plain cut here is the
+     * whole point of having two chains.
+     */
+    private static final String[] UI_CANDIDATES = {
+        "/fonts/Cinzel-SemiBold.ttf",
+        "/fonts/Cinzel-Bold.ttf",
+        "/fonts/Cinzel-Regular.ttf",
+        "/fonts/Cinzel-VariableFont_wght.ttf",
+    };
+
+    private static final String[] UI_SYSTEM_FALLBACKS = {
+        "Cinzel", "Cinzel Decorative",
+    };
+
+    private static Font bodyBase;
+    private static boolean bodyLoadAttempted;
+
+    private static Font uiSerifBase;
+    private static boolean uiSerifLoadAttempted;
 
     private FontManager() {
         // Utility class — not instantiable.
@@ -268,6 +313,83 @@ public final class FontManager {
     public static synchronized String displayLoadedFrom() {
         displayBase();
         return displayLoadedFrom;
+    }
+
+    /** The body serif, or null when nothing usable was found. Resolved once. */
+    public static synchronized Font bodyBase() {
+        if (bodyLoadAttempted) {
+            return bodyBase;
+        }
+        bodyLoadAttempted = true;
+
+        Font bundled = loadFirstAvailableQuietly(BODY_CANDIDATES);
+        if (bundled != null) {
+            bodyBase = bundled;
+            return bodyBase;
+        }
+        bodyBase = findSystemFont(BODY_SYSTEM_FALLBACKS);
+        if (bodyBase == null) {
+            System.out.println("[FontManager] No EB Garamond found — captions fall "
+                    + "back to an italic serif. See resources/fonts/README.md.");
+        }
+        return bodyBase;
+    }
+
+    /**
+     * A font for prose: subtitles, captions and footnotes.
+     *
+     * <p>Falls back to the platform serif, which is the right shape of failure —
+     * these lines are italic serif by intent, so an unstyled italic serif is a
+     * plainer version of the design rather than a broken one.
+     */
+    public static Font bodyFont(int size, int style) {
+        Font base = bodyBase();
+        if (base != null) {
+            return base.deriveFont(style, (float) size);
+        }
+        return new Font(Font.SERIF, style, size);
+    }
+
+    /** The plain inscription serif, or null when nothing usable was found. */
+    public static synchronized Font uiSerifBase() {
+        if (uiSerifLoadAttempted) {
+            return uiSerifBase;
+        }
+        uiSerifLoadAttempted = true;
+
+        Font bundled = loadFirstAvailableQuietly(UI_CANDIDATES);
+        if (bundled != null) {
+            uiSerifBase = bundled;
+            return uiSerifBase;
+        }
+        uiSerifBase = findSystemFont(UI_SYSTEM_FALLBACKS);
+        return uiSerifBase;
+    }
+
+    /**
+     * A font for tracked capitals: button labels, stat labels, small chrome text.
+     *
+     * <p>Falls back to the platform serif rather than to sans, because these are
+     * inscription-style caps and a sans fallback changes what the interface is
+     * saying about itself more than a plainer serif does.
+     */
+    public static Font uiSerifFont(int size, int style) {
+        Font base = uiSerifBase();
+        if (base != null) {
+            return base.deriveFont(style, (float) size);
+        }
+        return new Font(Font.SERIF, style, size);
+    }
+
+    /** {@link #loadFirstAvailable} without the per-file success logging. */
+    private static Font loadFirstAvailableQuietly(String[] paths) {
+        for (String path : paths) {
+            Font font = loadResourceFont(path);
+            if (font != null) {
+                return font;
+            }
+        }
+        return null;
     }
 
     /**

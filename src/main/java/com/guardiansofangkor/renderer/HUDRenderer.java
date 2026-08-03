@@ -19,10 +19,12 @@ import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.GradientPaint;
 import java.awt.Graphics2D;
+import java.awt.LinearGradientPaint;
 import java.awt.geom.Ellipse2D;
 import java.awt.geom.Path2D;
 import java.awt.geom.RoundRectangle2D;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Heads-up display and the game-over screen.
@@ -87,6 +89,22 @@ public class HUDRenderer {
     private Font countFont;
     private Font defendFont;
 
+    // ---- end-of-run modal ---------------------------------------------------
+    //
+    // Its own faces rather than the HUD's, because the modal is the one screen
+    // in the game that is read rather than glanced at, and the design specifies
+    // three faces for it: a decorative display cut for the headline and the
+    // numbers, plain Cinzel for the tracked labels, Garamond for the prose.
+
+    private Font modalTitleFont;
+    private Font modalPreTitleFont;
+    private Font modalBadgeFont;
+    private Font modalStatLabelFont;
+    private Font modalStatValueFont;
+    private Font modalStatBigFont;
+    private Font modalNoteFont;
+    private Font modalFootnoteFont;
+
     public HUDRenderer(Language language) {
         setLanguage(language);
     }
@@ -104,6 +122,15 @@ public class HUDRenderer {
         // animation re-rasterises at its true size instead of upscaling.
         this.countFont = FontManager.uiFont(language, (int) COUNT_SIZE, Font.BOLD);
         this.defendFont = FontManager.uiFont(language, (int) DEFEND_SIZE, Font.BOLD);
+
+        this.modalTitleFont = FontManager.displayFont(34, Font.BOLD);
+        this.modalPreTitleFont = FontManager.bodyFont(13, Font.ITALIC);
+        this.modalBadgeFont = FontManager.uiSerifFont(10, Font.BOLD);
+        this.modalStatLabelFont = FontManager.uiSerifFont(9, Font.BOLD);
+        this.modalStatValueFont = FontManager.displayFont(22, Font.BOLD);
+        this.modalStatBigFont = FontManager.displayFont(26, Font.BOLD);
+        this.modalNoteFont = FontManager.bodyFont(11, Font.ITALIC);
+        this.modalFootnoteFont = FontManager.bodyFont(12, Font.ITALIC);
     }
 
     /**
@@ -656,118 +683,416 @@ public class HUDRenderer {
 
     // ---- game over ---------------------------------------------------------
 
+    /** Modal card geometry — the design's constants, matching the engine's. */
+    private static final int MODAL_W = 620;
+    private static final int MODAL_H = 552;
+    private static final int MODAL_TOP = 66;
+    private static final int MODAL_ARC = 20;
+    private static final int MODAL_PAD_X = 36;
+
+    /** Stat grid: two columns, four rows, one cell per statistic. */
+    private static final int STAT_COLUMNS = 2;
+    private static final int STAT_ROWS = 4;
+
+    /**
+     * The end-of-run card, shared by a won run and a lost one.
+     *
+     * <p>Fires once, when the run ends — not per level. The two outcomes share
+     * every pixel of the layout and differ only in the headline, the accent and
+     * the badge, because they are the same information about the same run. What
+     * they must never share is the wording or the colour: congratulating a
+     * player in the defeat palette, or commiserating in gold, is the one mistake
+     * on this screen nobody would forgive.
+     */
     private void drawGameOver(Graphics2D g2, GameState state, boolean restartArmed) {
-        g2.setColor(Palette.SCRIM);
+        // The design blurs the backdrop. That is a full-screen convolve every
+        // frame, which is precisely the per-frame cost the render pass was just
+        // rebuilt to avoid, so this darkens instead — the purpose is to push the
+        // play field back, and a scrim does that without the frame budget.
+        g2.setColor(Palette.MODAL_SCRIM);
         g2.fillRect(0, 0, GameConfig.SCREEN_WIDTH, GameConfig.SCREEN_HEIGHT);
 
         final int centerX = GameConfig.SCREEN_WIDTH / 2;
-        final int panelWidth = 620;
-        final int panelX = centerX - panelWidth / 2;
-        final int panelY = 66;
-        // Grown by one stat row and the victory subtitle. Kept as one constant
-        // rather than measured, because the controls below it are positioned
-        // from the panel's bottom edge.
-        final int panelHeight = 552;
+        final int panelX = centerX - MODAL_W / 2;
+        final int panelY = MODAL_TOP;
 
-        RoundRectangle2D panel = new RoundRectangle2D.Double(
-                panelX, panelY, panelWidth, panelHeight, 20, 20);
-        g2.setColor(Palette.HUD_BG);
-        g2.fill(panel);
-        g2.setColor(Palette.HUD_DIVIDER_SOFT);
-        g2.setStroke(new BasicStroke(1.5f));
-        g2.draw(panel);
-
-        // A won run and a lost one share this panel but must never share its
-        // headline — congratulating the player in the defeat colour, or vice
-        // versa, is the one mistake here nobody would forgive.
         boolean won = state.isVictory();
+        Color accent = won ? Palette.GOLD : Palette.DANGER;
+        Color accentLight = won ? Palette.GOLD_LIGHT : Palette.DANGER_LIGHT;
 
-        int titleBaseline = panelY + 74;
-        g2.setFont(titleFont);
-        FontMetrics titleMetrics = g2.getFontMetrics();
-        String title = won ? "The temple stands" : "The temple has fallen";
-        g2.setColor(won ? Palette.HUD_TEXT_GOLD : Palette.DANGER);
-        g2.drawString(title, centerX - titleMetrics.stringWidth(title) / 2, titleBaseline);
+        drawModalCard(g2, panelX, panelY, accent);
 
-        if (won) {
-            g2.setFont(bodyFont);
-            FontMetrics subMetrics = g2.getFontMetrics();
-            String sub = state.getDifficulty().getDisplayName()
-                    + " cleared  ·  all " + state.getFinalLevel() + " levels";
-            g2.setColor(Palette.BOON);
-            g2.drawString(sub, centerX - subMetrics.stringWidth(sub) / 2, titleBaseline + 30);
-        }
+        int y = panelY + 28;
+        y = drawModalHeader(g2, state, centerX, y, won, accent, accentLight);
 
-        int ruleY = titleBaseline + (won ? 54 : 24);
-        g2.setColor(Palette.HUD_DIVIDER);
-        g2.setStroke(new BasicStroke(2f));
-        g2.drawLine(centerX - 150, ruleY, centerX + 150, ruleY);
+        // Centred 18 below the badge rather than 12: the divider is 36 tall, so
+        // a smaller step overlaps the pill's bottom edge by a couple of pixels.
+        Ornament.drawNagaDivider(g2, centerX, y + 18, 1.0, accent);
+        y += 38;
 
-        final int columnWidth = 210;
-        final int columnGap = 70;
-        final int leftCol = centerX - columnGap / 2 - columnWidth;
-        final int rightCol = centerX + columnGap / 2;
-        final int gridTop = ruleY + 58;
-        final int rowHeight = 76;
+        y = drawStatGrid(g2, state, panelX + MODAL_PAD_X, y,
+                MODAL_W - MODAL_PAD_X * 2, accent, accentLight);
 
-        drawGameOverStat(g2, "LEVEL REACHED",
-                Integer.toString(Math.max(1, state.getLevel())), leftCol, gridTop);
-        drawGameOverStat(g2, "FINAL SCORE",
-                Integer.toString(state.getScore()), rightCol, gridTop);
-        drawGameOverStat(g2, "SPIRITS SLAIN",
-                Integer.toString(state.getEnemiesDefeated()), leftCol, gridTop + rowHeight);
-        drawGameOverStat(g2, "BOLTS INTERCEPTED",
-                Integer.toString(state.getProjectilesIntercepted()),
-                rightCol, gridTop + rowHeight);
-        drawGameOverStat(g2, "WORDS PER MINUTE",
-                Integer.toString((int) Math.round(state.getWpm())),
-                leftCol, gridTop + rowHeight * 2);
-        drawGameOverStat(g2, "ACCURACY",
-                Math.round(state.getResolver().getAccuracy() * 100) + "%",
-                rightCol, gridTop + rowHeight * 2);
-        // Best combo takes the grid slot and boons move down to the footer line.
-        // The grid cannot grow: a fifth row would push the control hints below
-        // the bottom of the window, since they are positioned from the panel's
-        // edge rather than measured.
-        drawGameOverStat(g2, "BEST COMBO",
-                state.getCombo().getBest() + "x",
-                leftCol, gridTop + rowHeight * 3);
-        drawGameOverStat(g2, "DIFFICULTY",
-                state.getDifficulty().getDisplayName(),
-                rightCol, gridTop + rowHeight * 3);
+        y += 14;
+        Ornament.drawGoldRule(g2, centerX, y, MODAL_W - MODAL_PAD_X * 2, accent, 0.6);
+        y += 20;
 
-        int bestY = gridTop + rowHeight * 3 + 62;
-        boolean newBest = state.getScore() >= state.getBestScore() && state.getScore() > 0;
-        g2.setFont(bodyFont);
-        String bestText = newBest
-                ? "New personal best   ·   " + state.getPowerUpsCollected() + " boons claimed"
-                : "Personal best  " + state.getBestScore()
-                        + "   ·   Level " + Math.max(1, state.getBestLevel())
-                        + "   ·   " + state.getPowerUpsCollected() + " boons";
-        FontMetrics bestMetrics = g2.getFontMetrics();
-        g2.setColor(newBest ? Palette.HUD_TEXT_GOLD : Palette.HUD_TEXT_DIM);
-        g2.drawString(bestText, centerX - bestMetrics.stringWidth(bestText) / 2, bestY);
+        drawModalActions(g2, centerX, y, restartArmed, accent);
+        y += 52;
 
-        int controlsY = panelY + panelHeight + 46;
-        if (restartArmed) {
-            drawKeyHint(g2, centerX, controlsY, "ENTER", "restart now",
-                    Palette.HUD_TEXT_GOLD);
-        } else {
-            drawKeyHint(g2, centerX, controlsY, "TAB  then  ENTER", "play again",
-                    Palette.HUD_TEXT_GOLD);
-        }
-        drawKeyHint(g2, centerX, controlsY + 44, "ESC", "quit", Palette.HUD_TEXT_DIM);
+        drawModalFootnote(g2, state, centerX, y, won);
     }
 
-    /** Label above value, both left-aligned to the column. */
-    private void drawGameOverStat(Graphics2D g2, String label, String value, int x, int y) {
-        g2.setFont(microFont);
-        g2.setColor(Palette.HUD_TEXT_DIM);
-        g2.drawString(label, x, y);
+    /** The card itself: gradient fill, top accent bar, corner brackets. */
+    private void drawModalCard(Graphics2D g2, int x, int y, Color accent) {
+        RoundRectangle2D card = new RoundRectangle2D.Double(
+                x, y, MODAL_W, MODAL_H, MODAL_ARC, MODAL_ARC);
 
-        g2.setFont(secondaryFont);
-        g2.setColor(Palette.HUD_TEXT_WHITE);
-        g2.drawString(value, x, y + 32);
+        // Outer drop shadow, so the card lifts off the play field behind it.
+        for (int i = 6; i >= 1; i--) {
+            g2.setColor(new Color(0, 0, 0, 18));
+            g2.fill(new RoundRectangle2D.Double(
+                    x - i, y - i + 4, MODAL_W + i * 2, MODAL_H + i * 2,
+                    MODAL_ARC + i, MODAL_ARC + i));
+        }
+
+        g2.setPaint(new LinearGradientPaint(
+                x, y, x + MODAL_W * 0.35f, y + MODAL_H,
+                new float[] {0f, 0.45f, 1f},
+                new Color[] {
+                    Palette.STONE_LIGHT, Palette.STONE_MODAL_MID, Palette.STONE_MODAL_LOW,
+                }));
+        g2.fill(card);
+
+        Ornament.drawStoneTexture(g2, card, 0.12);
+
+        g2.setColor(Palette.alpha(accent, 0.35));
+        g2.setStroke(new BasicStroke(1.5f));
+        g2.draw(card);
+
+        // The 3px accent bar across the top edge, clipped to the card so it
+        // follows the rounded corners instead of squaring them off.
+        Graphics2D bar = (Graphics2D) g2.create();
+        try {
+            bar.clip(card);
+            bar.setPaint(new LinearGradientPaint(
+                    x, y, x + MODAL_W, y,
+                    new float[] {0f, 0.3f, 0.5f, 0.7f, 1f},
+                    new Color[] {
+                        Palette.alpha(accent, 0),
+                        accent,
+                        Palette.blend(accent, Color.WHITE, 0.35),
+                        accent,
+                        Palette.alpha(accent, 0),
+                    }));
+            bar.fillRect(x, y, MODAL_W, 3);
+        } finally {
+            bar.dispose();
+        }
+
+        // L-brackets, brighter at the top than the bottom exactly as the design
+        // has them — the eye enters at the top and the weight follows it.
+        Ornament.drawCornerBracket(g2, x + 8, y + 8, 28, 0, accent, 0.45);
+        Ornament.drawCornerBracket(g2, x + MODAL_W - 36, y + 8, 28, 1, accent, 0.45);
+        Ornament.drawCornerBracket(g2, x + 8, y + MODAL_H - 36, 28, 2, accent, 0.35);
+        Ornament.drawCornerBracket(g2, x + MODAL_W - 36, y + MODAL_H - 36, 28, 3,
+                accent, 0.35);
+    }
+
+    /** Pre-title, headline and badge pill. Returns the y below the badge. */
+    private int drawModalHeader(Graphics2D g2, GameState state, int centerX, int y,
+                                boolean won, Color accent, Color accentLight) {
+        // Pre-title — quiet, italic, and the line that says what run this was.
+        g2.setFont(modalPreTitleFont);
+        FontMetrics preMetrics = g2.getFontMetrics();
+        String pre = won
+                ? state.getDifficulty().getDisplayName() + " · Run Complete"
+                : "Level " + Math.max(1, state.getLevel()) + " · The Siege Broke Through";
+        g2.setColor(Palette.GOLD_DIM);
+        drawTrackedString(g2, pre, centerX, y + preMetrics.getAscent(), 2.3);
+        y += 30;
+
+        // Headline, drawn as outlines so the glow is a real halo.
+        String title = won ? "The Temple Stands" : "The Temple Has Fallen";
+        y += 24;
+        DisplayText.drawCentred(g2, title, modalTitleFont, centerX, y,
+                accentLight, accentLight, accent, 0.45f, 1f);
+        y += 28;
+
+        drawBadgePill(g2, state, centerX, y, won, accent);
+        return y + 26;
+    }
+
+    /** The rounded outline pill under the headline, flanked by two asterisks. */
+    private void drawBadgePill(Graphics2D g2, GameState state, int centerX, int y,
+                               boolean won, Color accent) {
+        String text = won
+                ? (state.getDifficulty().getDisplayName() + " cleared · all "
+                        + state.getFinalLevel() + " levels").toUpperCase(Locale.ROOT)
+                : (state.getDifficulty().getDisplayName() + " · reached level "
+                        + Math.max(1, state.getLevel()) + " of "
+                        + state.getFinalLevel()).toUpperCase(Locale.ROOT);
+
+        g2.setFont(modalBadgeFont);
+        FontMetrics fm = g2.getFontMetrics();
+        double tracking = 2.2;
+        double textWidth = trackedWidth(fm, text, tracking);
+
+        int starGap = 10;
+        double starWidth = 7;
+        double inner = textWidth + (starGap + starWidth) * 2;
+        int padX = 14;
+        int pillW = (int) Math.round(inner + padX * 2);
+        int pillH = 22;
+        int pillX = centerX - pillW / 2;
+
+        RoundRectangle2D pill = new RoundRectangle2D.Double(
+                pillX, y, pillW, pillH, pillH, pillH);
+        g2.setColor(Palette.alpha(accent, 0.10));
+        g2.fill(pill);
+        g2.setColor(Palette.alpha(accent, 0.28));
+        g2.setStroke(new BasicStroke(1f));
+        g2.draw(pill);
+
+        int baseline = y + pillH / 2 + fm.getAscent() / 2 - 1;
+        g2.setColor(Palette.GOLD_MID);
+        drawTrackedString(g2, text, centerX, baseline, tracking);
+
+        // Four-point stars either side, drawn as diamonds so they match the
+        // diamond terminators used on every rule in the design.
+        g2.setColor(accent);
+        double starX = textWidth / 2 + starGap + starWidth / 2;
+        Ornament.drawDiamond(g2, centerX - starX, y + pillH / 2.0, 3.2);
+        Ornament.drawDiamond(g2, centerX + starX, y + pillH / 2.0, 3.2);
+    }
+
+    /**
+     * The bordered 2x4 grid of run statistics.
+     *
+     * <p>Cells are laid out left-to-right, top-to-bottom in the design's order.
+     * Final Score is the highlighted one — it is the number the player came for,
+     * and the design gives it a larger cut, a brighter gold and a tinted cell so
+     * it wins the grid without needing a second colour introduced.
+     *
+     * @return the y below the grid
+     */
+    private int drawStatGrid(Graphics2D g2, GameState state, int x, int y, int width,
+                             Color accent, Color accentLight) {
+        String[] labels = {
+            "LEVEL REACHED", "FINAL SCORE",
+            "SPIRITS SLAIN", "BOLTS INTERCEPTED",
+            "WORDS PER MINUTE", "ACCURACY",
+            "BEST COMBO", "DIFFICULTY",
+        };
+        String[] values = {
+            Integer.toString(Math.max(1, state.getLevel())),
+            Integer.toString(state.getScore()),
+            Integer.toString(state.getEnemiesDefeated()),
+            Integer.toString(state.getProjectilesIntercepted()),
+            Integer.toString((int) Math.round(state.getWpm())),
+            Math.round(state.getResolver().getAccuracy() * 100) + "%",
+            state.getCombo().getBest() + "×",
+            state.getDifficulty().getDisplayName(),
+        };
+
+        boolean newBest = state.getScore() >= state.getBestScore() && state.getScore() > 0;
+        String[] notes = new String[labels.length];
+        notes[6] = newBest ? "New personal best" : null;
+        notes[7] = state.getPowerUpsCollected() + " boons claimed";
+
+        int cellW = width / STAT_COLUMNS;
+        int cellH = 62;
+        int gridH = cellH * STAT_ROWS;
+
+        RoundRectangle2D grid =
+                new RoundRectangle2D.Double(x, y, width, gridH, 8, 8);
+
+        Graphics2D gg = (Graphics2D) g2.create();
+        try {
+            gg.clip(grid);
+            gg.setColor(new Color(0, 0, 0, 46));
+            gg.fill(grid);
+
+            for (int i = 0; i < labels.length; i++) {
+                int col = i % STAT_COLUMNS;
+                int row = i / STAT_COLUMNS;
+                int cx = x + col * cellW;
+                int cy = y + row * cellH;
+                boolean highlight = i == 1;
+
+                // Cell tint: the highlighted cell takes the accent, and alternate
+                // row-pairs take a barely-there lift so the grid has a rhythm
+                // without needing visible zebra striping.
+                if (highlight) {
+                    gg.setColor(Palette.alpha(accent, 0.05));
+                    gg.fillRect(cx, cy, cellW, cellH);
+                } else if (row % 2 == 0) {
+                    gg.setColor(new Color(0xFF, 0xFF, 0xFF, 4));
+                    gg.fillRect(cx, cy, cellW, cellH);
+                }
+
+                gg.setStroke(new BasicStroke(1f));
+                gg.setColor(Palette.alpha(accent, 0.08));
+                if (row < STAT_ROWS - 1) {
+                    gg.drawLine(cx, cy + cellH, cx + cellW, cy + cellH);
+                }
+                if (col < STAT_COLUMNS - 1) {
+                    gg.drawLine(cx + cellW, cy, cx + cellW, cy + cellH);
+                }
+
+                drawStatCell(gg, labels[i], values[i], notes[i],
+                        cx + 18, cy + 11, highlight, accentLight);
+            }
+        } finally {
+            gg.dispose();
+        }
+
+        g2.setColor(Palette.alpha(accent, 0.12));
+        g2.setStroke(new BasicStroke(1f));
+        g2.draw(grid);
+
+        return y + gridH;
+    }
+
+    /** One grid cell: tracked label, large value, optional italic note. */
+    private void drawStatCell(Graphics2D g2, String label, String value, String note,
+                              int x, int y, boolean highlight, Color accentLight) {
+        g2.setFont(modalStatLabelFont);
+        FontMetrics labelMetrics = g2.getFontMetrics();
+        g2.setColor(Palette.GOLD_FAINT);
+        drawTrackedLeft(g2, label, x, y + labelMetrics.getAscent(), 2.0);
+
+        g2.setFont(highlight ? modalStatBigFont : modalStatValueFont);
+        FontMetrics valueMetrics = g2.getFontMetrics();
+        int valueBaseline = y + labelMetrics.getHeight() + valueMetrics.getAscent();
+
+        if (highlight) {
+            // The one number with a halo. Drawn through DisplayText for the same
+            // reason the headline is: a stamped shadow at this size reads as
+            // ghosting rather than as glow.
+            double w = valueMetrics.stringWidth(value);
+            DisplayText.drawCentred(g2, value, modalStatBigFont,
+                    x + w / 2, valueBaseline - valueMetrics.getAscent() / 2.0 + 1,
+                    accentLight, accentLight, accentLight, 0.3f, 1f);
+        } else {
+            g2.setColor(Palette.GOLD_VALUE);
+            g2.drawString(value, x, valueBaseline);
+        }
+
+        if (note != null) {
+            g2.setFont(modalNoteFont);
+            g2.setColor(Palette.GOLD_WARM);
+            g2.drawString(note, x, valueBaseline + 15);
+        }
+    }
+
+    /**
+     * The action row.
+     *
+     * <p>The design draws three clickable buttons. This game's end screen is
+     * keyboard-driven — Tab arms a restart, Enter confirms it, Escape quits —
+     * so the buttons keep the design's shape but carry their key as the label.
+     * Drawing a mouse affordance for something the mouse cannot do would be
+     * worse than not drawing a button at all.
+     */
+    private void drawModalActions(Graphics2D g2, int centerX, int y,
+                                  boolean restartArmed, Color accent) {
+        int buttonW = 168;
+        int buttonH = 38;
+        int gap = 12;
+        int totalW = buttonW * 2 + gap;
+        int x = centerX - totalW / 2;
+
+        if (restartArmed) {
+            drawModalButton(g2, x, y, buttonW, buttonH, "ENTER", "play again",
+                    true, accent);
+        } else {
+            drawModalButton(g2, x, y, buttonW, buttonH, "TAB → ENTER", "play again",
+                    true, accent);
+        }
+        drawModalButton(g2, x + buttonW + gap, y, buttonW, buttonH, "ESC", "quit",
+                false, accent);
+    }
+
+    /** One action button: key cap treatment, primary or secondary. */
+    private void drawModalButton(Graphics2D g2, int x, int y, int width, int height,
+                                 String key, String caption, boolean primary,
+                                 Color accent) {
+        RoundRectangle2D plate =
+                new RoundRectangle2D.Double(x, y, width, height, 8, 8);
+
+        if (primary) {
+            g2.setColor(Palette.alpha(accent, 0.16));
+            g2.fill(plate);
+            g2.setColor(Palette.alpha(accent, 0.75));
+            g2.setStroke(new BasicStroke(1.5f));
+        } else {
+            g2.setColor(new Color(0x1E, 0x19, 0x14, 140));
+            g2.fill(plate);
+            g2.setColor(Palette.alpha(accent, 0.32));
+            g2.setStroke(new BasicStroke(1.2f));
+        }
+        g2.draw(plate);
+
+        g2.setFont(modalBadgeFont);
+        FontMetrics keyMetrics = g2.getFontMetrics();
+        g2.setColor(primary ? Palette.GOLD_LIGHT : Palette.GOLD_MID);
+        drawTrackedString(g2, key, x + width / 2,
+                y + height / 2 - 1, 2.0);
+
+        g2.setFont(modalNoteFont);
+        FontMetrics capMetrics = g2.getFontMetrics();
+        g2.setColor(Palette.GOLD_FAINT);
+        g2.drawString(caption,
+                x + width / 2 - capMetrics.stringWidth(caption) / 2,
+                y + height / 2 + capMetrics.getAscent() + 1);
+    }
+
+    /** The single italic line under the actions. */
+    private void drawModalFootnote(Graphics2D g2, GameState state, int centerX, int y,
+                                   boolean won) {
+        g2.setFont(modalFootnoteFont);
+        FontMetrics fm = g2.getFontMetrics();
+
+        String text;
+        if (won) {
+            text = "Personal best " + state.getBestScore()
+                    + " · reached level " + Math.max(1, state.getBestLevel());
+        } else {
+            text = "Best this session " + state.getBestScore()
+                    + " · level " + Math.max(1, state.getBestLevel());
+        }
+        g2.setColor(Palette.GOLD_FAINT);
+        g2.drawString(text, centerX - fm.stringWidth(text) / 2, y);
+    }
+
+    // ---- tracked text helpers ----------------------------------------------
+
+    private static double trackedWidth(FontMetrics fm, String text, double tracking) {
+        if (text.isEmpty()) {
+            return 0;
+        }
+        return fm.stringWidth(text) + tracking * (text.length() - 1);
+    }
+
+    /** Tracked text centred on {@code centerX}. */
+    private void drawTrackedString(Graphics2D g2, String text, double centerX,
+                                   double baseline, double tracking) {
+        FontMetrics fm = g2.getFontMetrics();
+        drawTrackedLeft(g2, text,
+                centerX - trackedWidth(fm, text, tracking) / 2, baseline, tracking);
+    }
+
+    /** Tracked text starting at {@code x}. */
+    private void drawTrackedLeft(Graphics2D g2, String text, double x, double baseline,
+                                 double tracking) {
+        FontMetrics fm = g2.getFontMetrics();
+        double cursor = x;
+        for (int i = 0; i < text.length(); i++) {
+            String ch = String.valueOf(text.charAt(i));
+            g2.drawString(ch, (float) cursor, (float) baseline);
+            cursor += fm.stringWidth(ch) + tracking;
+        }
     }
 
     /** A key cap with a caption, the pair centred together on {@code centerX}. */

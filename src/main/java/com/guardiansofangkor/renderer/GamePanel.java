@@ -242,6 +242,13 @@ public class GamePanel extends JPanel {
             List<WordTarget> highlighted = state.getResolver().getHighlighted();
             WordTarget locked = state.getResolver().getLockedTarget();
 
+            // The boss and its chrome go down FIRST, under everything typeable.
+            // A MINIONS phase fills the plaza with ordinary enemies carrying
+            // ordinary words, and the boss is four times the size of any of them
+            // standing dead centre — drawn later it buried both the summons and
+            // the words the player was supposed to be reading off them.
+            bossRenderer.drawWorld(g2, state.getBoss(), sprites);
+
             drawEffects(g2, VisualEffect.Kind.SPAWN_POOF);
 
             // Painter's algorithm: things further from the temple are higher on
@@ -251,11 +258,6 @@ public class GamePanel extends JPanel {
             for (Enemy enemy : ordered) {
                 drawEnemy(g2, enemy, typed, highlighted.contains(enemy), locked == enemy);
             }
-
-            // The boss is drawn behind Preah Ream and behind the bolts, so a
-            // monster four times anyone else's size cannot bury the hero or the
-            // venom the player is meant to be watching.
-            bossRenderer.draw(g2, state.getBoss(), sprites);
 
             drawPlayer(g2, state.getPlayer());
 
@@ -292,6 +294,11 @@ public class GamePanel extends JPanel {
             if (!state.isGameOver() && !state.isBossActive()) {
                 drawLockChip(g2);
             }
+
+            // The two held screens — the arrival card and the briefing — go on
+            // top of everything. Both stop the fight while they are up, so
+            // nothing they cover is anything the player could be acting on.
+            bossRenderer.drawOverlay(g2, state.getBoss());
 
             hud.draw(g2, state, restartArmed);
         } finally {

@@ -32,21 +32,25 @@ is fully playable in English on a fresh clone. The loader also accepts a few
 alternative filenames (`Suwannaphum.ttf`, `KamtumruyPro-Regular.ttf`,
 `NotoSansKhmer-Regular.ttf`, `KhmerOS.ttf`) so nobody has to rename a download.
 
-## Menu wordmark (optional)
+## Interface faces (optional)
 
-The "ANGKOR" title on the main menu reaches for **Cinzel Decorative** — an
-inscription-style display face — with **Cinzel** as a fallback. Also not
-committed, also Open Font License, also entirely optional.
+The menu and the end-of-run card are designed in three faces. All optional, all
+Open Font License, none committed — the UI degrades to platform serifs without
+them, which looks plainer but never broken.
 
-| Slot | File | Source |
-|---|---|---|
-| Primary | `CinzelDecorative-Black.ttf` (or `-Bold.ttf`) | https://fonts.google.com/specimen/Cinzel+Decorative |
-| Fallback | `Cinzel-Black.ttf` (or `-Bold.ttf`) | https://fonts.google.com/specimen/Cinzel |
+| Chain | Files | Used for | Source |
+|---|---|---|---|
+| `displayFont` | `CinzelDecorative-Black.ttf`, `-Bold.ttf` | the ANGKOR wordmark, modal headline, stat numbers | https://fonts.google.com/specimen/Cinzel+Decorative |
+| `uiSerifFont` | `Cinzel-SemiBold.ttf`, `-Bold.ttf`, `-Regular.ttf` | button labels, stat labels, tracked caps | https://fonts.google.com/specimen/Cinzel |
+| `bodyFont` | `EBGaramond-Regular.ttf`, `-Italic.ttf` | italic subtitles, captions, footnotes | https://fonts.google.com/specimen/EB+Garamond |
 
-Without either, the title falls back to the plain bold serif it always used.
-`FontManager.displayFont` is a separate chain from the Khmer one above, checked
-the same way: bundled file, then a matching face already installed on the
-machine, then the plain fallback.
+Cinzel and Cinzel Decorative are deliberately **separate chains** even though
+both fall back to each other. Decorative has swash capitals that carry a 49px
+wordmark and turn a 14px button label into a smear, so the plain cut is
+preferred wherever text is small and tracked.
+
+Each chain is checked the same way as the Khmer one: bundled file first, then a
+matching face already installed on the machine, then a platform fallback.
 
 ## Why fonts must be bundled at all
 
