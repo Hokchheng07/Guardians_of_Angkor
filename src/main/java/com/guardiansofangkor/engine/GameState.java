@@ -17,8 +17,10 @@ import com.guardiansofangkor.util.GraphemeCounter;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Random;
+import java.util.Set;
 
 /**
  * All mutable gameplay state for a run, plus the per-tick update.
@@ -41,6 +43,9 @@ public class GameState {
 
     /** Timed boons and banked shield charges. */
     private final PowerUpState powerUpState = new PowerUpState();
+
+    /** The run of perfectly typed words, and the score multiplier it earns. */
+    private final ComboTracker combo = new ComboTracker();
 
     /**
      * The finale, once the last wave has been cleared. Null for the whole rest
@@ -138,6 +143,16 @@ public class GameState {
      * leave every venom bolt looking untouched however much of it was typed.
      */
     private String bossBuffer = "";
+
+    /**
+     * Difficulty tiers beaten at least once, as word-bank keys.
+     *
+     * <p>The one piece of state here that is not about the current run, and the
+     * reason it lives on {@code GameState} anyway is that winning is the event
+     * that produces it. Deliberately untouched by {@link #restart()} — losing a
+     * run must not cost the player a tier they already earned.
+     */
+    private final Set<String> clearedTiers = new LinkedHashSet<>();
 
     public GameState() {
         this(Language.ENGLISH, Difficulty.defaultChoice());
@@ -280,9 +295,77 @@ public class GameState {
         if (boss.isVenomDue()) {
             spitVenom();
         }
+        if (boss.isMinionDue()) {
+            summonMinion();
+        }
+        if (boss.isPhaseJustEnded()) {
+            clearBossField();
+        }
         if (boss.isFinished()) {
             declareVictory();
         }
+    }
+
+    /**
+     * Wipes whatever the boss's phase left behind, so the paragraph that
+     * follows is read in peace.
+     *
+     * <p>The finale alternates between a paragraph the player types and a phase
+     * the boss attacks through, and the paragraph is off screen for the whole of
+     * the latter. Letting bolts and summons survive the handover would put the
+     * player back to reading a sentence while something walked at them, which is
+     * the arrangement the alternation exists to replace.
+     *
+     * <p>Nothing is scored. These were not killed — they are dismissed when
+     * their phase ends, and paying the player for outlasting them would make
+     * ignoring a phase the profitable option. The phase still has teeth while it
+     * runs: a bolt that lands or a summon that breaches costs a life then,
+     * exactly as it would in a wave.
+     */
+    private void clearBossField() {
+        for (Enemy enemy : enemies) {
+            if (enemy.isActive()) {
+                enemy.defeat();
+            }
+        }
+        for (Projectile projectile : projectiles) {
+            if (projectile.isActive()) {
+                projectile.intercept();
+            }
+        }
+        resolver.reset();
+        bossBuffer = "";
+    }
+
+    /**
+     * The boss calls a shadow spirit up out of the plaza.
+     *
+     * <p>An ordinary enemy in every respect — it walks the same routes, carries
+     * the same kind of word and is typed down the same way. That is the point of
+     * the summoning phase: it puts the rest of the game back into the finale
+     * rather than leaving the last two minutes as prose and nothing else.
+     *
+     * <p>Its word is drawn to avoid everything the paragraph still wants, for
+     * the same reason venom is.
+     */
+    private void summonMinion() {
+        List<String> reserved = new ArrayList<>(boss.remainingWords());
+        for (Projectile projectile : projectiles) {
+            reserved.add(projectile.getWord());
+        }
+
+        Enemy minion = waveManager.spawnBossMinion(enemies, reserved);
+        if (minion == null) {
+            return;
+        }
+        enemies.add(minion);
+        effects.add(new VisualEffect(
+                VisualEffect.Kind.SPAWN_POOF,
+                minion.getX(),
+                minion.getAnchorY() - minion.getType().getTargetHeight()
+                        * minion.depthScale() * 0.35,
+                GameConfig.POOF_TICKS,
+                minion.depthScale()));
     }
 
     /**
@@ -305,8 +388,16 @@ public class GameState {
             return;
         }
 
-        List<String> paragraph = wordBank.bossParagraph(difficulty.getWordBankKey(), random);
-        boss = new BossFight(difficulty.getFinalBossType(), paragraph, difficulty, random);
+        // The boss's health is the length of what it asks the player to type,
+        // so the tier decides the script rather than the word bank offering one
+        // paragraph and hoping it is the right size.
+        List<String> script = wordBank.bossScript(
+                difficulty.getWordBankKey(),
+                difficulty.getBossParagraphCount(),
+                difficulty.getBossSentencesPerParagraph(),
+                random);
+        boss = new BossFight(difficulty.getFinalBossType(), script,
+                difficulty.getBossSentencesPerParagraph(), difficulty, random);
 
         powerUps.clear();
         resolver.reset();
@@ -341,34 +432,20 @@ public class GameState {
     }
 
     /**
-     * Preah Ream's answer to a finished sentence: every bolt in the air is shot
-     * out of it.
-     *
-     * <p>This is what makes the paragraph a defence rather than just a score.
-     * Venom cannot be typed away individually, so without a way for progress to
-     * clear the sky the fight would be a pure endurance test with the player
-     * powerless over the thing actually killing them.
-     */
-    private void counterVolley() {
-        for (Projectile projectile : projectiles) {
-            if (!projectile.isActive()) {
-                continue;
-            }
-            projectile.intercept();
-            projectilesIntercepted++;
-            spawnArrowAt(projectile.getX(), projectile.getY());
-        }
-    }
-
-    /**
      * Typing during the finale.
      *
-     * <p>The boss and the venom go through the ordinary prefix matcher together
-     * — the boss as a target whose word is the current word of the verse, the
-     * venom as the priority tier above it. That is only possible because the
-     * verse is typed a word at a time, and it is what lets one buffer serve both
-     * without a mode key: the same ambiguity rules that already govern two
-     * enemies sharing a prefix govern a bolt and a verse sharing one.
+     * <p>The verse, the venom and anything the boss has summoned all share one
+     * buffer, with the field taking priority over the verse. That is only
+     * possible because the verse is typed a word at a time, and it is what lets
+     * one buffer serve all three without a mode key: the same ambiguity rules
+     * that already govern two enemies sharing a prefix govern a bolt, a summon
+     * and a verse sharing one.
+     *
+     * <p>A summon's word can still be a strict <em>prefix</em> of the verse word
+     * in progress, in which case those keystrokes go to the monster. That is
+     * deliberate and is the same rule the ordinary matcher applies everywhere
+     * else — the completed target wins. Exact collisions are impossible because
+     * summons are drawn against {@code boss.remainingWords()}.
      */
     private ResolveResult handleBossInput(String typedSoFar) {
         String buffer = typedSoFar == null ? "" : typedSoFar;
@@ -380,22 +457,38 @@ public class GameState {
 
         List<Projectile> venom = projectilesOfKind(Projectile.Kind.VENOM);
 
-        // Completions are checked before prefixes, and bolts before the verse.
+        // Completions are checked before prefixes, and the field before the
+        // verse.
         //
         // Checking exact matches first is what stops a verse word that happens
-        // to be a prefix of a live bolt's word — "the" while "temple" is in the
+        // to be a prefix of something live — "the" while "temple" is in the
         // air — from being impossible to finish. It is the same rule the
         // ordinary matcher already applies between two enemies whose words
-        // share a prefix; it just has to be applied across the two kinds here,
+        // share a prefix; it just has to be applied across the kinds here,
         // because they are not in one list.
         for (Projectile bolt : venom) {
             if (bolt.isActive() && bolt.getWord().equals(buffer)) {
                 return deflectVenom(bolt, buffer);
             }
         }
+        // Summoned monsters are ordinary enemies and are answered like ordinary
+        // enemies, down to the shared completion handler — so a summon dies,
+        // scores and looses an arrow exactly as it would have during a wave.
+        for (Enemy minion : enemies) {
+            if (minion.isActive() && minion.getWord().equals(buffer)) {
+                return strikeMinion(minion, buffer);
+            }
+        }
+        // Mid-phase the paragraph is off screen, so it is not a target and a
+        // stray keystroke is just a stray keystroke — there is no verse to
+        // reset and nothing to charge the player for.
+        if (!boss.isTyping()) {
+            return trackFieldOnly(buffer, venom);
+        }
+
         // A word of the verse only confirms on the space after it, not the
-        // moment its last letter lands — see BossFight for why. A bolt's word
-        // never contains a space, so this can never collide with the check
+        // moment its last letter lands — see BossFight for why. No enemy or
+        // bolt word contains a space, so this can never collide with the checks
         // above.
         if (buffer.equals(boss.currentWord() + " ")) {
             return advanceVerse(buffer);
@@ -407,6 +500,12 @@ public class GameState {
             if (bolt.isActive() && bolt.getWord().startsWith(buffer)) {
                 bolt.flashHit(GameConfig.HIT_FLASH_TICKS);
                 alive.add(bolt);
+            }
+        }
+        for (Enemy minion : enemies) {
+            if (minion.isActive() && minion.getWord().startsWith(buffer)) {
+                minion.flashHit(GameConfig.HIT_FLASH_TICKS);
+                alive.add(minion);
             }
         }
         boolean matchesVerse = boss.currentWord().startsWith(buffer);
@@ -427,6 +526,54 @@ public class GameState {
         resolver.noteExternalInput(true);
         boss.trackTyping(matchesVerse ? buffer : "");
         return ResolveResult.locked(alive.get(0), buffer);
+    }
+
+    /**
+     * Resolves a keystroke against the field alone, with no verse in play.
+     *
+     * <p>Used mid-phase. A buffer that matches nothing is still a mistype and
+     * still flashes the bar — the player has to know they missed — but it costs
+     * nothing beyond that, because the paragraph it would otherwise have reset
+     * is not on screen to have been aimed at.
+     */
+    private ResolveResult trackFieldOnly(String buffer, List<Projectile> venom) {
+        List<WordTarget> alive = new ArrayList<>();
+        for (Projectile bolt : venom) {
+            if (bolt.isActive() && bolt.getWord().startsWith(buffer)) {
+                bolt.flashHit(GameConfig.HIT_FLASH_TICKS);
+                alive.add(bolt);
+            }
+        }
+        for (Enemy minion : enemies) {
+            if (minion.isActive() && minion.getWord().startsWith(buffer)) {
+                minion.flashHit(GameConfig.HIT_FLASH_TICKS);
+                alive.add(minion);
+            }
+        }
+
+        if (alive.isEmpty()) {
+            resolver.noteExternalInput(false);
+            bossBuffer = "";
+            return ResolveResult.typo("");
+        }
+        resolver.noteExternalInput(true);
+        return ResolveResult.locked(alive.get(0), buffer);
+    }
+
+    /**
+     * A summoned monster's word landed.
+     *
+     * <p>Routed through {@link #handleCompleted} rather than reimplemented, so
+     * chained summons, scoring and the arrow all behave exactly as they do in an
+     * ordinary wave. The only finale-specific part is clearing the boss's own
+     * partial word: the keystrokes went to the monster, so whatever the verse
+     * thought was in progress is not.
+     */
+    private ResolveResult strikeMinion(Enemy minion, String typedSoFar) {
+        bossBuffer = "";
+        boss.clearTyping();
+        handleCompleted(minion);
+        return ResolveResult.completed(minion, typedSoFar);
     }
 
     private ResolveResult deflectVenom(Projectile bolt, String typedSoFar) {
@@ -456,12 +603,15 @@ public class GameState {
         resolver.reset();
 
         if (result == BossFight.Result.STAGE_CLEARED
+                || result == BossFight.Result.PARAGRAPH_CLEARED
                 || result == BossFight.Result.DEFEATED) {
-            // A finished verse is the counter-attack: it sweeps every bolt in
-            // the air. Without that the paragraph would score but never defend,
-            // and the fight would be endurance with the player powerless over
-            // the thing killing them.
-            counterVolley();
+            // A finished verse lands a visible blow on the boss, and nothing
+            // else. It used to sweep every bolt in the air as well; that made
+            // typing quickly a way to clear the field rather than a way to
+            // win, so a fast player never actually had to deal with what the
+            // boss had put there. Venom and summons are each answerable on
+            // their own terms — the player is not powerless without the sweep,
+            // just obliged to spend keystrokes on it.
             player.tryFire();
             spawnArrowAt(GameConfig.TEMPLE_CENTER_X, boss.getVenomOriginY());
         }
@@ -471,7 +621,8 @@ public class GameState {
     /** A verse word is worth more than an ordinary one — the finale is harder. */
     private int scoreForVerseWord(String word) {
         int base = GraphemeCounter.count(word) * 20;
-        return (int) Math.round(base * DifficultyCurve.scoreMultiplier(getLevel()));
+        return (int) Math.round(base
+                * DifficultyCurve.scoreMultiplier(getLevel()) * combo.getMultiplier());
     }
 
     /**
@@ -578,12 +729,17 @@ public class GameState {
             return ResolveResult.EMPTY_RESULT;
         }
 
-        // The finale takes the keyboard entirely. There is no way for one
-        // keystroke to mean both "the next letter of the sentence" and "clear
-        // that bolt", so during the boss the paragraph is the only target.
+        // The finale takes the keyboard entirely — it resolves the verse, the
+        // venom and the boss's summons against one buffer itself rather than
+        // going through the ordinary resolver, because the verse is not a
+        // WordTarget the resolver knows how to advance.
         if (boss != null && boss.isFighting()) {
             ResolveResult bossResult = handleBossInput(typedSoFar);
             lastResult = bossResult;
+            // The finale bypasses the resolver, so it has to feed the combo
+            // itself — otherwise accuracy would stop mattering at exactly the
+            // point in the run where it matters most.
+            applyToCombo(bossResult);
             return bossResult;
         }
 
@@ -593,6 +749,8 @@ public class GameState {
                 projectilesOfKind(Projectile.Kind.CURSED_BOLT), powerUps, enemies);
         lastResult = result;
 
+        applyToCombo(result);
+
         switch (result.status()) {
             case COMPLETED -> handleCompleted(result.target());
             case LOCKED, AMBIGUOUS -> handleProgress(result.candidates());
@@ -601,6 +759,28 @@ public class GameState {
             }
         }
         return result;
+    }
+
+    /**
+     * Feeds a resolution to the combo.
+     *
+     * <p>Applied at the single point every keystroke passes through, rather than
+     * at each of the places a word can be completed, so there is no route by
+     * which a mistype can miss the combo or a completion can be counted twice.
+     *
+     * <p>A completion is only clean if the streak is still alive when it lands —
+     * which it is, because a typo would already have broken it on the keystroke
+     * that caused it. That ordering is what makes "no wrong letters in this
+     * word" the actual rule rather than an approximation of it.
+     */
+    private void applyToCombo(ResolveResult result) {
+        switch (result.status()) {
+            case COMPLETED -> combo.noteCleanWord();
+            case TYPO -> combo.breakStreak();
+            default -> {
+                // A partial word is neither yet.
+            }
+        }
     }
 
     private void handleCompleted(WordTarget target) {
@@ -792,13 +972,22 @@ public class GameState {
         resolver.reset();
     }
 
-    /** Ends the run as a win. */
+    /**
+     * Ends the run as a win, and records the tier as beaten.
+     *
+     * <p>The clear is banked here rather than when the save is written, because
+     * this is the only moment that knows a run was won. It survives
+     * {@link #restart()} on purpose: unlocks are the player's, not the run's.
+     */
     private void declareVictory() {
         if (victory) {
             return;
         }
         victory = true;
         gameOver = true;
+        if (difficulty.isWinnable()) {
+            clearedTiers.add(difficulty.getWordBankKey());
+        }
         resolver.reset();
     }
 
@@ -817,14 +1006,16 @@ public class GameState {
     private int scoreForEnemy(Enemy enemy) {
         int base = GraphemeCounter.count(enemy.getWord()) * 10;
         double tierBonus = 1.0 / Math.max(0.4, enemy.getType().getSpeedMultiplier());
-        return (int) Math.round(base * tierBonus * DifficultyCurve.scoreMultiplier(getLevel()));
+        return (int) Math.round(base * tierBonus
+                * DifficultyCurve.scoreMultiplier(getLevel()) * combo.getMultiplier());
     }
 
     private int scoreForProjectile(Projectile projectile) {
         // Short words but urgent — worth a flat premium so intercepting feels
         // rewarding rather than a distraction from scoring on enemies.
         int base = GraphemeCounter.count(projectile.getWord()) * 25;
-        return (int) Math.round(base * DifficultyCurve.scoreMultiplier(getLevel()));
+        return (int) Math.round(base
+                * DifficultyCurve.scoreMultiplier(getLevel()) * combo.getMultiplier());
     }
 
     /** Wipes the run and starts over from level 1, keeping personal bests. */
@@ -840,6 +1031,7 @@ public class GameState {
         waveManager.reset();
         player.reset();
         powerUpState.reset();
+        combo.reset();
         boss = null;
         bossBuffer = "";
         // Repeat tracking is per-run, so a fresh run gets the whole vocabulary
@@ -891,6 +1083,11 @@ public class GameState {
     /** Running boons and banked shield charges, for the HUD. */
     public PowerUpState getPowerUpState() {
         return powerUpState;
+    }
+
+    /** The run of perfectly typed words, for the HUD and the end-of-run summary. */
+    public ComboTracker getCombo() {
+        return combo;
     }
 
     /** The finale, or null while the ordinary waves are still running. */
@@ -1155,7 +1352,26 @@ public class GameState {
         return new SaveData(
                 getLevel(), score, getLives(), language,
                 Math.max(bestScore, score),
-                Math.max(bestLevel, getLevel()));
+                Math.max(bestLevel, getLevel()),
+                clearedTiers);
+    }
+
+    /** Which tiers have been beaten, as a progress ladder the menu can read. */
+    public DifficultyProgress getProgress() {
+        return new DifficultyProgress(clearedTiers);
+    }
+
+    /**
+     * Seeds the unlock state from a save without touching the current run.
+     *
+     * <p>Separate from {@link #restoreFrom} because the two are wanted at
+     * different moments: unlocks matter the instant the menu opens, whereas
+     * resuming a run only happens if the player asks for it.
+     */
+    public void restoreProgress(SaveData data) {
+        if (data != null) {
+            clearedTiers.addAll(data.clearedTiers());
+        }
     }
 
     /** Restores a previous run. Enemies are not persisted — the level restarts. */
@@ -1165,6 +1381,7 @@ public class GameState {
         }
         this.bestScore = data.bestScore();
         this.bestLevel = data.bestWave();
+        restoreProgress(data);
 
         if (data.hasResumableRun()) {
             this.score = data.score();

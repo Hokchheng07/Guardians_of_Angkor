@@ -129,4 +129,23 @@ public final class Palette {
         int a = (int) Math.round(Math.max(0, Math.min(1, alpha)) * 255);
         return new Color(base.getRed(), base.getGreen(), base.getBlue(), a);
     }
+
+    /**
+     * Mixes two chrome colours, {@code t} of the way from {@code from} to
+     * {@code to}.
+     *
+     * <p>Here rather than in whichever renderer wanted it first, for the same
+     * reason the colours themselves are: a second copy of this would eventually
+     * round differently, and two parts of one frame drifting apart is exactly
+     * what keeping colour in one file prevents. Alpha is interpolated too, so
+     * fading between a solid and a transparent colour behaves.
+     */
+    public static Color blend(Color from, Color to, double t) {
+        double mix = Math.max(0, Math.min(1, t));
+        return new Color(
+                (int) Math.round(from.getRed() + (to.getRed() - from.getRed()) * mix),
+                (int) Math.round(from.getGreen() + (to.getGreen() - from.getGreen()) * mix),
+                (int) Math.round(from.getBlue() + (to.getBlue() - from.getBlue()) * mix),
+                (int) Math.round(from.getAlpha() + (to.getAlpha() - from.getAlpha()) * mix));
+    }
 }

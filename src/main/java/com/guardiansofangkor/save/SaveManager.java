@@ -9,7 +9,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.util.LinkedHashSet;
 import java.util.Properties;
+import java.util.Set;
 
 /**
  * Reads and writes run progress.
@@ -34,6 +36,15 @@ public class SaveManager {
     private static final String KEY_LANGUAGE = "language";
     private static final String KEY_BEST_SCORE = "bestScore";
     private static final String KEY_BEST_WAVE = "bestWave";
+
+    /**
+     * Difficulty tiers already beaten, comma-separated.
+     *
+     * <p>A flat string rather than one key per tier so adding a tier never means
+     * migrating a save format, and so a save written by an older build simply
+     * reads as "nothing cleared yet" instead of failing to parse.
+     */
+    private static final String KEY_CLEARED = "clearedTiers";
 
     private final Path saveFile;
 
@@ -83,7 +94,24 @@ public class SaveManager {
                 readInt(props, KEY_LIVES),
                 Language.fromCode(props.getProperty(KEY_LANGUAGE)),
                 readInt(props, KEY_BEST_SCORE),
-                readInt(props, KEY_BEST_WAVE));
+                readInt(props, KEY_BEST_WAVE),
+                readTiers(props));
+    }
+
+    /** Splits the cleared-tier list. Blank, absent or malformed reads as empty. */
+    private static Set<String> readTiers(Properties props) {
+        String raw = props.getProperty(KEY_CLEARED, "");
+        if (raw == null || raw.isBlank()) {
+            return Set.of();
+        }
+        Set<String> tiers = new LinkedHashSet<>();
+        for (String part : raw.split(",")) {
+            String key = part.trim();
+            if (!key.isEmpty()) {
+                tiers.add(key);
+            }
+        }
+        return tiers;
     }
 
     /**
@@ -102,6 +130,7 @@ public class SaveManager {
         props.setProperty(KEY_LANGUAGE, data.language().getCode());
         props.setProperty(KEY_BEST_SCORE, Integer.toString(data.bestScore()));
         props.setProperty(KEY_BEST_WAVE, Integer.toString(data.bestWave()));
+        props.setProperty(KEY_CLEARED, String.join(",", data.clearedTiers()));
 
         try {
             Path parent = saveFile.getParent();

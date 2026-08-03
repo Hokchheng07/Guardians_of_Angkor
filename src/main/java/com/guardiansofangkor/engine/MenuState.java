@@ -68,6 +68,12 @@ public class MenuState {
     /** Whether a resumable run exists, which decides if Continue is usable. */
     private boolean continueAvailable;
 
+    /**
+     * Which tiers have been earned. Starts at nothing cleared, so a build with
+     * no save wired in still behaves — only Easy opens.
+     */
+    private DifficultyProgress progress = DifficultyProgress.fresh();
+
     /** Counts down while a locked entry's explanation is showing. */
     private int lockedFlashTicks;
 
@@ -182,10 +188,22 @@ public class MenuState {
         };
     }
 
+    /**
+     * Decides what pressing a difficulty does.
+     *
+     * <p>The two ways a tier can refuse are reported separately on purpose. "Not
+     * ready yet" means nobody can play it; "clear Medium first" means the player
+     * can, once they have earned it. Collapsing them into one message would tell
+     * a player who is one run away from Hard that it does not exist.
+     */
     private Outcome resolveDifficulty() {
         Difficulty difficulty = getSelectedDifficulty();
         if (!difficulty.isImplemented()) {
             flashLocked(difficulty.getDisplayName() + " is not ready yet.");
+            return Outcome.NONE;
+        }
+        if (!progress.isUnlocked(difficulty)) {
+            flashLocked(progress.lockReason(difficulty));
             return Outcome.NONE;
         }
         return Outcome.START_RUN;
@@ -248,8 +266,24 @@ public class MenuState {
         return item != MenuItem.CONTINUE || continueAvailable;
     }
 
+    /**
+     * True when a run can actually be started on this tier — it is both built
+     * and earned. This is what greys the button out.
+     */
     public boolean isEnabled(Difficulty difficulty) {
-        return difficulty != null && difficulty.isImplemented();
+        return difficulty != null
+                && difficulty.isImplemented()
+                && progress.isUnlocked(difficulty);
+    }
+
+    /** Which tiers the player has earned. */
+    public DifficultyProgress getProgress() {
+        return progress;
+    }
+
+    /** Updates the unlock state, e.g. after loading a save or winning a run. */
+    public void setProgress(DifficultyProgress progress) {
+        this.progress = progress == null ? DifficultyProgress.fresh() : progress;
     }
 
     private String lockedReasonFor(MenuItem item) {

@@ -22,8 +22,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class WaveManagerTest {
 
     /**
-     * A manager on the reference tuning, so these tests describe the baseline
+     * A manager pinned to one tier, so these tests describe a fixed baseline
      * rather than whichever tier happens to be the menu default.
+     *
+     * <p>Medium rather than {@link Difficulty#reference()} deliberately: these
+     * are tests about spawn mechanics, and pinning them to the reference would
+     * mean a future rebalance that moves the reference silently changes what
+     * they are measuring — which is exactly what happened when the reference
+     * moved from Medium to Hard.
      */
     private WaveManager newManager() {
         return new WaveManager(new WordBank(Language.ENGLISH, new Random(42)),

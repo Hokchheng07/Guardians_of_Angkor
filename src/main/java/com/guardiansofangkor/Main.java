@@ -81,6 +81,11 @@ public final class Main {
         SaveData saved = saveManager.load();
 
         GameState state = new GameState(language);
+        // Unlocks are needed the instant the menu opens, which is before the
+        // player has decided whether to resume anything — so they are seeded
+        // separately from the run itself.
+        state.restoreProgress(saved);
+
         AutosaveHook autosave = new AutosaveHook(saveManager, state::toSaveData);
         autosave.register();
 
@@ -103,6 +108,7 @@ public final class Main {
         // ---- front end -----------------------------------------------------
 
         MenuState menuState = new MenuState(saved.hasResumableRun());
+        menuState.setProgress(state.getProgress());
         MenuPanel menuPanel = new MenuPanel(menuState, sprites);
 
         JPanel root = new JPanel(new CardLayout());
@@ -174,6 +180,10 @@ public final class Main {
             loop.stop();
             ((CardLayout) root.getLayout()).show(root, CARD_MENU);
             menuState.setContinueAvailable(state.getLevel() > 0 && !state.isGameOver());
+            // A run that was just won may have opened the next tier. Refreshing
+            // here rather than only at startup means the player sees it unlock
+            // on the way back to the menu, not on their next launch.
+            menuState.setProgress(state.getProgress());
             menuPanel.activateScreen();
         };
 

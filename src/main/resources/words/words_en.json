@@ -1176,7 +1176,7 @@
     "easy": {
       "bands": [
         {
-          "throughLevel": 5,
+          "throughLevel": 3,
           "pools": [
             "tiny",
             "short"
@@ -1184,7 +1184,7 @@
           "boss": "novice"
         },
         {
-          "throughLevel": 10,
+          "throughLevel": 6,
           "pools": [
             "tiny",
             "short",
@@ -1193,7 +1193,7 @@
           "boss": "novice"
         },
         {
-          "throughLevel": 15,
+          "throughLevel": 10,
           "pools": [
             "short",
             "medium",
@@ -1239,7 +1239,7 @@
     "hard": {
       "bands": [
         {
-          "throughLevel": 4,
+          "throughLevel": 6,
           "pools": [
             "short",
             "medium",
@@ -1249,7 +1249,7 @@
           "boss": "adept"
         },
         {
-          "throughLevel": 9,
+          "throughLevel": 13,
           "pools": [
             "short",
             "medium",
@@ -1260,7 +1260,7 @@
           "boss": "master"
         },
         {
-          "throughLevel": 15,
+          "throughLevel": 20,
           "pools": [
             "medium",
             "long",
@@ -1320,54 +1320,151 @@
     "easy": [
       [
         "the naga rises from the flooded baray",
-        "seven stone heads turn toward the causeway",
         "hold the terrace until the venom runs dry"
       ],
       [
-        "moss and root have carried off the outer wall",
-        "the serpent coils in the shadow of the prasat",
+        "moss and root have taken the outer wall",
         "speak the old words and drive it back"
       ],
       [
         "lanterns gutter along the broken colonnade",
-        "the apsara watch from the gallery above",
         "name the guardian and the temple will stand"
+      ],
+      [
+        "seven stone heads turn toward the causeway",
+        "meet them here and do not step back"
+      ],
+      [
+        "the moat is black and the bridge is long",
+        "type every name the water gives you"
+      ],
+      [
+        "apsara watch from the gallery above",
+        "give them a reason to keep watching"
       ]
     ],
     "medium": [
       [
         "krong reap walks the causeway of the dead",
         "the laterite splits beneath every step he takes",
-        "the bayon holds its breath and the towers wait",
         "answer him now or the sanctuary is lost"
       ],
       [
         "the monsoon breaks over the ruined gopura",
         "his shadow drowns the frieze of churning seas",
-        "garuda and naga alike have fled the gallery",
         "hold the last terrace and do not falter"
       ],
       [
         "a thousand faces watch from the crumbling spire",
         "the demon king comes for the reliquary within",
-        "smoke of the censer bends away from his tread",
         "unmake him with the names carved in the stone"
+      ],
+      [
+        "smoke of the censer bends away from his tread",
+        "garuda and naga alike have fled the gallery",
+        "you are what is left standing on the stair"
+      ],
+      [
+        "the bells in the north tower have gone silent",
+        "something older than the temple is awake",
+        "keep the words coming and it cannot land"
+      ],
+      [
+        "he crosses the moat without troubling the water",
+        "every lamp in the outer gallery leans away",
+        "hold the line of the doorway and speak"
+      ],
+      [
+        "the causeway lions turn their heads to follow",
+        "dust lifts from the flagstones and hangs there",
+        "name each shadow before it reaches the step"
+      ],
+      [
+        "the library roof gave way in the first hour",
+        "palm leaf and ash are all that is left of it",
+        "say what was written there and mean it"
+      ],
+      [
+        "he asks for the temple by its oldest name",
+        "do not give it to him and do not stop typing",
+        "the stone remembers who defended it"
+      ],
+      [
+        "rain runs upward along the carved pilasters",
+        "the guardian figures have closed their eyes",
+        "open them again with the words you know"
+      ],
+      [
+        "his crown is made of the seven fallen towers",
+        "each one still has a name that can be spoken",
+        "speak them in order and take the crown apart"
+      ],
+      [
+        "the plaza has filled with things that were buried",
+        "they came up when he called and they answer to him",
+        "cut the thread between them and hold the gate"
       ]
     ],
     "hard": [
       [
-        "the sarcophagus in the sanctum has been opened",
-        "krong reap wears the crown of the seven terraces",
+        "the sarcophagus in the innermost sanctum stands open",
         "every lintel of the temple bleeds verdigris and ash",
-        "the apsara have turned their faces to the wall",
-        "there is no ward left but the words you carry"
+        "there is no ward left here but the words you carry"
       ],
       [
-        "night falls in the middle of the afternoon",
+        "an unseasonal darkness swallows the afternoon entirely",
         "the moat boils and the causeway cracks lengthwise",
+        "finish the invocation before the temple forgets itself"
+      ],
+      [
         "he speaks and the inscriptions peel from the gopura",
-        "the last brazier gutters out in the antechamber",
-        "finish the invocation before the temple forgets its name"
+        "the consecrated brazier gutters out in the antechamber",
+        "recite the deconsecration and unmake his procession"
+      ],
+      [
+        "krong reap wears the crown of the seven terraces",
+        "his retinue of revenants encircles the sanctuary wall",
+        "articulate every syllable or the ward will not hold"
+      ],
+      [
+        "the apsara have turned their faces to the wall",
+        "an unremembered language runs beneath the flagstones",
+        "transliterate it faster than he can rewrite the stone"
+      ],
+      [
+        "the reliquary has been prised from its pedestal",
+        "reliquary dust hangs incandescent in the still air",
+        "reconstitute the litany before the last mote settles"
+      ],
+      [
+        "his shadow precedes him by the length of the causeway",
+        "the balustrade serpents have abandoned their posts",
+        "enunciate the guardian names in unbroken succession"
+      ],
+      [
+        "the bas relief of the churning sea has begun to move",
+        "asuras and devas alike have let go of the serpent",
+        "restore the equilibrium with nothing but your hands"
+      ],
+      [
+        "an interminable procession climbs the eastern stair",
+        "each figure carries a fragment of the broken lintel",
+        "assemble the inscription before they reach the summit"
+      ],
+      [
+        "the sanctuary vault exhales centuries of trapped air",
+        "every carved apsara is weeping a granular black dust",
+        "consecrate the threshold again and refuse him entry"
+      ],
+      [
+        "he pronounces the temple deconsecrated and abandoned",
+        "the pediment sculptures crumble to acknowledge him",
+        "contradict him with the whole architecture of the word"
+      ],
+      [
+        "the last unbroken naga balustrade fractures audibly",
+        "his crown is an accumulation of everything he has taken",
+        "disassemble it syllable by deliberate syllable"
       ]
     ],
     "endless": [
@@ -1380,6 +1477,16 @@
         "there is no last terrace and no last tower",
         "the jungle takes back everything it is given",
         "type until the temple stops asking you to"
+      ],
+      [
+        "the causeway runs further than it did yesterday",
+        "nothing you clear stays cleared for very long",
+        "keep going anyway because that is the whole point"
+      ],
+      [
+        "another shape resolves out of the treeline",
+        "there is no count and there is no ending",
+        "hold the doorway for as long as you are able"
       ]
     ]
   }

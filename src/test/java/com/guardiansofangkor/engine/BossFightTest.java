@@ -18,6 +18,7 @@ import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -439,35 +440,61 @@ class BossFightTest {
 
     // ---- venom -------------------------------------------------------------
 
-    @Test
-    @DisplayName("venom starts flying once the fight is live")
-    void venomEventuallyFlies() {
-        BossFight boss = fighting();
-
-        boolean spat = false;
-        for (int i = 0; i < 2000 && !spat; i++) {
-            boss.update();
-            spat = boss.isVenomDue();
+    /**
+     * Plays a bare BossFight forward, typing each paragraph the moment it comes
+     * up and riding out each phase, until {@code stop} is satisfied.
+     *
+     * @return true if the condition was met before the fight ended
+     */
+    private static boolean playUntil(BossFight boss, java.util.function.Predicate<BossFight> stop) {
+        for (int i = 0; i < 20_000; i++) {
+            if (stop.test(boss)) {
+                return true;
+            }
+            if (boss.isTyping()) {
+                typeVerse(boss);
+            } else if (boss.isFighting()) {
+                boss.update();
+            } else {
+                return false;
+            }
         }
-        assertTrue(spat, "the boss never attacked");
+        return false;
+    }
+
+    @Test
+    @DisplayName("venom flies once a paragraph has provoked a barrage")
+    void venomEventuallyFlies() {
+        BossFight boss = paragraphBoss();
+
+        assertTrue(playUntil(boss, BossFight::isVenomDue), "the boss never spat");
     }
 
     @Test
     @DisplayName("the venom-due flag is true for exactly one tick")
     void venomFlagIsOneShot() {
         // A sticky flag would spawn a bolt on every frame for the rest of the
-        // fight, which is not a boss, it is a wall.
-        BossFight boss = fighting();
+        // phase, which is not a boss, it is a wall.
+        BossFight boss = paragraphBoss();
 
-        for (int i = 0; i < 2000; i++) {
-            boss.update();
-            if (boss.isVenomDue()) {
-                boss.update();
-                assertFalse(boss.isVenomDue(), "the spit flag stuck");
-                return;
-            }
+        assertTrue(playUntil(boss, BossFight::isVenomDue), "the boss never spat");
+        boss.update();
+        assertFalse(boss.isVenomDue(), "the spit flag stuck");
+    }
+
+    @Test
+    @DisplayName("a bolt always lands inside the phase that threw it")
+    void venomOutlivesNothing() {
+        // The field is swept when a phase ends. A bolt slower than its own
+        // phase would be cleared away unanswered on every tier that stretches
+        // the flight, which teaches the player to ignore the barrage entirely.
+        for (Difficulty tier : Difficulty.values()) {
+            BossFight boss = new BossFight(EnemyType.KRONG_REAP, VERSES, tier);
+            assertTrue(boss.venomFlightTicks() < BossFight.PHASE_MIN_TICKS,
+                    tier + " throws bolts that outlive the shortest phase");
+            assertTrue(boss.venomFlightTicks() >= GameConfig.TARGET_FPS * 2,
+                    tier + " throws bolts too fast to read");
         }
-        throw new AssertionError("the boss never attacked");
     }
 
     @Test
@@ -501,13 +528,20 @@ class BossFightTest {
     @DisplayName("a Time Freeze still holds during the finale")
     void freezeStopsTheVenomClock() {
         // The boon was earned and spent. Quietly cancelling it at the boss door
-        // would feel like a cheat.
-        BossFight boss = fighting();
+        // would feel like a cheat. Frozen mid-phase, the phase itself must also
+        // stop — a barrage that kept firing through a freeze would be the boon
+        // visibly not working.
+        BossFight boss = paragraphBoss();
+        typeVerse(boss);
+        typeVerse(boss);
+        assertTrue(boss.isAttacking());
 
         for (int i = 0; i < 2000; i++) {
             boss.update(0.0);
             assertFalse(boss.isVenomDue(), "venom flew through a Time Freeze");
+            assertFalse(boss.isMinionDue(), "a summon arrived through a Time Freeze");
         }
+        assertTrue(boss.isAttacking(), "the phase timer ran out under a freeze");
     }
 
     // ---- the fight inside a run --------------------------------------------
@@ -541,15 +575,281 @@ class BossFightTest {
     }
 
     @Test
-    @DisplayName("the boss stands alone — no ordinary enemies join it")
-    void noWavesDuringTheFinale() {
+    @DisplayName("no scheduled wave runs during the finale")
+    void noScheduledWavesDuringTheFinale() {
+        // The wave manager is done once the finale begins. Anything on the
+        // field from here is the boss's doing, not the schedule's.
         GameState state = atTheFinale();
+        int levelBefore = state.getLevel();
 
         for (int i = 0; i < 3000; i++) {
             state.update();
-            assertTrue(state.getEnemies().isEmpty(),
-                    "a wave spawned during the finale");
         }
+        assertEquals(levelBefore, state.getLevel(),
+                "the wave manager rolled into another level during the finale");
+    }
+
+    // ---- attack phases -----------------------------------------------------
+
+    /**
+     * A boss with two-sentence paragraphs, so phases are quick to reach.
+     *
+     * <p>Three paragraphs rather than two: the last one kills the boss instead
+     * of provoking a phase, so a script with only two would leave exactly one
+     * phase in the whole fight and nothing to compare it against.
+     */
+    private static BossFight paragraphBoss() {
+        BossFight boss = new BossFight(EnemyType.KRONG_REAP,
+                List.of("one two", "three four", "five six",
+                        "seven eight", "nine ten", "eleven twelve"),
+                2, Difficulty.MEDIUM, new Random(5));
+        settleArrival(boss);
+        return boss;
+    }
+
+    /** Ticks until the current attack phase has run out. */
+    private static void waitOutThePhase(BossFight boss) {
+        for (int i = 0; i <= BossFight.PHASE_MAX_TICKS && boss.isAttacking(); i++) {
+            boss.update();
+        }
+    }
+
+    @Test
+    @DisplayName("the fight opens on a paragraph, not on an attack")
+    void theFightOpensQuietly() {
+        // The briefing has just finished explaining the rules. Opening with a
+        // barrage would mean the player's first act under those rules is losing
+        // a verse to something they were still reading about.
+        BossFight boss = fighting();
+
+        assertTrue(boss.isTyping());
+        assertFalse(boss.isAttacking());
+        assertNull(boss.getAttackPhase(), "nothing should be attacking yet");
+    }
+
+    @Test
+    @DisplayName("a phase lasts seven to ten seconds")
+    void phasesRunSevenToTenSeconds() {
+        assertEquals(GameConfig.TARGET_FPS * 7, BossFight.PHASE_MIN_TICKS);
+        assertEquals(GameConfig.TARGET_FPS * 10, BossFight.PHASE_MAX_TICKS);
+    }
+
+    @Test
+    @DisplayName("the boss never attacks while a paragraph is up")
+    void noAttacksDuringTheTypingWindow() {
+        BossFight boss = paragraphBoss();
+
+        for (int i = 0; i < 3000; i++) {
+            boss.update();
+            assertFalse(boss.isVenomDue(), "spat at tick " + i + ", with the verse on screen");
+            assertFalse(boss.isMinionDue(), "summoned at tick " + i + ", with the verse up");
+        }
+        assertTrue(boss.isTyping(), "and it should still be waiting on the player");
+    }
+
+    @Test
+    @DisplayName("finishing a paragraph starts a phase; finishing a sentence does not")
+    void paragraphsProvokeThePhase() {
+        BossFight boss = paragraphBoss();
+
+        assertEquals(BossFight.Result.STAGE_CLEARED, typeVerse(boss),
+                "the first sentence is only half a paragraph");
+        assertTrue(boss.isTyping(), "so the boss should not have moved yet");
+
+        assertEquals(BossFight.Result.PARAGRAPH_CLEARED, typeVerse(boss));
+        assertTrue(boss.isAttacking(), "the paragraph should have provoked it");
+        assertNotNull(boss.getAttackPhase());
+        assertEquals(1, boss.getParagraphsCleared());
+    }
+
+    @Test
+    @DisplayName("the paragraph cannot be typed while a phase is running")
+    void theVerseIsClosedDuringAPhase() {
+        // The panel is off screen for the duration. Accepting keystrokes against
+        // a sentence nobody can see, and charging a verse reset for guessing
+        // wrong, is the trap the briefing phase already exists to avoid.
+        BossFight boss = paragraphBoss();
+        typeVerse(boss);
+        typeVerse(boss);
+        assertTrue(boss.isAttacking());
+
+        assertEquals(BossFight.Result.NONE, boss.submit("f"));
+        assertFalse(boss.isActive(), "the matcher must not see the verse either");
+    }
+
+    @Test
+    @DisplayName("the phase ends on its own and hands the next paragraph back")
+    void phasesReturnTheFloor() {
+        BossFight boss = paragraphBoss();
+        int paragraphsBefore = boss.getParagraphsCleared();
+
+        typeVerse(boss);
+        typeVerse(boss);
+        assertTrue(boss.isAttacking());
+
+        waitOutThePhase(boss);
+
+        assertTrue(boss.isTyping(), "the phase never gave the floor back");
+        assertEquals(1, boss.getPhasesElapsed());
+        assertEquals(paragraphsBefore + 1, boss.getParagraphsCleared(),
+                "and it should be a new paragraph, not the one already typed");
+        assertNull(boss.getAttackPhase(), "nothing should still be attacking");
+    }
+
+    @Test
+    @DisplayName("the end of a phase is announced for exactly one tick")
+    void phaseEndIsAOneShot() {
+        // GameState answers this by sweeping the field. A sticky flag would
+        // sweep on every tick of the typing window, so nothing the next phase
+        // put up would ever survive to be typed.
+        BossFight boss = paragraphBoss();
+        typeVerse(boss);
+        typeVerse(boss);
+
+        for (int i = 0; i <= BossFight.PHASE_MAX_TICKS; i++) {
+            boss.update();
+            if (boss.isPhaseJustEnded()) {
+                boss.update();
+                assertFalse(boss.isPhaseJustEnded(), "the phase-ended flag stuck");
+                return;
+            }
+        }
+        throw new AssertionError("the phase never ended");
+    }
+
+    @Test
+    @DisplayName("consecutive phases are never the same attack twice")
+    void phasesAlternate() {
+        // A "new phase" that is visibly the old phase reads as the transition
+        // having failed.
+        BossFight boss = paragraphBoss();
+
+        typeVerse(boss);
+        typeVerse(boss);
+        BossPhase first = boss.getAttackPhase();
+        waitOutThePhase(boss);
+
+        typeVerse(boss);
+        typeVerse(boss);
+        assertNotEquals(first, boss.getAttackPhase());
+    }
+
+    @Test
+    @DisplayName("each attack belongs to its own phase")
+    void attacksBelongToTheirPhase() {
+        BossFight boss = paragraphBoss();
+        typeVerse(boss);
+        typeVerse(boss);
+
+        for (int i = 0; i < 3000; i++) {
+            boss.update();
+            if (boss.isVenomDue()) {
+                assertEquals(BossPhase.PROJECTILE, boss.getAttackPhase(),
+                        "the boss spat during a phase that is not about spitting");
+            }
+            if (boss.isMinionDue()) {
+                assertEquals(BossPhase.MINIONS, boss.getAttackPhase(),
+                        "the boss summoned outside its summoning phase");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("a phase always actually does something")
+    void everyPhaseAttacks() {
+        // A seven-second phase with nothing in it is the game doing nothing at
+        // all, now that the paragraph is off screen for the duration.
+        BossFight boss = paragraphBoss();
+
+        for (int paragraph = 0; paragraph < 2; paragraph++) {
+            typeVerse(boss);
+            typeVerse(boss);
+            assertTrue(boss.isAttacking());
+
+            boolean attacked = false;
+            for (int i = 0; i <= BossFight.PHASE_MAX_TICKS && boss.isAttacking(); i++) {
+                boss.update();
+                attacked |= boss.isVenomDue() || boss.isMinionDue();
+            }
+            assertTrue(attacked, "a phase passed without the boss doing anything");
+        }
+    }
+
+    @Test
+    @DisplayName("a summoning phase has time to get its monsters across the plaza")
+    void summonsFitInsideTheirPhase() {
+        BossFight boss = fighting();
+
+        assertTrue(boss.minionsPerPhase() >= 2, "a summon of one is not a phase");
+        assertTrue(boss.minionIntervalTicks() * boss.minionsPerPhase()
+                        <= BossFight.PHASE_MAX_TICKS,
+                "the phase would end before it finished summoning");
+    }
+
+    @Test
+    @DisplayName("gentler tiers summon fewer monsters")
+    void summonCountFollowsTheTier() {
+        BossFight easy = new BossFight(EnemyType.NAGA, VERSES, Difficulty.EASY);
+        BossFight hard = new BossFight(EnemyType.KRONG_REAP, VERSES, Difficulty.HARD);
+
+        assertTrue(easy.minionsPerPhase() < hard.minionsPerPhase());
+    }
+
+    @Test
+    @DisplayName("the boss summons real enemies that can be typed down")
+    void summonedMinionsAreTypeable() {
+        GameState state = atTheFinale();
+        settleIntoTheFight(state);
+
+        Enemy minion = waitForMinion(state);
+        String word = minion.getWord();
+
+        for (int i = 1; i <= word.length(); i++) {
+            state.handleInput(word.substring(0, i));
+        }
+
+        assertFalse(minion.isActive(),
+                "a summoned monster the player typed correctly survived, so the "
+                        + "summoning phase is unanswerable");
+    }
+
+    @Test
+    @DisplayName("a summon never carries a word the paragraph still wants")
+    void summonsNeverStealAVerseWord() {
+        // One set of keystrokes meaning two things is exactly what typing the
+        // verse a word at a time exists to prevent.
+        GameState state = atTheFinale();
+
+        playFinaleUntil(state, s -> {
+            BossFight boss = s.getBoss();
+            if (boss == null) {
+                return true;
+            }
+            List<String> wanted = boss.remainingWords();
+            for (Enemy minion : s.getEnemies()) {
+                assertFalse(wanted.contains(minion.getWord()),
+                        "summon '" + minion.getWord() + "' is also a word of the verse");
+            }
+            return false;
+        });
+    }
+
+    /** Runs the fight until the boss has summoned something, and returns it. */
+    private static Enemy waitForMinion(GameState state) {
+        boolean summoned = playFinaleUntil(state, s -> liveMinion(s) != null);
+        if (!summoned) {
+            throw new AssertionError("the boss never summoned anything");
+        }
+        return liveMinion(state);
+    }
+
+    private static Enemy liveMinion(GameState state) {
+        for (Enemy enemy : state.getEnemies()) {
+            if (enemy.isActive()) {
+                return enemy;
+            }
+        }
+        return null;
     }
 
     @Test
@@ -578,12 +878,14 @@ class BossFightTest {
     @Test
     @DisplayName("no new power-ups drop once the finale has begun")
     void noDropsDuringTheFinale() {
+        // Summons die to typing like any other enemy, so this has to be checked
+        // while they are actually being killed rather than on an empty field.
         GameState state = atTheFinale();
 
-        for (int i = 0; i < 4000; i++) {
-            state.update();
-            assertTrue(state.getPowerUps().isEmpty(), "a boon dropped mid-finale");
-        }
+        playFinaleUntil(state, s -> {
+            assertTrue(s.getPowerUps().isEmpty(), "a boon dropped mid-finale");
+            return false;
+        });
     }
 
     /** Ticks a state past the rise and the held briefing, into the live fight. */
@@ -593,17 +895,82 @@ class BossFightTest {
         }
     }
 
-    /** Runs the fight until a bolt is in the air, and returns it. */
-    private static Projectile waitForVenom(GameState state) {
-        for (int i = 0; i < 4000; i++) {
-            state.update();
-            for (Projectile p : state.getProjectiles()) {
-                if (p.getKind() == Projectile.Kind.VENOM && p.isActive()) {
-                    return p;
+    /**
+     * Plays the finale forward through GameState: types each paragraph as it
+     * comes up, and rides out each phase, until {@code stop} is satisfied.
+     *
+     * <p>The fight only attacks in response to a finished paragraph now, so a
+     * test that merely ticks would sit in the typing window forever.
+     */
+    private static boolean playFinaleUntil(GameState state,
+                                           java.util.function.Predicate<GameState> stop) {
+        return playFinaleUntil(state, stop, false);
+    }
+
+    /**
+     * @param sweepEveryTick clears the field after each step. Used by tests that
+     *                       care about one specific way of being hit — a summon
+     *                       walking in costs a whole heart and a bolt costs
+     *                       half, so a test measuring one has to rule out the
+     *                       other rather than hope.
+     */
+    private static boolean playFinaleUntil(GameState state,
+                                           java.util.function.Predicate<GameState> stop,
+                                           boolean sweepEveryTick) {
+        // Deliberately one word or one tick per step, never a whole verse: a
+        // coarser loop would run past the moment being waited for and report it
+        // late, or miss it entirely.
+        //
+        // Only bailing on isBeaten() — not on "not yet fighting" — is what lets
+        // this be called straight off atTheFinale(), with the boss still
+        // ARRIVING. Bailing whenever the phase isn't FIGHHTING would stop on the
+        // very first iteration and report the condition never met, which is
+        // exactly the bug this replaced: every caller that skipped its own
+        // settleIntoTheFight() ride-through failed here, not because anything
+        // was wrong, but because the helper gave up before the briefing had
+        // even finished. isTyping() is already false during ARRIVING and
+        // BRIEFING, so the ordinary "else" branch below ticks through both the
+        // same way it ticks through an attack phase.
+        for (int i = 0; i < 60_000; i++) {
+            if (stop.test(state)) {
+                return true;
+            }
+            BossFight boss = state.getBoss();
+            if (boss == null || boss.isBeaten()) {
+                return false;
+            }
+            if (boss.isTyping()) {
+                String word = boss.currentWord();
+                for (int c = 1; c <= word.length(); c++) {
+                    state.handleInput(word.substring(0, c));
                 }
+                state.handleInput(word + " ");
+            } else {
+                state.update();
+            }
+            if (sweepEveryTick) {
+                clearTheField(state);
             }
         }
-        throw new AssertionError("the boss never spat");
+        return false;
+    }
+
+    /** Runs the fight until a bolt is in the air, and returns it. */
+    private static Projectile waitForVenom(GameState state) {
+        boolean spat = playFinaleUntil(state, s -> liveVenom(s) != null);
+        if (!spat) {
+            throw new AssertionError("the boss never spat");
+        }
+        return liveVenom(state);
+    }
+
+    private static Projectile liveVenom(GameState state) {
+        for (Projectile p : state.getProjectiles()) {
+            if (p.getKind() == Projectile.Kind.VENOM && p.isActive()) {
+                return p;
+            }
+        }
+        return null;
     }
 
     @Test
@@ -626,17 +993,18 @@ class BossFightTest {
         // is exactly what typing the verse word-at-a-time exists to avoid.
         GameState state = atTheFinale();
 
-        for (int i = 0; i < 12_000; i++) {
-            state.update();
-            if (state.getBoss() == null || !state.getBoss().isFighting()) {
-                break;
+        playFinaleUntil(state, s -> {
+            BossFight boss = s.getBoss();
+            if (boss == null) {
+                return true;
             }
-            List<String> wanted = state.getBoss().remainingWords();
-            for (Projectile bolt : state.getProjectiles()) {
+            List<String> wanted = boss.remainingWords();
+            for (Projectile bolt : s.getProjectiles()) {
                 assertFalse(wanted.contains(bolt.getWord()),
                         "venom '" + bolt.getWord() + "' is also a word of the verse");
             }
-        }
+            return false;
+        });
     }
 
     @Test
@@ -705,35 +1073,87 @@ class BossFightTest {
     }
 
     @Test
-    @DisplayName("finishing a verse sweeps the venom already in the air")
-    void counterVolleyClearsTheSky() {
+    @DisplayName("the field is swept when a phase ends, so the next paragraph is safe")
+    void thePhaseEndClearsTheField() {
+        // The paragraph comes back on screen the moment a phase is over. Leaving
+        // bolts and monsters standing would put the player back to reading a
+        // sentence while something walked at them, which is the arrangement the
+        // alternation exists to replace.
         GameState state = atTheFinale();
         settleIntoTheFight(state);
 
-        waitForVenom(state);
+        // Get something on the field, then ride out the rest of the phase.
+        assertTrue(playFinaleUntil(state,
+                        s -> liveVenom(s) != null || liveMinion(s) != null),
+                "the boss never put anything on the field");
 
-        typeVerseThrough(state);
-
-        for (Projectile bolt : state.getProjectiles()) {
-            assertFalse(bolt.isActive(),
-                    "a verse landed but the sky was not cleared, so the paragraph "
-                            + "is not actually a defence against anything");
+        BossFight boss = state.getBoss();
+        for (int i = 0; i < 20_000 && boss.isAttacking(); i++) {
+            state.update();
         }
+
+        assertTrue(boss.isTyping(), "the phase never ended");
+        assertNull(liveVenom(state), "a bolt survived into the typing window");
+        assertNull(liveMinion(state), "a summon survived into the typing window");
+    }
+
+    @Test
+    @DisplayName("a swept summon is not scored — outlasting a phase is not a kill")
+    void sweptSummonsPayNothing() {
+        // Paying for them would make ignoring a phase the profitable option.
+        GameState state = atTheFinale();
+        settleIntoTheFight(state);
+
+        assertTrue(playFinaleUntil(state, s -> liveMinion(s) != null));
+        int scoreBefore = state.getScore();
+        int slainBefore = state.getEnemiesDefeated();
+
+        BossFight boss = state.getBoss();
+        for (int i = 0; i < 20_000 && boss.isAttacking(); i++) {
+            state.update();
+        }
+
+        assertEquals(scoreBefore, state.getScore(), "the sweep paid out");
+        assertEquals(slainBefore, state.getEnemiesDefeated(),
+                "dismissed monsters were counted as kills");
     }
 
     /**
      * Types the boss's current verse through GameState, one word at a time,
      * confirming each with the trailing space that actually advances it.
+     *
+     * <p>Summons are cleared first on every pass. They carry words of their own
+     * and one of them can be an exact prefix of the verse word in progress, in
+     * which case the keystrokes legitimately go to the monster instead — real
+     * behaviour, but not what these tests are measuring.
      */
     private static void typeVerseThrough(GameState state) {
         BossFight boss = state.getBoss();
         int verse = boss.getStage();
-        while (boss.getStage() == verse && boss.isFighting()) {
+
+        for (int guard = 0;
+                guard < 40_000 && boss.getStage() == verse && boss.isFighting();
+                guard++) {
+            // A phase may be running — the verse is off screen and nothing can
+            // be typed at it until the boss is finished. Ride it out rather
+            // than spinning against a closed window.
+            if (!boss.isTyping()) {
+                state.update();
+                continue;
+            }
+            clearTheField(state);
             String word = boss.currentWord();
             for (int i = 1; i <= word.length(); i++) {
                 state.handleInput(word.substring(0, i));
             }
             state.handleInput(word + " ");
+        }
+    }
+
+    /** Removes everything the boss has summoned, without typing at it. */
+    private static void clearTheField(GameState state) {
+        for (Enemy enemy : List.copyOf(state.getEnemies())) {
+            enemy.defeat();
         }
     }
 
@@ -744,7 +1164,8 @@ class BossFightTest {
         settleIntoTheFight(state);
         assertFalse(state.isVictory());
 
-        for (int verse = 0; verse < state.getBoss().getStageCount(); verse++) {
+        int verses = state.getBoss().getStageCount();
+        for (int verse = 0; verse < verses; verse++) {
             typeVerseThrough(state);
         }
         assertFalse(state.isVictory(), "the death animation should still be playing");
@@ -771,13 +1192,15 @@ class BossFightTest {
     @Test
     @DisplayName("venom that lands costs a life like anything else")
     void venomStillHurts() {
+        // A bolt has to land inside its own phase, or the sweep would clear it
+        // unanswered — see venomOutlivesNothing. Summons are cleared as they
+        // arrive so the only thing that can reach the temple here is a bolt.
         GameState state = atTheFinale();
         int halves = state.getHalfLives();
 
-        for (int i = 0; i < 20_000 && state.getHalfLives() == halves; i++) {
-            state.update();
-        }
+        boolean hit = playFinaleUntil(state, s -> s.getHalfLives() != halves, true);
 
+        assertTrue(hit, "the boss never landed a bolt");
         assertEquals(halves - GameConfig.DAMAGE_PROJECTILE, state.getHalfLives(),
                 "a bolt costs half a heart, like every other projectile");
     }
@@ -789,21 +1212,78 @@ class BossFightTest {
         state.applyPowerUp(PowerUpType.NAGA_SHIELD);
         int halves = state.getHalfLives();
 
-        for (int i = 0; i < 20_000; i++) {
-            state.update();
-            if (state.getPowerUpState().getShieldCharges() == 0) {
-                assertEquals(halves, state.getHalfLives(),
-                        "the ward should have taken the hit, not the player");
-                return;
-            }
-        }
-        throw new AssertionError("the boss never landed a hit to absorb");
+        boolean spent = playFinaleUntil(state,
+                s -> s.getPowerUpState().getShieldCharges() == 0, true);
+
+        assertTrue(spent, "the boss never landed a hit to absorb");
+        assertEquals(halves, state.getHalfLives(),
+                "the ward should have taken the hit, not the player");
     }
 
     // ---- the paragraphs themselves -----------------------------------------
 
     @Test
-    @DisplayName("every tier has a paragraph, and every paragraph has verses")
+    @DisplayName("every tier gets exactly the script its boss health calls for")
+    void everyTierGetsItsScript() {
+        com.guardiansofangkor.i18n.WordBank bank =
+                new com.guardiansofangkor.i18n.WordBank(Language.ENGLISH, new Random(1));
+
+        for (Difficulty tier : Difficulty.values()) {
+            List<String> script = bank.bossScript(tier.getWordBankKey(),
+                    tier.getBossParagraphCount(),
+                    tier.getBossSentencesPerParagraph(),
+                    new Random(1));
+
+            assertEquals(tier.getBossSentenceCount(), script.size(),
+                    tier + " was handed the wrong amount of health");
+        }
+    }
+
+    @Test
+    @DisplayName("a tier's paragraphs are not repeated while fresh ones are left")
+    void scriptsDoNotRepeatUnnecessarily() {
+        // Repeating the same block three times is the literal reading of "three
+        // paragraphs, three times", and it would mean two thirds of the fight is
+        // text the player has already typed.
+        com.guardiansofangkor.i18n.WordBank bank =
+                new com.guardiansofangkor.i18n.WordBank(Language.ENGLISH, new Random(1));
+
+        List<String> script = bank.bossScript(
+                Difficulty.MEDIUM.getWordBankKey(),
+                Difficulty.MEDIUM.getBossParagraphCount(),
+                Difficulty.MEDIUM.getBossSentencesPerParagraph(),
+                new Random(4));
+
+        assertEquals(script.size(), new java.util.HashSet<>(script).size(),
+                "the finale asked the player to type the same sentence twice");
+    }
+
+    @Test
+    @DisplayName("Hard draws on its own, harder pool rather than Medium's")
+    void hardHasItsOwnSentences() {
+        com.guardiansofangkor.i18n.WordBank bank =
+                new com.guardiansofangkor.i18n.WordBank(Language.ENGLISH, new Random(1));
+
+        java.util.Set<String> medium = new java.util.HashSet<>(bank.bossScript(
+                Difficulty.MEDIUM.getWordBankKey(), 12, 3, new Random(1)));
+        List<String> hard = bank.bossScript(
+                Difficulty.HARD.getWordBankKey(), 12, 3, new Random(1));
+
+        for (String sentence : hard) {
+            assertFalse(medium.contains(sentence),
+                    "Hard reused Medium's line: \"" + sentence + "\"");
+        }
+
+        double mediumAverage = medium.stream().mapToInt(String::length).average().orElse(0);
+        double hardAverage = hard.stream().mapToInt(String::length).average().orElse(0);
+        assertTrue(hardAverage > mediumAverage,
+                "Hard's lines average " + Math.round(hardAverage)
+                        + " characters against Medium's " + Math.round(mediumAverage)
+                        + ", so it is not actually asking for more");
+    }
+
+    @Test
+    @DisplayName("every tier has a paragraph, and every verse is typeable")
     void everyTierHasAFinale() {
         com.guardiansofangkor.i18n.WordBank bank =
                 new com.guardiansofangkor.i18n.WordBank(Language.ENGLISH, new Random(1));
@@ -812,8 +1292,9 @@ class BossFightTest {
             List<String> paragraph = bank.bossParagraph(tier.getWordBankKey(), new Random(1));
 
             assertNotNull(paragraph, tier + " has no finale");
-            assertTrue(paragraph.size() >= 3,
-                    tier + " should be at least three verses, got " + paragraph.size());
+            assertTrue(paragraph.size() >= tier.getBossSentencesPerParagraph(),
+                    tier + " paragraphs are shorter than its phases need, got "
+                            + paragraph.size());
             for (String verse : paragraph) {
                 assertFalse(verse.isBlank(), tier + " has an empty verse");
                 assertTrue(verse.length() <= 60,

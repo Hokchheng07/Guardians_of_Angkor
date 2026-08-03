@@ -29,6 +29,49 @@ class SaveManagerTest {
     }
 
     @Test
+    @DisplayName("unlocked tiers round-trip with the run")
+    void clearedTiersRoundTrip(@TempDir Path dir) {
+        SaveManager manager = new SaveManager(dir.resolve("progress.properties"));
+        SaveData original = new SaveData(7, 4200, 2, Language.ENGLISH, 9000, 12,
+                new java.util.LinkedHashSet<>(java.util.List.of("easy", "medium")));
+
+        assertTrue(manager.save(original));
+        SaveData loaded = manager.load();
+
+        assertTrue(loaded.hasCleared("easy"));
+        assertTrue(loaded.hasCleared("medium"));
+        assertFalse(loaded.hasCleared("hard"),
+                "a tier that was never beaten must not come back unlocked");
+    }
+
+    @Test
+    @DisplayName("a save written before unlocks existed still loads")
+    void oldSavesHaveNoUnlocks(@TempDir Path dir) throws IOException {
+        // The field is simply absent in an older file. That should read as
+        // "nothing cleared yet", not as a parse failure that costs the run too.
+        Path file = dir.resolve("progress.properties");
+        Files.writeString(file, "wave=4\nscore=120\nlives=2\nlanguage=en\n");
+
+        SaveData loaded = new SaveManager(file).load();
+
+        assertEquals(4, loaded.wave(), "the rest of the save must still load");
+        assertTrue(loaded.clearedTiers().isEmpty());
+    }
+
+    @Test
+    @DisplayName("a hand-edited unlock list is cleaned up rather than trusted")
+    void clearedTiersAreNormalised(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve("progress.properties");
+        Files.writeString(file, "wave=1\nlives=3\nclearedTiers= EASY , ,medium \n");
+
+        SaveData loaded = new SaveManager(file).load();
+
+        assertTrue(loaded.hasCleared("easy"), "capitals and padding should still count");
+        assertTrue(loaded.hasCleared("medium"));
+        assertEquals(2, loaded.clearedTiers().size(), "the blank entry should be dropped");
+    }
+
+    @Test
     @DisplayName("a missing save file yields an empty save, not an exception")
     void missingFileYieldsEmpty(@TempDir Path dir) {
         SaveManager manager = new SaveManager(dir.resolve("does-not-exist.properties"));

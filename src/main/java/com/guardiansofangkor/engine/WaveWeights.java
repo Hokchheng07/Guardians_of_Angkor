@@ -28,15 +28,18 @@ final class WaveWeights {
      * <p>Easy delays the roster rather than only slowing it. Meeting five
      * different monsters in the first six levels is a lot to learn while also
      * learning to type under pressure, and the tier's job is to let the player
-     * get good at one thing at a time. Hard does the reverse, within reason —
-     * nothing can unlock before level 1.
+     * get good at one thing at a time. Medium holds the roster back by one
+     * level rather than two, so the ladder introduces monsters a little sooner
+     * at every rung. Hard is the reference and delays nothing.
+     *
+     * <p>Nothing can unlock before level 1 regardless of what is written here.
      */
     private static final Map<Difficulty, Integer> UNLOCK_DELAY = new EnumMap<>(Difficulty.class);
 
     static {
         UNLOCK_DELAY.put(Difficulty.EASY, 2);
-        UNLOCK_DELAY.put(Difficulty.MEDIUM, 0);
-        UNLOCK_DELAY.put(Difficulty.HARD, -1);
+        UNLOCK_DELAY.put(Difficulty.MEDIUM, 1);
+        UNLOCK_DELAY.put(Difficulty.HARD, 0);
         UNLOCK_DELAY.put(Difficulty.ENDLESS, 0);
     }
 

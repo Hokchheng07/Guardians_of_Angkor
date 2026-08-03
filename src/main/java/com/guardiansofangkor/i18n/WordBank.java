@@ -131,17 +131,17 @@ public class WordBank {
      */
     private static final Map<String, List<Band>> FALLBACK_BANDS = Map.of(
             "easy", List.of(
-                    new Band(5, List.of("tiny", "short"), "novice"),
-                    new Band(10, List.of("tiny", "short", "medium"), "novice"),
-                    new Band(15, List.of("short", "medium"), "adept")),
+                    new Band(3, List.of("tiny", "short"), "novice"),
+                    new Band(6, List.of("tiny", "short", "medium"), "novice"),
+                    new Band(10, List.of("short", "medium"), "adept")),
             "medium", List.of(
                     new Band(4, List.of("tiny", "short", "medium"), "novice"),
                     new Band(9, List.of("short", "medium", "long"), "adept"),
                     new Band(15, List.of("short", "medium", "long"), "master")),
             "hard", List.of(
-                    new Band(4, List.of("short", "medium", "long"), "adept"),
-                    new Band(9, List.of("short", "medium", "long", "epic"), "master"),
-                    new Band(15, List.of("medium", "long", "epic"), "legend")),
+                    new Band(6, List.of("short", "medium", "long"), "adept"),
+                    new Band(13, List.of("short", "medium", "long", "epic"), "master"),
+                    new Band(20, List.of("medium", "long", "epic"), "legend")),
             "endless", List.of(
                     new Band(4, List.of("tiny", "short", "medium"), "novice"),
                     new Band(9, List.of("short", "medium", "long"), "adept"),
@@ -650,6 +650,81 @@ public class WordBank {
         }
         Random source = picker == null ? random : picker;
         return options.get(source.nextInt(options.size()));
+    }
+
+    /**
+     * The whole script the finale asks for, as a flat run of sentences.
+     *
+     * <p>The boss's health is measured in text, so the tier says how much text
+     * it wants and this assembles it: {@code paragraphs} paragraphs of
+     * {@code sentencesPerParagraph} sentences each, drawn from the tier's pool.
+     *
+     * <p>Paragraphs are drawn <em>without replacement</em> for as long as the
+     * pool allows. Repeating the same block two or three times over would be
+     * the literal reading of "two paragraphs, twice", and it would mean the
+     * second half of every fight is text the player has already typed — which
+     * turns a climax into a transcription exercise. Only once the pool runs dry
+     * does it start round again, reshuffled, so a short pool degrades into
+     * repetition rather than into failure.
+     *
+     * <p>Paragraphs shorter than asked for are skipped rather than padded: a
+     * three-sentence phase built out of a two-sentence paragraph would change
+     * the phase length, which is the one thing the count is for. If nothing in
+     * the pool is long enough the requirement is relaxed instead of returning an
+     * unwinnable empty script.
+     *
+     * @param tierKey lower-case difficulty name, e.g. {@code "easy"}
+     */
+    public List<String> bossScript(String tierKey, int paragraphs,
+                                   int sentencesPerParagraph, Random picker) {
+        int wantParagraphs = Math.max(1, paragraphs);
+        int wantSentences = Math.max(1, sentencesPerParagraph);
+        Random source = picker == null ? random : picker;
+
+        List<List<String>> pool = paragraphPoolFor(tierKey, wantSentences);
+
+        List<String> script = new ArrayList<>(wantParagraphs * wantSentences);
+        List<List<String>> bag = new ArrayList<>();
+
+        for (int i = 0; i < wantParagraphs; i++) {
+            if (bag.isEmpty()) {
+                bag.addAll(pool);
+                Collections.shuffle(bag, source);
+            }
+            List<String> paragraph = bag.remove(0);
+            for (int s = 0; s < wantSentences && s < paragraph.size(); s++) {
+                script.add(paragraph.get(s));
+            }
+        }
+        return List.copyOf(script);
+    }
+
+    /**
+     * The tier's paragraphs that are long enough to fill a phase, falling back
+     * through progressively weaker requirements rather than ever coming back
+     * empty.
+     */
+    private List<List<String>> paragraphPoolFor(String tierKey, int wantSentences) {
+        List<List<String>> options = tierKey == null
+                ? null
+                : bossParagraphs.get(tierKey.toLowerCase(java.util.Locale.ROOT));
+
+        if (options == null || options.isEmpty()) {
+            options = FALLBACK_PARAGRAPHS.getOrDefault(
+                    tierKey == null ? "easy" : tierKey.toLowerCase(java.util.Locale.ROOT),
+                    FALLBACK_PARAGRAPHS.get("easy"));
+        }
+
+        List<List<String>> longEnough = new ArrayList<>();
+        for (List<String> paragraph : options) {
+            if (paragraph.size() >= wantSentences) {
+                longEnough.add(paragraph);
+            }
+        }
+        // Nothing in the pool is long enough. Take what there is — a slightly
+        // short paragraph is a tuning problem; an empty script is an unwinnable
+        // run.
+        return longEnough.isEmpty() ? new ArrayList<>(options) : longEnough;
     }
 
     /** How many paragraphs a tier has to choose between. Zero if none. */

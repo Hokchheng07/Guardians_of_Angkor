@@ -80,7 +80,16 @@ public class BossRenderer {
             return;
         }
         drawHealthBar(g2, boss);
-        drawParagraphPanel(g2, boss);
+
+        // The paragraph is off screen for the whole of an attack phase. Leaving
+        // it up would ask the player to read a sentence they are not allowed to
+        // type, which reads as the input having broken; the banner in its place
+        // says what is happening and how much longer it lasts.
+        if (boss.isAttacking()) {
+            drawPhaseBanner(g2, boss);
+        } else {
+            drawParagraphPanel(g2, boss);
+        }
 
         // Last, so it sits over the verse rather than under it — the whole
         // point of the held beat is that this is the only thing being read.
@@ -451,6 +460,67 @@ public class BossRenderer {
                 g2.draw(pip);
             }
         }
+    }
+
+    // ---- the attack phase --------------------------------------------------
+
+    /**
+     * What the boss is doing, and how much of it is left.
+     *
+     * <p>Occupies the verse panel's exact footprint. Anything else would make
+     * the whole lower half of the screen jump every few seconds, and the two
+     * states are meant to read as the same slot showing different things rather
+     * than as the layout rearranging itself.
+     *
+     * <p>Deliberately thin: a name and a draining bar. The player's attention
+     * during a phase belongs on the field, and a panel that competed for it
+     * would defeat the point of having taken the paragraph away.
+     */
+    private void drawPhaseBanner(Graphics2D g2, BossFight boss) {
+        g2.setFont(paragraphFont);
+        FontMetrics fm = g2.getFontMetrics();
+
+        int lineHeight = fm.getHeight() + LINE_GAP;
+        int panelHeight = PANEL_PADDING * 2 + lineHeight;
+        int panelWidth = GameConfig.SCREEN_WIDTH - PANEL_SIDE_MARGIN * 2;
+        int panelX = PANEL_SIDE_MARGIN;
+        int panelY = GameConfig.VERSE_PANEL_BOTTOM_Y - panelHeight;
+
+        RoundRectangle2D panel = new RoundRectangle2D.Double(
+                panelX, panelY, panelWidth, panelHeight, 16, 16);
+        g2.setColor(Palette.BOSS_PANEL);
+        g2.fill(panel);
+        g2.setColor(Palette.DANGER);
+        g2.setStroke(new BasicStroke(2.0f));
+        g2.draw(panel);
+
+        String name = boss.getAttackPhase() == null
+                ? ""
+                : boss.getAttackPhase().getDisplayName().toUpperCase(java.util.Locale.ROOT);
+        int baseline = panelY + PANEL_PADDING + fm.getAscent();
+        g2.setColor(Palette.HUD_TEXT_GOLD);
+        g2.drawString(name,
+                GameConfig.SCREEN_WIDTH / 2 - fm.stringWidth(name) / 2, baseline);
+
+        // Drains left to right, so "nearly over" is legible at a glance without
+        // reading anything.
+        int trackWidth = panelWidth - PANEL_PADDING * 2;
+        int trackX = panelX + PANEL_PADDING;
+        int trackY = panelY + panelHeight - PANEL_PADDING / 2 - 3;
+        double remaining = Math.max(0.0, 1.0 - boss.getAttackPhaseProgress());
+
+        g2.setColor(Palette.LIFE_LOST);
+        g2.fillRect(trackX, trackY, trackWidth, 5);
+        g2.setColor(Palette.DANGER);
+        g2.fillRect(trackX, trackY, (int) Math.round(trackWidth * remaining), 5);
+
+        g2.setFont(labelFont);
+        FontMetrics labelMetrics = g2.getFontMetrics();
+        String hint = "TYPE THEM DOWN";
+        g2.setColor(Palette.HUD_TEXT_DIM);
+        g2.drawString(hint,
+                panelX + panelWidth - PANEL_PADDING - labelMetrics.stringWidth(hint),
+                panelY - 10);
     }
 
     // ---- the paragraph -----------------------------------------------------

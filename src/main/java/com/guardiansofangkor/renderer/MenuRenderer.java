@@ -191,8 +191,11 @@ public class MenuRenderer {
         for (MenuItem item : MenuItem.values()) {
             boolean selected = state.getSelectedItem() == item
                     && state.getScreen() == MenuState.Screen.MAIN;
+            // Continue is built — it is only dark when there is no saved run —
+            // so it must never carry the SOON badge.
             drawButton(g2, item.getLabel().toUpperCase(java.util.Locale.ROOT),
-                    x, y, width, selected, state.isEnabled(item), glowPhase,
+                    x, y, width, selected, state.isEnabled(item),
+                    !item.isImplemented(), glowPhase,
                     pressFor(state, selected));
             y += BUTTON_H + BUTTON_GAP;
         }
@@ -213,8 +216,12 @@ public class MenuRenderer {
 
         for (Difficulty difficulty : Difficulty.values()) {
             boolean selected = state.getSelectedDifficulty() == difficulty;
+            // Only Endless is unbuilt. Medium and Hard are finished and simply
+            // locked until they are earned, so they render dark but unbadged —
+            // pressing one explains what would open it.
             drawButton(g2, difficulty.getDisplayName().toUpperCase(java.util.Locale.ROOT),
-                    x, y, width, selected, state.isEnabled(difficulty), glowPhase,
+                    x, y, width, selected, state.isEnabled(difficulty),
+                    !difficulty.isImplemented(), glowPhase,
                     pressFor(state, selected));
             y += BUTTON_H + BUTTON_GAP;
         }
@@ -239,10 +246,19 @@ public class MenuRenderer {
      * dark text, available is an outlined plate with gold text, and locked keeps
      * the same silhouette but drops to flat stone — present, clearly not ready,
      * and not mistakable for either of the other two.
+     *
+     * @param unbuilt whether to badge the plate SOON. Deliberately separate from
+     *                {@code enabled}, because there are two quite different
+     *                reasons a button can be dark. SOON means the feature does
+     *                not exist yet and no amount of playing will produce it. A
+     *                difficulty the player has not earned, or a Continue with
+     *                nothing to continue, is finished work waiting on them —
+     *                badging those SOON tells the player a lie, and one that
+     *                would stop them trying to unlock it.
      */
     private void drawButton(Graphics2D g2, String label, int x, int y, int width,
-                            boolean selected, boolean enabled, double glowPhase,
-                            double pressProgress) {
+                            boolean selected, boolean enabled, boolean unbuilt,
+                            double glowPhase, double pressProgress) {
         // A pressed button sinks a couple of pixels and loses a little width, so
         // the click has a physical read rather than just changing colour.
         int sink = (int) Math.round(2 * pressProgress);
@@ -322,7 +338,7 @@ public class MenuRenderer {
         Ornament.drawCandle(g2, centreX + candleGap, candleBase, 20,
                 candleBody, candleFlame);
 
-        if (!enabled) {
+        if (unbuilt) {
             g2.setFont(hintFont);
             g2.setColor(Palette.alpha(LOCKED_TEXT, 0.9));
             String tag = "SOON";

@@ -228,7 +228,7 @@ class WordBankTest {
         WordBank bank = bank(13);
 
         WordPolicy early = bank.policyFor("easy", 1);
-        WordPolicy late = bank.policyFor("easy", 15);
+        WordPolicy late = bank.policyFor("easy", 10);
 
         assertTrue(early.restrictsPools(), "Easy level 1 should be banded");
         assertTrue(early.getPoolNames().contains("tiny"));

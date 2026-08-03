@@ -1,7 +1,10 @@
 package com.guardiansofangkor.engine;
 
+import com.guardiansofangkor.entities.EnemyType;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -46,17 +49,26 @@ class LevelPreviewTest {
     @Test
     @DisplayName("the hint follows the tier's own boss")
     void hintFollowsTheTierBoss() {
-        // Both tiers end on 15, but with different monsters. Announcing the
-        // wrong finale is worse than announcing nothing.
-        LevelPreview easyFinale = LevelPreview.forLevel(15, Difficulty.EASY);
+        // The tiers end on different levels and with different monsters.
+        // Announcing the wrong finale is worse than announcing nothing, and
+        // announcing it on the wrong level is worse still.
+        LevelPreview easyFinale = LevelPreview.forLevel(
+                Difficulty.EASY.getFinalBossLevel(), Difficulty.EASY);
         assertNotNull(easyFinale);
         assertTrue(easyFinale.hint().contains("Naga"),
                 "Easy's finale is the Naga, got: " + easyFinale.hint());
 
-        LevelPreview mediumFinale = LevelPreview.forLevel(15, Difficulty.MEDIUM);
+        LevelPreview mediumFinale = LevelPreview.forLevel(
+                Difficulty.MEDIUM.getFinalBossLevel(), Difficulty.MEDIUM);
         assertNotNull(mediumFinale);
         assertTrue(mediumFinale.hint().contains("Krong Reap"),
                 "Medium's finale is Krong Reap, got: " + mediumFinale.hint());
+
+        LevelPreview hardFinale = LevelPreview.forLevel(
+                Difficulty.HARD.getFinalBossLevel(), Difficulty.HARD);
+        assertNotNull(hardFinale);
+        assertTrue(hardFinale.hint().contains("Krong Reap"),
+                "Hard's finale is Krong Reap, got: " + hardFinale.hint());
 
         LevelPreview mediumAtTen = LevelPreview.forLevel(10, Difficulty.MEDIUM);
         assertNotNull(mediumAtTen);
@@ -64,32 +76,77 @@ class LevelPreviewTest {
                 "level 10 on Medium is only a mini-boss, got: " + mediumAtTen.hint());
     }
 
+    /** The level a type first appears on for a tier, from the same table the game uses. */
+    private static int arrivalLevelOf(EnemyType type, Difficulty tier) {
+        for (int level = 1; level <= 30; level++) {
+            if (WaveWeights.newlyUnlockedAt(level, tier).contains(type)) {
+                return level;
+            }
+        }
+        throw new AssertionError(type + " never arrives on " + tier);
+    }
+
     @Test
     @DisplayName("arrivals follow the tier, not a fixed table")
     void arrivalsFollowTheTier() {
-        // Easy holds the roster back, so a hint tied to a hardcoded level would
-        // promise Yeak two levels before he actually turns up.
-        LevelPreview mediumThree = LevelPreview.forLevel(3, Difficulty.MEDIUM);
-        assertNotNull(mediumThree);
-        assertTrue(mediumThree.hint().contains("Yeak"), "got: " + mediumThree.hint());
+        // Gentler tiers hold the roster back, so a hint tied to a hardcoded
+        // level would promise Yeak before he actually turns up. The levels are
+        // read from the unlock table rather than written down here, or this test
+        // would need editing every time the tiers are retuned — which is the
+        // very failure it exists to catch.
+        int mediumYeak = arrivalLevelOf(EnemyType.YEAK, Difficulty.MEDIUM);
+        LevelPreview onTime = LevelPreview.forLevel(mediumYeak, Difficulty.MEDIUM);
+        assertNotNull(onTime);
+        assertTrue(onTime.hint().contains("Yeak"), "got: " + onTime.hint());
 
-        LevelPreview easyThree = LevelPreview.forLevel(3, Difficulty.EASY);
-        if (easyThree != null) {
-            assertFalse(easyThree.hint().contains("Yeak"),
-                    "Yeak has not unlocked yet on Easy at level 3");
+        int easyYeak = arrivalLevelOf(EnemyType.YEAK, Difficulty.EASY);
+        assertTrue(easyYeak > mediumYeak,
+                "Easy should meet Yeak later than Medium does, got " + easyYeak
+                        + " against " + mediumYeak);
+
+        LevelPreview tooEarly = LevelPreview.forLevel(mediumYeak, Difficulty.EASY);
+        if (tooEarly != null) {
+            assertFalse(tooEarly.hint().contains("Yeak"),
+                    "Yeak has not unlocked yet on Easy at level " + mediumYeak);
         }
     }
 
     @Test
     @DisplayName("a level that is both a mini-boss and an arrival says both")
     void collisionsMentionBoth() {
-        // On Medium, Stec Kantoab unlocks on level 5, which is also a Naga
-        // level. Dropping either fact silently would misinform the player.
-        LevelPreview preview = LevelPreview.forLevel(5, Difficulty.MEDIUM);
+        // Which level this is moves with the tier — on Easy, Yeak's delayed
+        // arrival lands on level 5, which is also a Naga level. Dropping either
+        // fact silently would misinform the player, so the banner says both.
+        boolean found = false;
 
-        assertNotNull(preview);
-        assertTrue(preview.hint().contains("Naga"), "got: " + preview.hint());
-        assertTrue(preview.hint().contains("Stec Kantoab"), "got: " + preview.hint());
+        for (Difficulty tier : List.of(Difficulty.EASY, Difficulty.MEDIUM, Difficulty.HARD)) {
+            for (int level = 5; level <= 20; level += 5) {
+                List<EnemyType> arrivals = WaveWeights.newlyUnlockedAt(level, tier);
+                if (arrivals.isEmpty() || level == tier.getFinalBossLevel()) {
+                    // Nothing to collide with, or the finale outranks both.
+                    continue;
+                }
+
+                LevelPreview preview = LevelPreview.forLevel(level, tier);
+                assertNotNull(preview, tier + " level " + level);
+                assertTrue(preview.hint().contains("Naga"),
+                        tier + " level " + level + " dropped the mini-boss, got: "
+                                + preview.hint());
+
+                boolean named = false;
+                for (EnemyType type : arrivals) {
+                    named |= preview.hint().contains(type.getDisplayName());
+                }
+                assertTrue(named,
+                        tier + " level " + level + " dropped the arrival " + arrivals
+                                + ", got: " + preview.hint());
+                found = true;
+            }
+        }
+
+        assertTrue(found,
+                "no tier has a level that is both a mini-boss level and an arrival, "
+                        + "so this rule is no longer being exercised at all");
     }
 
     @Test

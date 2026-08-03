@@ -1,5 +1,6 @@
 package com.guardiansofangkor.renderer;
 
+import com.guardiansofangkor.engine.ComboTracker;
 import com.guardiansofangkor.engine.GameState;
 import com.guardiansofangkor.engine.IntroSequence;
 import com.guardiansofangkor.engine.LevelPreview;
@@ -294,8 +295,10 @@ public class HUDRenderer {
                 x, secondaryFont, Palette.HUD_TEXT_WHITE, SECONDARY_LABEL_ALPHA);
         x = drawStat(g2, "SLAIN", Integer.toString(state.getEnemiesDefeated()),
                 x, secondaryFont, Palette.HUD_TEXT_WHITE, SECONDARY_LABEL_ALPHA);
-        drawStat(g2, "BEST", Integer.toString(state.getBestScore()),
+        x = drawStat(g2, "BEST", Integer.toString(state.getBestScore()),
                 x, secondaryFont, Palette.HUD_TEXT_WHITE, SECONDARY_LABEL_ALPHA);
+
+        drawCombo(g2, state);
 
         drawLives(g2, state);
     }
@@ -353,6 +356,49 @@ public class HUDRenderer {
         g2.drawLine(dividerX, 18, dividerX, BAR_HEIGHT - 18);
 
         return dividerX + 30;
+    }
+
+    /**
+     * The unbroken run of perfectly typed words, and the multiplier it is worth.
+     *
+     * <p>Not part of the stat row, and appears only once the run is long enough
+     * to mean something. The other stats are steady facts about the game that
+     * are always true and always in the same place; this one is a live streak
+     * that vanishes the instant it is lost, and putting it in the row would make
+     * four fixed columns jump sideways every time somebody mistyped.
+     *
+     * <p>Sits below the bar on the right, opposite the lives, where the eye
+     * already goes for "how am I doing" — and where it can flash without
+     * disturbing anything that has to stay readable.
+     */
+    private void drawCombo(Graphics2D g2, GameState state) {
+        ComboTracker combo = state.getCombo();
+        if (!combo.isWorthShowing()) {
+            return;
+        }
+
+        String value = combo.getCount() + "x";
+        String multiplier = String.format(java.util.Locale.ROOT,
+                "%.2f SCORE", combo.getMultiplier());
+
+        int right = GameConfig.SCREEN_WIDTH - 28;
+        int top = BAR_HEIGHT + 26;
+
+        // Warms from gold toward white as the multiplier approaches its ceiling,
+        // so a maxed combo is visibly different from a merely good one without
+        // needing a second number read.
+        double fill = combo.getFillFraction();
+        Color hot = Palette.blend(Palette.HUD_TEXT_GOLD, Palette.HUD_TEXT_WHITE, fill);
+
+        g2.setFont(secondaryFont);
+        FontMetrics fm = g2.getFontMetrics();
+        g2.setColor(hot);
+        g2.drawString(value, right - fm.stringWidth(value), top);
+
+        g2.setFont(microFont);
+        FontMetrics micro = g2.getFontMetrics();
+        g2.setColor(Palette.alpha(Palette.HUD_TEXT_DIM, SECONDARY_LABEL_ALPHA));
+        g2.drawString(multiplier, right - micro.stringWidth(multiplier), top + 16);
     }
 
     /**
@@ -679,8 +725,12 @@ public class HUDRenderer {
         drawGameOverStat(g2, "ACCURACY",
                 Math.round(state.getResolver().getAccuracy() * 100) + "%",
                 rightCol, gridTop + rowHeight * 2);
-        drawGameOverStat(g2, "BOONS CLAIMED",
-                Integer.toString(state.getPowerUpsCollected()),
+        // Best combo takes the grid slot and boons move down to the footer line.
+        // The grid cannot grow: a fifth row would push the control hints below
+        // the bottom of the window, since they are positioned from the panel's
+        // edge rather than measured.
+        drawGameOverStat(g2, "BEST COMBO",
+                state.getCombo().getBest() + "x",
                 leftCol, gridTop + rowHeight * 3);
         drawGameOverStat(g2, "DIFFICULTY",
                 state.getDifficulty().getDisplayName(),
@@ -690,9 +740,10 @@ public class HUDRenderer {
         boolean newBest = state.getScore() >= state.getBestScore() && state.getScore() > 0;
         g2.setFont(bodyFont);
         String bestText = newBest
-                ? "New personal best"
+                ? "New personal best   ·   " + state.getPowerUpsCollected() + " boons claimed"
                 : "Personal best  " + state.getBestScore()
-                        + "   ·   Level " + Math.max(1, state.getBestLevel());
+                        + "   ·   Level " + Math.max(1, state.getBestLevel())
+                        + "   ·   " + state.getPowerUpsCollected() + " boons";
         FontMetrics bestMetrics = g2.getFontMetrics();
         g2.setColor(newBest ? Palette.HUD_TEXT_GOLD : Palette.HUD_TEXT_DIM);
         g2.drawString(bestText, centerX - bestMetrics.stringWidth(bestText) / 2, bestY);

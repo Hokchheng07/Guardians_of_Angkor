@@ -428,7 +428,17 @@ class GameStateTest {
         BossFight boss = state.getBoss();
         // Word at a time, because that is how the finale is typed — and each
         // word only advances on the confirming space that follows it.
-        for (int guard = 0; guard < 500 && boss.isFighting(); guard++) {
+        //
+        // The fight alternates: every finished paragraph provokes an attack
+        // phase during which the verse is off screen and nothing can be typed
+        // at it. Those have to be ridden out rather than typed through, or this
+        // spins against a closed window and the run is never won.
+        for (int guard = 0; guard < 40_000 && boss.isFighting(); guard++) {
+            if (!boss.isTyping()) {
+                state.update();
+                clearTheField(state);
+                continue;
+            }
             String word = boss.currentWord();
             for (int i = 1; i <= word.length(); i++) {
                 state.handleInput(word.substring(0, i));
@@ -523,6 +533,51 @@ class GameStateTest {
         assertFalse(state.isVictory());
         assertFalse(state.isGameOver());
         assertFalse(state.isBossActive());
+    }
+
+    // ---- unlocks -----------------------------------------------------------
+
+    @Test
+    @DisplayName("winning a run unlocks the next tier")
+    void winningUnlocksTheNextTier() {
+        GameState state = playing();
+        assertFalse(state.getProgress().isUnlocked(Difficulty.MEDIUM),
+                "Medium should be locked before Easy has been beaten");
+
+        winTheRun(state);
+
+        assertTrue(state.getProgress().hasCleared(Difficulty.EASY));
+        assertTrue(state.getProgress().isUnlocked(Difficulty.MEDIUM));
+        assertFalse(state.getProgress().isUnlocked(Difficulty.HARD),
+                "one win should open one rung");
+    }
+
+    @Test
+    @DisplayName("an unlock outlives the run that earned it")
+    void unlocksSurviveARestart() {
+        // Losing a run must not cost the player a tier they already beat.
+        GameState state = playing();
+        winTheRun(state);
+
+        state.restart();
+
+        assertTrue(state.getProgress().hasCleared(Difficulty.EASY));
+        assertTrue(state.toSaveData().hasCleared("easy"),
+                "and it has to reach the save file, or it dies with the session");
+    }
+
+    @Test
+    @DisplayName("unlocks can be seeded from a save without resuming the run")
+    void progressLoadsWithoutResuming() {
+        GameState state = playing();
+        int levelBefore = state.getLevel();
+
+        state.restoreProgress(new SaveData(9, 500, 3, Language.ENGLISH, 500, 9,
+                new java.util.LinkedHashSet<>(java.util.List.of("easy"))));
+
+        assertTrue(state.getProgress().isUnlocked(Difficulty.MEDIUM));
+        assertEquals(levelBefore, state.getLevel(),
+                "seeding unlocks must not quietly resume somebody else's run");
     }
 
     @Test

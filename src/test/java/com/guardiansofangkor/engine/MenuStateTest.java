@@ -141,22 +141,106 @@ class MenuStateTest {
     }
 
     @Test
-    @DisplayName("all four tiers are listed; Easy and Medium are playable")
+    @DisplayName("all four tiers are listed; only Endless is unbuilt")
     void allTiersAreListed() {
         assertEquals(4, Difficulty.values().length);
         assertTrue(Difficulty.EASY.isImplemented());
         assertTrue(Difficulty.MEDIUM.isImplemented());
-        assertFalse(Difficulty.HARD.isImplemented());
+        assertTrue(Difficulty.HARD.isImplemented());
         assertFalse(Difficulty.ENDLESS.isImplemented());
     }
 
-    @Test
-    @DisplayName("Medium starts a run too")
-    void mediumStartsRun() {
+    /** A picker open for a player who has beaten everything up to {@code tier}. */
+    private static MenuState atDifficultyWithCleared(Difficulty... cleared) {
         MenuState state = atDifficulty();
+        DifficultyProgress progress = DifficultyProgress.fresh();
+        for (Difficulty tier : cleared) {
+            progress = progress.withCleared(tier);
+        }
+        state.setProgress(progress);
+        return state;
+    }
+
+    @Test
+    @DisplayName("Medium starts a run once Easy has been cleared")
+    void mediumStartsRun() {
+        MenuState state = atDifficultyWithCleared(Difficulty.EASY);
         state.select(Difficulty.MEDIUM);
 
         assertEquals(MenuState.Outcome.START_RUN, press(state));
+    }
+
+    // ---- the unlock ladder -------------------------------------------------
+
+    @Test
+    @DisplayName("a new player can only start Easy")
+    void onlyEasyIsOpenAtFirst() {
+        MenuState state = atDifficulty();
+
+        assertTrue(state.isEnabled(Difficulty.EASY));
+        assertFalse(state.isEnabled(Difficulty.MEDIUM), "Medium has not been earned");
+        assertFalse(state.isEnabled(Difficulty.HARD));
+    }
+
+    @Test
+    @DisplayName("clearing a tier opens exactly the next one, not the whole ladder")
+    void clearingOpensOneRung() {
+        MenuState state = atDifficultyWithCleared(Difficulty.EASY);
+
+        assertTrue(state.isEnabled(Difficulty.MEDIUM));
+        assertFalse(state.isEnabled(Difficulty.HARD),
+                "beating Easy must not hand the player Hard as well");
+
+        state = atDifficultyWithCleared(Difficulty.EASY, Difficulty.MEDIUM);
+        assertTrue(state.isEnabled(Difficulty.HARD));
+    }
+
+    @Test
+    @DisplayName("a locked tier refuses to start and says what would unlock it")
+    void lockedTierExplainsItself() {
+        // "Not ready yet" would be a lie here — the tier is built and one run
+        // away, and telling the player it does not exist is worse than telling
+        // them nothing.
+        MenuState state = atDifficulty();
+        state.select(Difficulty.MEDIUM);
+
+        assertEquals(MenuState.Outcome.NONE, press(state));
+        assertTrue(state.getLockedMessage().contains("Easy"),
+                "the message should name what to clear, got: "
+                        + state.getLockedMessage());
+        assertTrue(state.getLockedMessage().contains("Medium"),
+                "and what it unlocks, got: " + state.getLockedMessage());
+    }
+
+    @Test
+    @DisplayName("locked and unbuilt are different facts about a tier")
+    void lockedIsNotTheSameAsUnbuilt() {
+        // The menu badges one SOON and not the other. Medium is finished work
+        // waiting on the player; Endless does not exist yet. Badging the first
+        // would tell the player a lie, and one that would stop them trying.
+        MenuState state = atDifficulty();
+
+        assertTrue(Difficulty.MEDIUM.isImplemented(),
+                "Medium is built — it is only locked");
+        assertFalse(state.isEnabled(Difficulty.MEDIUM),
+                "and it should still be unavailable until Easy is cleared");
+
+        assertFalse(Difficulty.ENDLESS.isImplemented(),
+                "Endless is the only tier that is genuinely not built");
+    }
+
+    @Test
+    @DisplayName("an unbuilt tier says so even when its predecessor is cleared")
+    void unbuiltBeatsLocked() {
+        // Endless sits behind Hard on the ladder and is also not built. The
+        // player should be told the honest reason, which is the second one.
+        MenuState state = atDifficultyWithCleared(
+                Difficulty.EASY, Difficulty.MEDIUM, Difficulty.HARD);
+        state.select(Difficulty.ENDLESS);
+
+        assertEquals(MenuState.Outcome.NONE, press(state));
+        assertTrue(state.getLockedMessage().contains("not ready"),
+                "got: " + state.getLockedMessage());
     }
 
     @Test

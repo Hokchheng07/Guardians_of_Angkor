@@ -21,10 +21,25 @@ import java.util.Random;
  * ignores its own movement, its own hitbox and its own word, which is not an
  * enemy any more.
  *
- * <p>The paragraph is delivered in three stages, one sentence at a time. Thirty
- * words dumped on screen at once reads as a punishment rather than a fight;
- * revealed a sentence at a time it has a rhythm, and each cleared sentence is a
- * beat where the player can see they are winning.
+ * <p>The paragraph is delivered one sentence at a time. Thirty words dumped on
+ * screen at once reads as a punishment rather than a fight; revealed a sentence
+ * at a time it has a rhythm, and each cleared sentence is a beat where the
+ * player can see they are winning.
+ *
+ * <p>Sentences are grouped into <em>paragraphs</em> — see
+ * {@link #getSentencesPerParagraph()} — and a finished paragraph is what changes
+ * the boss's attack. The whole script is the boss's health: Easy asks for two
+ * paragraphs of two sentences twice over, Medium and Hard for three of three
+ * three times over. The grouping is a plain integer rather than a nested list
+ * because everything else here — the verse panel, the health bar, the venom
+ * exclusion list — works on a flat run of sentences, and nesting the data would
+ * have meant rewriting all of it to express one boundary.
+ *
+ * <p>What the boss is <em>doing</em> between those boundaries is a
+ * {@link BossPhase}, on its own seven-to-ten second timer. The two clocks are
+ * deliberately independent: the phase runs its full length whether or not the
+ * player has finished the paragraph, so typing fast wins the fight sooner
+ * without letting the player skip the part where the boss fights back.
  *
  * <p>Within a verse the player types ONE WORD AT A TIME and the input field
  * clears between them, exactly as it does after killing an enemy. That is not
@@ -78,6 +93,25 @@ public class BossFight implements WordTarget {
         DONE
     }
 
+    /**
+     * Which half of the fight's rhythm the boss is in.
+     *
+     * <p>The finale alternates strictly: the player types a paragraph, the boss
+     * answers with a phase, and neither happens while the other is running. The
+     * paragraph is taken off screen for the duration of a phase, which is the
+     * whole reason the two are separate states rather than two clocks running at
+     * once — asking the player to read a sentence while dodging is asking them
+     * to do two things with one pair of eyes, and the earlier version of this
+     * fight did exactly that.
+     */
+    public enum Stance {
+        /** The paragraph is up and typeable. The boss is not attacking. */
+        TYPING,
+
+        /** A phase is running. The paragraph is hidden and cannot be typed. */
+        ATTACKING
+    }
+
     /** What a keystroke did. */
     public enum Result {
         /** Nothing to report — empty buffer, or the fight is not accepting input. */
@@ -94,6 +128,17 @@ public class BossFight implements WordTarget {
 
         /** The verse is done and the next one is up. */
         STAGE_CLEARED,
+
+        /**
+         * A whole paragraph is done, so the boss changes what it is doing.
+         *
+         * <p>Distinct from {@link #STAGE_CLEARED} because callers react to it
+         * differently, and because a caller that only knows about sentences
+         * would silently treat a paragraph boundary as an ordinary one. Every
+         * paragraph boundary is also a sentence boundary, so anything that only
+         * cares about the sentence should handle both.
+         */
+        PARAGRAPH_CLEARED,
 
         /** The last sentence is done. The boss is falling. */
         DEFEATED
@@ -118,6 +163,29 @@ public class BossFight implements WordTarget {
     /** Grace after the briefing before the first spit, so verse one is readable. */
     private static final int FIRST_VENOM_DELAY = GameConfig.TARGET_FPS * 3;
 
+    /** Shortest an attack phase runs before the boss changes what it is doing. */
+    public static final int PHASE_MIN_TICKS = GameConfig.TARGET_FPS * 7;
+
+    /**
+     * Longest an attack phase runs.
+     *
+     * <p>Seven to ten seconds. Short enough that the fight keeps turning over,
+     * long enough that a phase is a stretch of play with its own shape rather
+     * than a flicker — under about five seconds the summoning phase cannot get
+     * its monsters across the plaza before it is over, which makes the whole
+     * phase read as decoration.
+     */
+    public static final int PHASE_MAX_TICKS = GameConfig.TARGET_FPS * 10;
+
+    /**
+     * Monsters a summoning phase calls up at the reference tuning.
+     *
+     * <p>Scaled by the tier's enemy-count scale like an ordinary wave, so the
+     * finale gets lighter on Easy for the same reason every other level does
+     * rather than needing its own table.
+     */
+    private static final int MINIONS_PER_PHASE = 6;
+
     /** How long the boss flashes when a verse lands. */
     private static final int HIT_FLASH_TICKS = GameConfig.TARGET_FPS / 2;
 
@@ -126,6 +194,15 @@ public class BossFight implements WordTarget {
 
     /** Each verse pre-split into its words, since that is how it is typed. */
     private final List<List<String>> verseWords;
+
+    /**
+     * How many sentences make one paragraph — the boss's phase boundary.
+     *
+     * <p>At least one and never more than the whole script, so a mis-set tier
+     * cannot produce a boss whose attack never changes or one that changes on
+     * every word.
+     */
+    private final int sentencesPerParagraph;
 
     private final Difficulty difficulty;
     private final Random random;
@@ -153,13 +230,70 @@ public class BossFight implements WordTarget {
     private int hitFlashTicks;
     private int typoFlashTicks;
 
+    /** Which half of the rhythm the fight is in. Only meaningful while FIGHTING. */
+    private Stance stance = Stance.TYPING;
+
+    /** Which attack is running, or null whenever the boss is not attacking. */
+    private BossPhase attackPhase;
+
+    /**
+     * The attack that ran last, remembered across the typing window.
+     *
+     * <p>Separate from {@link #attackPhase} because that one is nulled the
+     * moment a phase ends — the renderer must not keep drawing an attack that
+     * is over. Without somewhere to keep the previous value, every roll would
+     * see a null predecessor and the same attack could come up twice running,
+     * which reads as the phase having failed to change.
+     */
+    private BossPhase lastAttackPhase;
+
+    /** True for exactly one tick, when a phase has just finished. */
+    private boolean phaseJustEnded;
+
+    private double attackPhaseTicks;
+
+    /** Length rolled for the current phase, in ticks. */
+    private int attackPhaseDuration = PHASE_MIN_TICKS;
+
+    /** Phases finished so far, for the renderer and for tests. */
+    private int phasesElapsed;
+
+    private double minionCooldown;
+
+    /** True for exactly one tick, when a summon is due. One-shot like the spit. */
+    private boolean minionDue;
+
+    /**
+     * A boss whose whole script is one paragraph.
+     *
+     * <p>{@code Integer.MAX_VALUE} is clamped down to the script's length by the
+     * full constructor, which is exactly "however many sentences there are".
+     * That keeps this the pre-phase behaviour — the attack only ever changes on
+     * its own timer — so callers that do not care about paragraphs are not
+     * silently opted into a phase change on every sentence.
+     */
     public BossFight(EnemyType type, List<String> sentences, Difficulty difficulty) {
-        this(type, sentences, difficulty, new Random());
+        this(type, sentences, Integer.MAX_VALUE, difficulty, new Random());
     }
 
     /** Seeded constructor so the attack rhythm is reproducible in tests. */
     public BossFight(EnemyType type, List<String> sentences, Difficulty difficulty,
                      Random random) {
+        this(type, sentences, Integer.MAX_VALUE, difficulty, random);
+    }
+
+    /**
+     * The full constructor.
+     *
+     * @param sentencesPerParagraph how many sentences the boss treats as one
+     *                              paragraph, which is how often it changes
+     *                              attack. Clamped into range rather than
+     *                              rejected — a boss that refuses to exist is
+     *                              worse than one whose phases are the wrong
+     *                              length.
+     */
+    public BossFight(EnemyType type, List<String> sentences, int sentencesPerParagraph,
+                     Difficulty difficulty, Random random) {
         if (type == null) {
             throw new IllegalArgumentException("a boss needs a type");
         }
@@ -168,6 +302,8 @@ public class BossFight implements WordTarget {
         }
         this.type = type;
         this.sentences = List.copyOf(sentences);
+        this.sentencesPerParagraph =
+                Math.max(1, Math.min(sentencesPerParagraph, this.sentences.size()));
         this.difficulty = difficulty == null ? Difficulty.reference() : difficulty;
         this.random = random == null ? new Random() : random;
 
@@ -205,6 +341,8 @@ public class BossFight implements WordTarget {
         double scale = Math.max(0.0, timeScale);
 
         venomDue = false;
+        minionDue = false;
+        phaseJustEnded = false;
         if (hitFlashTicks > 0) {
             hitFlashTicks--;
         }
@@ -229,6 +367,10 @@ public class BossFight implements WordTarget {
                 if (phaseTicks >= BRIEFING_TICKS) {
                     phase = Phase.FIGHTING;
                     phaseTicks = 0;
+                    // The fight opens on a paragraph, not on an attack. The
+                    // briefing has just explained the rules and the player
+                    // should get to use them before being shot at.
+                    stance = Stance.TYPING;
                 }
             }
             case FIGHTING -> {
@@ -236,10 +378,8 @@ public class BossFight implements WordTarget {
                 if (scale <= 0.0001) {
                     return;
                 }
-                venomCooldown -= scale;
-                if (venomCooldown <= 0) {
-                    venomDue = true;
-                    venomCooldown = venomIntervalTicks();
+                if (stance == Stance.ATTACKING) {
+                    updateAttackPhase(scale);
                 }
             }
             case FALLING -> {
@@ -252,6 +392,157 @@ public class BossFight implements WordTarget {
                 // Nothing left to do; GameState has already taken the win.
             }
         }
+    }
+
+    // ---- attack phases -----------------------------------------------------
+
+    /**
+     * Runs the current phase's clock and its own attack.
+     *
+     * <p>Only ever called while the boss is {@link Stance#ATTACKING}. When the
+     * timer runs out the boss goes quiet and the next paragraph comes up — the
+     * two stances strictly alternate, and neither can interrupt the other.
+     */
+    private void updateAttackPhase(double scale) {
+        attackPhaseTicks += scale;
+        if (attackPhaseTicks >= attackPhaseDuration) {
+            endAttackPhase();
+            return;
+        }
+
+        switch (attackPhase) {
+            case PROJECTILE -> {
+                venomCooldown -= scale;
+                if (venomCooldown <= 0) {
+                    venomDue = true;
+                    venomCooldown = venomIntervalTicks();
+                }
+            }
+            case MINIONS -> {
+                minionCooldown -= scale;
+                if (minionCooldown <= 0) {
+                    minionDue = true;
+                    minionCooldown = minionIntervalTicks();
+                }
+            }
+        }
+    }
+
+    /**
+     * The boss stops attacking and hands the floor back to the player.
+     *
+     * <p>{@link #isPhaseJustEnded()} goes true for one tick so {@link GameState}
+     * can clear whatever is still on the field. That sweep is what makes the
+     * typing window safe, and it is a deliberate, reversible choice rather than
+     * a rule of the design — see that method.
+     */
+    private void endAttackPhase() {
+        phasesElapsed++;
+        stance = Stance.TYPING;
+        lastAttackPhase = attackPhase;
+        attackPhase = null;
+        attackPhaseTicks = 0;
+        phaseJustEnded = true;
+    }
+
+    /**
+     * Starts an attack phase: rolls its length and resets what it attacks with.
+     *
+     * <p>Called when a paragraph is finished, never on a timer — the paragraph
+     * is what provokes the boss.
+     */
+    private void beginAttackPhase() {
+        stance = Stance.ATTACKING;
+        attackPhase = BossPhase.rollAfter(lastAttackPhase, random);
+        attackPhaseTicks = 0;
+        attackPhaseDuration = rollPhaseDuration();
+
+        // Both cooldowns start short so a phase attacks almost immediately.
+        // Rolling a full interval here would let a seven-second phase pass with
+        // nothing in it, which reads as the boss having skipped its turn — and
+        // now that the paragraph is off screen for the duration, an empty phase
+        // is simply the game doing nothing at all.
+        double opening = GameConfig.TARGET_FPS / 2.0;
+
+        venomCooldown = attackPhase == BossPhase.PROJECTILE
+                ? opening
+                : venomIntervalTicks();
+        minionCooldown = attackPhase == BossPhase.MINIONS
+                ? opening
+                : minionIntervalTicks();
+    }
+
+    /** A fresh seven-to-ten seconds. */
+    private int rollPhaseDuration() {
+        int span = PHASE_MAX_TICKS - PHASE_MIN_TICKS;
+        return PHASE_MIN_TICKS + random.nextInt(Math.max(1, span + 1));
+    }
+
+    /** How many monsters one summoning phase calls up on this tier. */
+    public int minionsPerPhase() {
+        double scaled = MINIONS_PER_PHASE * difficulty.getEnemyCountScale();
+        return Math.max(2, (int) Math.round(scaled));
+    }
+
+    /**
+     * Ticks between summons, so a phase's monsters arrive spread across it
+     * rather than all on the first frame.
+     */
+    public int minionIntervalTicks() {
+        return Math.max(GameConfig.TARGET_FPS / 2, PHASE_MIN_TICKS / minionsPerPhase());
+    }
+
+    /** True for exactly one tick, when a monster should be summoned. */
+    public boolean isMinionDue() {
+        return minionDue;
+    }
+
+    /**
+     * True for exactly one tick, when an attack phase has just ended.
+     *
+     * <p>{@link GameState} answers this by clearing everything the phase left on
+     * the field, which is what makes the typing window that follows completely
+     * safe. That sweep is a tuning decision, not a rule of the design: the
+     * alternation still works if the leftovers are allowed to stand, and the
+     * only change needed to try it is to stop acting on this flag. It is a
+     * separate one-shot signal rather than a check on the stance precisely so
+     * that choice lives in one place.
+     */
+    public boolean isPhaseJustEnded() {
+        return phaseJustEnded;
+    }
+
+    /** Which half of the rhythm the fight is in. */
+    public Stance getStance() {
+        return stance;
+    }
+
+    /** True while the paragraph is on screen and the boss is holding off. */
+    public boolean isTyping() {
+        return phase == Phase.FIGHTING && stance == Stance.TYPING;
+    }
+
+    /** True while a phase is running and the paragraph is off screen. */
+    public boolean isAttacking() {
+        return phase == Phase.FIGHTING && stance == Stance.ATTACKING;
+    }
+
+    /** What the boss is doing, or null whenever it is not attacking. */
+    public BossPhase getAttackPhase() {
+        return attackPhase;
+    }
+
+    /** Progress through the current attack phase, 0 to 1. For the renderer. */
+    public double getAttackPhaseProgress() {
+        if (attackPhase == null || attackPhaseDuration <= 0) {
+            return 0;
+        }
+        return Math.min(1.0, attackPhaseTicks / attackPhaseDuration);
+    }
+
+    /** How many attack phases have ended so far. */
+    public int getPhasesElapsed() {
+        return phasesElapsed;
     }
 
     /**
@@ -283,7 +574,16 @@ public class BossFight implements WordTarget {
      */
     public int venomFlightTicks() {
         double scaled = GameConfig.VENOM_FLIGHT_TICKS * difficulty.getSpawnIntervalScale();
-        return Math.max(GameConfig.TARGET_FPS * 2, (int) Math.round(scaled));
+
+        // Capped to land inside the phase that threw it. Bolts used to outlive
+        // their own phase on the gentler tiers — Easy stretches the flight to
+        // over eight seconds and a phase can end after seven — so the sweep
+        // that clears the field for the next paragraph was quietly disarming
+        // most of the barrage. A threat the player never has to answer is not a
+        // threat, and worse, it teaches them to ignore the one that follows.
+        int mustLandBy = PHASE_MIN_TICKS - GameConfig.TARGET_FPS;
+        int capped = Math.min((int) Math.round(scaled), mustLandBy);
+        return Math.max(GameConfig.TARGET_FPS * 2, capped);
     }
 
     /** True for exactly one tick, when a venom bolt should be spawned. */
@@ -313,7 +613,11 @@ public class BossFight implements WordTarget {
      * break on it.
      */
     public Result submit(String buffer) {
-        if (phase != Phase.FIGHTING) {
+        if (phase != Phase.FIGHTING || stance != Stance.TYPING) {
+            // Mid-phase the paragraph is not on screen. Accepting keystrokes
+            // against a sentence the player cannot see — and charging them a
+            // verse reset for guessing wrong — is the exact trap the briefing
+            // phase exists to avoid, so the same rule applies here.
             return Result.NONE;
         }
         String input = buffer == null ? "" : buffer;
@@ -363,6 +667,15 @@ public class BossFight implements WordTarget {
             phase = Phase.FALLING;
             phaseTicks = 0;
             return Result.DEFEATED;
+        }
+
+        // A finished paragraph is what provokes the boss. Finishing a sentence
+        // inside one does not: the paragraph is the unit of damage, and a phase
+        // that turned over every sentence would never last long enough for its
+        // own monsters to arrive.
+        if (stage % sentencesPerParagraph == 0) {
+            beginAttackPhase();
+            return Result.PARAGRAPH_CLEARED;
         }
         return Result.STAGE_CLEARED;
     }
@@ -484,6 +797,33 @@ public class BossFight implements WordTarget {
         return sentences.size();
     }
 
+    // ---- paragraphs --------------------------------------------------------
+
+    /** Sentences the boss treats as one paragraph. Its phase boundary. */
+    public int getSentencesPerParagraph() {
+        return sentencesPerParagraph;
+    }
+
+    /** Which paragraph the player is on, counting from zero. */
+    public int getParagraphIndex() {
+        return Math.min(stage / sentencesPerParagraph, getParagraphCount() - 1);
+    }
+
+    /**
+     * Paragraphs in the whole fight.
+     *
+     * <p>Rounded up so a script whose length is not an exact multiple still
+     * reports its trailing part-paragraph rather than losing it.
+     */
+    public int getParagraphCount() {
+        return (sentences.size() + sentencesPerParagraph - 1) / sentencesPerParagraph;
+    }
+
+    /** Paragraphs already finished. */
+    public int getParagraphsCleared() {
+        return stage / sentencesPerParagraph;
+    }
+
     /**
      * Health remaining, 1 at the start and 0 when it falls.
      *
@@ -586,9 +926,16 @@ public class BossFight implements WordTarget {
         return currentWord();
     }
 
+    /**
+     * Only a target while the paragraph is actually on screen.
+     *
+     * <p>Mid-phase the verse is not typeable at all, so the matcher must not see
+     * it — otherwise a keystroke aimed at a venom bolt could resolve against a
+     * sentence the player cannot read.
+     */
     @Override
     public boolean isActive() {
-        return phase == Phase.FIGHTING;
+        return isTyping();
     }
 
     @Override

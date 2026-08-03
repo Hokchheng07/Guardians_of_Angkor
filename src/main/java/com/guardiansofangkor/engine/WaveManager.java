@@ -119,12 +119,40 @@ public class WaveManager {
     }
 
     private Enemy spawnOne(List<Enemy> activeEnemies) {
-        EnemyType type = chooseType();
+        return spawnOne(activeEnemies, chooseType(), List.of());
+    }
 
+    /**
+     * One extra enemy outside the wave schedule, for the boss's summoning
+     * phase.
+     *
+     * <p>Lives here rather than in {@link GameState} so there is exactly one
+     * piece of code that knows how a monster is placed on the field. A second
+     * copy in the finale would drift — the routes, the depth cap and the
+     * per-tier speed are all decisions this class already makes, and a summoned
+     * monster that ignored any of them would be visibly a different kind of
+     * thing from the ones the player spent the run learning.
+     *
+     * <p>Never a boss type: {@link WaveWeights} only ever returns rank and file,
+     * and the mini-boss slot is a property of a wave, which this is not part of.
+     *
+     * @param reservedWords words the finale's paragraph still wants, which a
+     *                      summon must not duplicate — one set of keystrokes
+     *                      meaning two things is the exact failure the whole
+     *                      word-at-a-time arrangement exists to prevent
+     */
+    public Enemy spawnBossMinion(List<Enemy> activeEnemies, List<String> reservedWords) {
+        EnemyType type = WaveWeights.pick(Math.max(1, level), difficulty, random);
+        return spawnOne(activeEnemies == null ? List.of() : activeEnemies,
+                type, reservedWords == null ? List.of() : reservedWords);
+    }
+
+    private Enemy spawnOne(List<Enemy> activeEnemies, EnemyType type,
+                           List<String> reservedWords) {
         // Collect every word already promised to the field, including words
         // later in a mini-boss chain that have not been revealed yet — otherwise
         // a Naga's second word could duplicate a live enemy's.
-        List<String> inPlay = new ArrayList<>();
+        List<String> inPlay = new ArrayList<>(reservedWords);
         for (Enemy enemy : activeEnemies) {
             inPlay.addAll(enemy.getAllWords());
         }

@@ -12,11 +12,34 @@ import com.guardiansofangkor.entities.EnemyType;
  * <p>All curves are monotonic and capped. An uncapped curve eventually produces
  * an unplayable level, which is worse than a plateau.
  *
- * <p>Every number here is written at {@link Difficulty#MEDIUM}, the reference
- * tuning. The single-argument overloads therefore describe Medium exactly; the
+ * <p>Every number here is written at {@link Difficulty#HARD}, the reference
+ * tuning. The single-argument overloads therefore describe Hard exactly; the
  * {@link Difficulty} overloads apply that tier's deviation on top.
  */
 public final class DifficultyCurve {
+
+    /**
+     * How much of the original per-level escalation is kept.
+     *
+     * <p>The speed curves used to climb 30% faster than this. Playtesting on
+     * what is now Hard reported level eleven as unreactable at 102 words per
+     * minute — not hard, but past the point where reading a word and answering
+     * it is physically possible, which is a different failure and not one more
+     * practice fixes.
+     *
+     * <p>Applied to the <em>slope</em> rather than to the speed itself, so
+     * level one is untouched and only the far end of a run is pulled back in.
+     * Flattening the whole curve instead would have made the opening waves
+     * sluggish to fix a problem that only exists at the end.
+     *
+     * <p>It also has to stretch further than it used to: Hard now runs twenty
+     * waves rather than fifteen, so the same slope would have reached somewhere
+     * even worse than the level that prompted this.
+     */
+    public static final double LEVEL_RAMP_DAMPING = 0.7;
+
+    /** Speed added per level at the reference tuning, after damping. */
+    private static final double SPEED_PER_LEVEL = 0.035 * LEVEL_RAMP_DAMPING;
 
     private DifficultyCurve() {
         // Utility class — not instantiable.
@@ -58,7 +81,7 @@ public final class DifficultyCurve {
      * per-type multiplier.
      */
     public static double baseSpeed(int level) {
-        return Math.min(0.40 + (Math.max(1, level) - 1) * 0.035, 1.15);
+        return Math.min(0.40 + (Math.max(1, level) - 1) * SPEED_PER_LEVEL, 1.15);
     }
 
     /** Base march speed for a tier. */
@@ -77,10 +100,17 @@ public final class DifficultyCurve {
      *
      * <p>Independent of difficulty on purpose: the tier scales the base speed,
      * so the <em>relationship</em> between types stays intact at every tier.
+     *
+     * <p>The per-level gain is damped by {@link #LEVEL_RAMP_DAMPING} for the
+     * same reason the base speed is. The two compound — a late-game Ahp is
+     * both on a faster base and carrying a bigger multiplier — so damping only
+     * one of them would leave the swarm types, which are exactly the ones that
+     * outran the player, barely slower than before.
      */
     public static double speedMultiplier(EnemyType type, int level) {
         int levelsIn = Math.max(0, level - 1);
-        double gained = type.getSpeedMultiplier() + (levelsIn * type.getLevelSpeedGain());
+        double gain = type.getLevelSpeedGain() * LEVEL_RAMP_DAMPING;
+        double gained = type.getSpeedMultiplier() + (levelsIn * gain);
         return Math.min(gained, type.getMaxSpeedMultiplier());
     }
 

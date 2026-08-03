@@ -203,19 +203,28 @@ class PowerUpTest {
     @Test
     @DisplayName("collecting a second of the same boon refreshes rather than stacks")
     void timedBoonsRefresh() {
+        // The tier's own scale is applied to the expectation rather than assumed
+        // to be 1.0. It used to be, back when Medium was the reference tuning —
+        // the reference has since moved to Hard, and a test that quietly depends
+        // on which tier is neutral breaks for a reason that has nothing to do
+        // with what it is testing.
+        Difficulty tier = Difficulty.MEDIUM;
+        int fullDuration = (int) Math.round(
+                PowerUpType.SLOW_TIDE.getBaseDurationTicks() * tier.getPowerUpDurationScale());
+
         PowerUpState boons = new PowerUpState();
-        boons.activate(PowerUpType.SLOW_TIDE, Difficulty.MEDIUM);
+        boons.activate(PowerUpType.SLOW_TIDE, tier);
 
         for (int i = 0; i < 60; i++) {
             boons.update();
         }
         int partway = boons.getActive().get(0).remainingTicks();
 
-        boons.activate(PowerUpType.SLOW_TIDE, Difficulty.MEDIUM);
+        boons.activate(PowerUpType.SLOW_TIDE, tier);
         int refreshed = boons.getActive().get(0).remainingTicks();
 
         assertTrue(refreshed > partway, "a second pickup should extend the boon");
-        assertEquals(PowerUpType.SLOW_TIDE.getBaseDurationTicks(), refreshed,
+        assertEquals(fullDuration, refreshed,
                 "and reset it to full, not add two durations together");
     }
 
