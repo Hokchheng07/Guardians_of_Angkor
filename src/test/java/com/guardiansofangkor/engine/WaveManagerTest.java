@@ -105,8 +105,16 @@ class WaveManagerTest {
         List<Enemy> field = new ArrayList<>();
         int spawned = 0;
 
-        for (int tick = 0; tick < 200_000 && waves.getLevel() <= 1; tick++) {
+        for (int tick = 0; tick < 200_000; tick++) {
             List<Enemy> arrived = waves.update(field);
+
+            // Checked AFTER the call, not before. beginLevel sets the spawn
+            // cooldown to zero, so the tick that ends the intermission starts
+            // level two and spawns its first enemy inside the same update —
+            // counting that against level one overcounts by exactly one.
+            if (waves.getLevel() > 1) {
+                break;
+            }
             spawned += arrived.size();
             field.addAll(arrived);
             for (Enemy enemy : field) {
