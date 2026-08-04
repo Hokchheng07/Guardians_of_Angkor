@@ -21,7 +21,7 @@ class EnemyTypeTest {
             EnemyType.NAGA, EnemyType.KRONG_REAP);
 
     private static final Set<EnemyType> EXPECTED_FLOATING = EnumSet.of(
-            EnemyType.AHP, EnemyType.STEC_KANTOAB);
+            EnemyType.AHP, EnemyType.KMAOCH);
 
     @Test
     @DisplayName("every legged or coiled monster is grounded")
@@ -35,7 +35,7 @@ class EnemyTypeTest {
     }
 
     @Test
-    @DisplayName("only Ahp and Stec Kantoab float")
+    @DisplayName("only Ahp and Kmaoch float")
     void onlyIntendedMonstersFloat() {
         for (EnemyType type : EXPECTED_FLOATING) {
             assertFalse(type.isGrounded(),

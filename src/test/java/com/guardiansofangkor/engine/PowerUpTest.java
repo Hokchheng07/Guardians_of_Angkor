@@ -353,7 +353,7 @@ class PowerUpTest {
 
         assertFalse(EnemyType.BEISACH.dropsBoons(), "the common walker is not a reward");
         assertFalse(EnemyType.AHP.dropsBoons(), "flyers never drop");
-        assertFalse(EnemyType.STEC_KANTOAB.dropsBoons(), "flyers never drop");
+        assertFalse(EnemyType.KMAOCH.dropsBoons(), "flyers never drop");
     }
 
     @Test

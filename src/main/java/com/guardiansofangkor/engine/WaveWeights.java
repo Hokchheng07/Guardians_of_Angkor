@@ -47,7 +47,7 @@ final class WaveWeights {
         UNLOCK_WAVE.put(EnemyType.BEISACH, 1);
         UNLOCK_WAVE.put(EnemyType.AHP, 2);
         UNLOCK_WAVE.put(EnemyType.YEAK, 3);
-        UNLOCK_WAVE.put(EnemyType.STEC_KANTOAB, 5);
+        UNLOCK_WAVE.put(EnemyType.KMAOCH, 5);
         UNLOCK_WAVE.put(EnemyType.PRET, 6);
         // Bosses are placed explicitly by WaveManager, never randomly.
         UNLOCK_WAVE.put(EnemyType.NAGA, Integer.MAX_VALUE);
@@ -56,7 +56,7 @@ final class WaveWeights {
         WEIGHT.put(EnemyType.BEISACH, 5);
         WEIGHT.put(EnemyType.AHP, 4);
         WEIGHT.put(EnemyType.YEAK, 3);
-        WEIGHT.put(EnemyType.STEC_KANTOAB, 2);
+        WEIGHT.put(EnemyType.KMAOCH, 2);
         WEIGHT.put(EnemyType.PRET, 2);
         WEIGHT.put(EnemyType.NAGA, 0);
         WEIGHT.put(EnemyType.KRONG_REAP, 0);

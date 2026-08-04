@@ -22,7 +22,7 @@ public enum GroundBehavior {
      * Floats. Its sprite is anchored by its <em>centre</em> to a hover height
      * above the ground, and it bobs on a sine wave to sell that it is airborne.
      *
-     * <p>Ahp (a flying head trailing entrails) and Stec Kantoab.
+     * <p>Ahp (a flying head trailing entrails) and Kmaoch.
      */
     FLOATING
 }

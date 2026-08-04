@@ -155,7 +155,7 @@ HUD keeps three lotus buds and clips the gold to the left half of one
 to show a half; six small pips would be exact but would need counting.
 
 ## Enemy roster (see bestiary for word-length tiers)
-Beisach, Yeak, Ahp, Pret, Stec Kantoab, Naga, Krong Reap
+Beisach, Yeak, Ahp, Pret, Kmaoch, Naga, Krong Reap
 
 ## Main class
 `com.guardiansofangkor.Main` — set as `mainClass` in build.gradle.kts,
@@ -277,7 +277,7 @@ test asserting a Pret never outruns an Ahp at any level.
 ## Ground behaviour
 EnemyType carries a GroundBehavior. GROUNDED (Beisach, Yeak, Pret, Naga,
 Krong Reap) anchors the BOTTOM of the trimmed sprite to GROUND_LINE_Y and
-never bobs — feet stay planted. FLOATING (Ahp, Stec Kantoab) anchors the
+never bobs — feet stay planted. FLOATING (Ahp, Kmaoch) anchors the
 sprite CENTRE at GROUND_LINE_Y minus hoverHeight and bobs on a sine wave.
 Never add bobbing to a grounded type; it looks like the ground is moving.
 
@@ -760,7 +760,21 @@ as words_en.json.
 ## Art still outstanding
 Everything below draws a placeholder and needs no code change when the
 PNG lands in src/main/resources/images:
-beisach_transparent.png, pret_transparent.png,
-stec_kantoab_transparent.png, and the five power-up icons
+pret_transparent.png, and the five power-up icons
 (powerup_time_freeze.png, powerup_slow_tide.png, powerup_purge.png,
 powerup_mend.png, powerup_naga_shield.png).
+
+Six of the seven monsters now have real art. EnemyType names the file
+directly (Beisach.png, Kmaoch.png, Naga.png alongside the older
+*_transparent.png ones), so the filename convention is not enforced —
+only that EnemyType and the file agree.
+
+SPRITES MUST BE RGBA WITH A TRANSPARENT BACKGROUND, not a cut-out saved
+on white. Beisach.png and Kmaoch.png arrived as RGB with no alpha, and
+the failure is quiet and confusing: SpriteCache.trim finds no
+transparent margin, keeps the whole square canvas, and the aspect ratio
+it derives is then 1:1 — so the monster draws squashed, inside an opaque
+white box, floating above the plaza because the canvas bottom rather
+than its feet is anchored to the ground line. Nothing throws. If a new
+sprite looks like that, check the alpha channel before reading any
+code.

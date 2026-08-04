@@ -20,9 +20,9 @@ import com.guardiansofangkor.util.GameConfig;
  */
 public enum EnemyType {
 
-    /** Common. Bread-and-butter enemy. Art pending. */
+    /** Common. Bread-and-butter enemy. */
     BEISACH("Beisach", "បិសាច", "Common",
-            "beisach_transparent.png", GroundBehavior.GROUNDED,
+            "Beisach.png", GroundBehavior.GROUNDED,
             115, 0, 3, 5,
             1.0, 0.075, 2.1, 0, 1, false),
 
@@ -43,13 +43,13 @@ public enum EnemyType {
 
     /** Heavy. Long words, slow approach. Barely speeds up. Art pending. */
     PRET("Pret", "ប្រេត", "Heavy",
-            "pret_transparent.png", GroundBehavior.GROUNDED,
+            "Pret.png", GroundBehavior.GROUNDED,
             185, 0, 8, 12,
             0.65, 0.018, 1.0, 0, 1, true),
 
-    /** Mimic. Its word shifts mid-type (Phase 10 behaviour). Floats. Art pending. */
-    STEC_KANTOAB("Stec Kantoab", "សើចកន្តួប", "Mimic",
-            "stec_kantoab_transparent.png", GroundBehavior.FLOATING,
+    /** Mimic. Its word shifts mid-type (Phase 10 behaviour). Floats. */
+    KMAOCH("Kmaoch", "ខ្មោច", "Mimic",
+            "Kmaoch.png", GroundBehavior.FLOATING,
             130, 120, 4, 6,
             1.0, 0.06, 2.0, 0, 1, false),
 

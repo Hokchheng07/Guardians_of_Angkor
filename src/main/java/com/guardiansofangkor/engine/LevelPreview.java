@@ -39,7 +39,7 @@ public record LevelPreview(String hint) {
     static {
         ARRIVAL.put(EnemyType.AHP, "Ahp swarms take to the air");
         ARRIVAL.put(EnemyType.YEAK, "Yeak arrives — and he throws");
-        ARRIVAL.put(EnemyType.STEC_KANTOAB, "Stec Kantoab drifts in");
+        ARRIVAL.put(EnemyType.KMAOCH, "Kmaoch drifts in");
         ARRIVAL.put(EnemyType.PRET, "Pret drags a long name behind it");
         ARRIVAL.put(EnemyType.BEISACH, "Beisach walk the causeway");
     }
