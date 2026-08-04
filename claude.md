@@ -591,6 +591,23 @@ COMPLETED on `currentWord() + " "`, never on the bare word, so a fully
 typed but unconfirmed word still shows as PROGRESS (want.startsWith(want)
 is trivially true) rather than jumping ahead on its own.
 
+The boss also HARASSES during the paragraph — roughly one bolt per
+paragraph, 9-16s apart (BossFight.updateHarassment). The fight used to
+strictly alternate, which made the verse a safe window, and a safe
+window is a window with no decisions in it.
+
+Harassment is a BUDGET FOR THE FIGHT, not a rate. At a fixed rate a
+slow reader would earn MORE interruptions — punished twice for the same
+slowness. Taking longer spaces them out instead.
+
+SLOWNESS IS DELIBERATELY NOT PUNISHED FURTHER, in either half of the
+fight. A phase already charges for it: unanswered summons breach and
+unanswered bolts land, so a slow player is losing lives the whole time.
+Adding escalation on top would charge twice for one mistake, and the
+player it hurts most is the one already losing. Do not add a stall
+timer, a quota escalation or verse regression without deciding that
+deliberately.
+
 Boss phases are OBJECTIVE-BASED, not timed. A phase sends a quota of
 attacks (BossFight.attacksFor: kind × tier × phases elapsed) and ends
 only when the quota is spent AND the field it filled is clear. Its
@@ -671,6 +688,21 @@ lists here.
 Because the resolver is bypassed, its buffer goes stale for the fight —
 GameState.getTypedBuffer() is what the renderer must read, not
 resolver.getValidBuffer().
+
+For the same reason the resolver's HIGHLIGHT list goes stale, and
+handleBossInput must publish its candidates back through
+TargetResolver.noteExternalCandidates(). Without it getHighlighted() is
+empty for the whole fight and every renderer asking "is this target
+lit?" is told no — summoned monsters never turned gold as they were
+typed. That was open-coded once in the projectile path before being
+fixed here; do not reintroduce a per-entity-type workaround.
+
+Venom words are excluded against the verse by PREFIX, not just exact
+match, now that a bolt can arrive mid-verse. `sea` and `seal` cannot
+both be finished and the player cannot tell which their keystrokes are
+going to — that is undecidable rather than merely ambiguous, so the
+pair is excluded at spawn instead. Worst case across the vocabulary
+bans one word.
 
 Power-ups: arriving CLEARS every drop on the ground and suppresses new
 ones for the fight. Boons already running are left alone — those were

@@ -200,6 +200,26 @@ public class TargetResolver {
         }
     }
 
+    /**
+     * Publishes the candidates chosen by a matcher that bypassed {@link #submit}.
+     *
+     * <p>The finale resolves its own input — a verse word, a summon and a bolt
+     * are three different kinds of target and are not in one list — so this
+     * object never sees those keystrokes. Without somewhere to put the result,
+     * {@link #getHighlighted()} stays empty for the whole boss fight and every
+     * renderer that asks it "is this target lit?" is told no.
+     *
+     * <p>That was a real bug and a spreading one: summoned monsters never turned
+     * gold as they were typed, and the fix had already been open-coded once in
+     * the projectile path. Routing the boss's candidates back through here keeps
+     * one answer to that question instead of one per entity type.
+     */
+    public void noteExternalCandidates(List<WordTarget> candidates) {
+        highlighted = candidates == null || candidates.isEmpty()
+                ? Collections.emptyList()
+                : List.copyOf(candidates);
+    }
+
     public int getCorrectInputs() {
         return correctInputs;
     }

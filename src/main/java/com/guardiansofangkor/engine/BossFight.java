@@ -297,6 +297,21 @@ public class BossFight implements WordTarget {
     /** Phases finished so far, for the renderer and for tests. */
     private int phasesElapsed;
 
+    /** Countdown to the next bolt thrown while the player is typing. */
+    private double harassCooldown;
+
+    /** Harassing bolts sent so far this fight, capped by {@link #harassmentPerFight}. */
+    private int harassmentSent;
+
+    /**
+     * Total harassing bolts a whole fight may throw.
+     *
+     * <p>A budget for the fight rather than a rate, so a slow reader is not
+     * punished twice — take twice as long over the paragraph and you do not get
+     * twice the interruptions, you get the same ones further apart.
+     */
+    private final int harassmentPerFight;
+
     private double minionCooldown;
 
     /** True for exactly one tick, when a summon is due. One-shot like the spit. */
@@ -345,6 +360,13 @@ public class BossFight implements WordTarget {
                 Math.max(1, Math.min(sentencesPerParagraph, this.sentences.size()));
         this.difficulty = difficulty == null ? Difficulty.reference() : difficulty;
         this.random = random == null ? new Random() : random;
+
+        // Roughly one interruption per paragraph, scaled by the tier. Easy gets
+        // a couple across the whole fight; Hard is nagged throughout.
+        int paragraphs = Math.max(1, this.sentences.size() / this.sentencesPerParagraph);
+        this.harassmentPerFight = (int) Math.round(
+                paragraphs * this.difficulty.getEnemyCountScale());
+        this.harassCooldown = harassIntervalTicks();
 
         List<List<String>> split = new ArrayList<>(this.sentences.size());
         for (String sentence : this.sentences) {
@@ -419,6 +441,8 @@ public class BossFight implements WordTarget {
                 }
                 if (stance == Stance.ATTACKING) {
                     updateAttackPhase(scale);
+                } else {
+                    updateHarassment(scale);
                 }
             }
             case FALLING -> {
@@ -487,6 +511,44 @@ public class BossFight implements WordTarget {
                 }
             }
         }
+    }
+
+    /**
+     * The occasional bolt thrown WHILE the player is typing the paragraph.
+     *
+     * <p>The fight used to be strictly alternating: verse, then barrage, then
+     * verse. That made the paragraph a safe window, and a safe window is a
+     * window with no decisions in it — the player could read at leisure and
+     * nothing they did during it mattered.
+     *
+     * <p>A single bolt drifting in mid-verse changes that. It is answerable
+     * with the same keystrokes and the same prefix matching as everything else,
+     * so it is not a second control scheme; it is the cost of the verse being
+     * worth something. Deliberately much rarer than a barrage — this is
+     * harassment, not a phase, and if it fired at barrage rate the paragraph
+     * would simply become unreadable.
+     *
+     * <p>Words come from the action pool and are excluded against the verse's
+     * remaining words at spawn, so a bolt can never carry a word the paragraph
+     * also wants. See {@code GameState.spitVenom}.
+     */
+    private void updateHarassment(double scale) {
+        if (harassmentPerFight <= 0 || harassmentSent >= harassmentPerFight) {
+            return;
+        }
+        harassCooldown -= scale;
+        if (harassCooldown <= 0) {
+            venomDue = true;
+            harassmentSent++;
+            harassCooldown = harassIntervalTicks();
+        }
+    }
+
+    /** Gap between harassing bolts. Far wider than a barrage's spacing. */
+    private int harassIntervalTicks() {
+        int base = GameConfig.TARGET_FPS * 9;
+        int span = GameConfig.TARGET_FPS * 7;
+        return base + random.nextInt(Math.max(1, span + 1));
     }
 
     /**

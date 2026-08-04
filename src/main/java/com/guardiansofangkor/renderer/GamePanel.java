@@ -262,14 +262,13 @@ public class GamePanel extends JPanel {
             drawPlayer(g2, state.getPlayer());
 
             for (Projectile projectile : state.getProjectiles()) {
-                // During the finale the resolver is bypassed, so candidacy is
-                // read straight off the buffer rather than from its highlight
-                // list — otherwise a bolt the player is part-way through would
-                // draw as if untouched.
-                boolean lit = highlighted.contains(projectile)
-                        || (state.isBossActive() && !typed.isEmpty()
-                            && projectile.getWord().startsWith(typed));
-                drawProjectile(g2, projectile, typed, lit, locked == projectile);
+                // The finale publishes its candidates back into the resolver
+                // (TargetResolver.noteExternalCandidates), so this one list is
+                // the answer everywhere. It used to be read straight off the
+                // buffer here instead — which worked for bolts and left every
+                // other kind of target, summons included, drawing as untouched.
+                drawProjectile(g2, projectile, typed,
+                        highlighted.contains(projectile), locked == projectile);
             }
 
             // Boons are drawn after the monsters and the hero so a drop is never

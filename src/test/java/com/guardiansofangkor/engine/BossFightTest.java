@@ -643,6 +643,46 @@ class BossFightTest {
     }
 
     @Test
+    @DisplayName("the boss harasses the player mid-paragraph")
+    void venomFliesDuringTheVerse() {
+        // The paragraph used to be a safe window — nothing could happen during
+        // it, so nothing the player did in it mattered. A bolt drifting in is
+        // what gives the verse a cost.
+        BossFight boss = paragraphBoss();
+        assertTrue(boss.isTyping(), "should start on the paragraph");
+
+        boolean spat = false;
+        for (int i = 0; i < GameConfig.TARGET_FPS * 60 && !spat; i++) {
+            boss.update();
+            if (boss.isVenomDue()) {
+                spat = true;
+            }
+        }
+        assertTrue(spat, "the boss never interrupted the paragraph");
+        assertTrue(boss.isTyping(), "and it should not have started a phase to do it");
+    }
+
+    @Test
+    @DisplayName("harassment is a budget for the fight, not a rate")
+    void harassmentIsBounded() {
+        // A slow reader must not be punished twice. Taking longer over the
+        // paragraph should space the interruptions out, not multiply them.
+        BossFight boss = paragraphBoss();
+
+        int spits = 0;
+        for (int i = 0; i < GameConfig.TARGET_FPS * 600; i++) {
+            boss.update();
+            if (boss.isVenomDue()) {
+                spits++;
+            }
+        }
+        assertTrue(spits > 0, "ten minutes of typing and never a single bolt");
+        assertTrue(spits <= 12,
+                "ten minutes of typing drew " + spits + " bolts — that is a rate, "
+                        + "and it punishes a slow reader for being slow");
+    }
+
+    @Test
     @DisplayName("a phase ends on its objective, not on a clock")
     void phasesEndOnTheirObjective() {
         // The whole point of the redesign. A phase sends a fixed number of
@@ -732,13 +772,17 @@ class BossFightTest {
     }
 
     @Test
-    @DisplayName("the boss never attacks while a paragraph is up")
-    void noAttacksDuringTheTypingWindow() {
+    @DisplayName("the boss never SUMMONS while a paragraph is up")
+    void noSummonsDuringTheTypingWindow() {
+        // Bolts may interrupt the paragraph — that is the harassment, and it is
+        // what stops the verse being a safe window. Summons may not: a monster
+        // walking in takes seconds to deal with and a paragraph the player
+        // cannot look away from, and the two together are unreadable. Monsters
+        // belong to a phase, where the verse is off screen.
         BossFight boss = paragraphBoss();
 
         for (int i = 0; i < 3000; i++) {
             boss.update();
-            assertFalse(boss.isVenomDue(), "spat at tick " + i + ", with the verse on screen");
             assertFalse(boss.isMinionDue(), "summoned at tick " + i + ", with the verse up");
         }
         assertTrue(boss.isTyping(), "and it should still be waiting on the player");
@@ -840,10 +884,15 @@ class BossFightTest {
 
         for (int i = 0; i < 3000; i++) {
             boss.update();
-            if (boss.isVenomDue()) {
+            // Bolts have two sources now — a barrage, and the harassment that
+            // interrupts the paragraph — so the phase rule only binds while a
+            // phase is actually running. A bolt with no phase at all is the
+            // harassment doing its job.
+            if (boss.isVenomDue() && boss.isAttacking()) {
                 assertEquals(BossPhase.PROJECTILE, boss.getAttackPhase(),
                         "the boss spat during a phase that is not about spitting");
             }
+            // Summons have only ever had one source, and that rule is absolute.
             if (boss.isMinionDue()) {
                 assertEquals(BossPhase.MINIONS, boss.getAttackPhase(),
                         "the boss summoned outside its summoning phase");
@@ -1238,13 +1287,17 @@ class BossFightTest {
                 guard < 40_000 && boss.getStage() == verse && boss.isFighting();
                 guard++) {
             // A phase may be running — the verse is off screen and nothing can
-            // be typed at it until the boss is finished. Ride it out rather
-            // than spinning against a closed window.
+            // be typed at it until the boss is finished. Deal with the phase
+            // rather than riding it out: it ends when its attacks are gone, and
+            // ignoring them means they breach and land until the run is over.
             if (!boss.isTyping()) {
+                answerTheField(state);
                 state.update();
                 continue;
             }
-            clearTheField(state);
+            // Bolts too, because harassment now interrupts the paragraph — a
+            // whole fight's worth of them landing unanswered is several lives.
+            answerTheField(state);
             String word = boss.currentWord();
             for (int i = 1; i <= word.length(); i++) {
                 state.handleInput(word.substring(0, i));
@@ -1253,10 +1306,33 @@ class BossFightTest {
         }
     }
 
-    /** Removes everything the boss has summoned, without typing at it. */
+    /**
+     * Removes everything the boss has summoned, without typing at it.
+     *
+     * <p>Summons ONLY. Callers waiting for a bolt to land rely on that: sweeping
+     * the monsters is what leaves a bolt as the one thing that can still reach
+     * the temple, so widening this to projectiles quietly disarms every test
+     * about venom landing.
+     */
     private static void clearTheField(GameState state) {
         for (Enemy enemy : List.copyOf(state.getEnemies())) {
             enemy.defeat();
+        }
+    }
+
+    /**
+     * Answers the bolts as well, for callers that have to survive a whole fight.
+     *
+     * <p>Separate from {@link #clearTheField} on purpose. A phase now ends only
+     * when its own attacks are gone, and the sole way they leave without being
+     * typed is by breaching or landing — each costing a life. A test that plays
+     * a fight to its end has to deal with both or it runs out of lives part-way
+     * through the paragraph, which is the design working rather than a bug.
+     */
+    private static void answerTheField(GameState state) {
+        clearTheField(state);
+        for (Projectile bolt : List.copyOf(state.getProjectiles())) {
+            bolt.intercept();
         }
     }
 
