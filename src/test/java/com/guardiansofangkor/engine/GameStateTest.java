@@ -535,6 +535,60 @@ class GameStateTest {
         assertFalse(state.isBossActive());
     }
 
+    // ---- the buffer a breach takes away ------------------------------------
+
+    @Test
+    @DisplayName("a breach drops the half-typed word it was aimed at")
+    void breachDropsTheStaleBuffer() {
+        // The reported bug: the letters stayed in the field after the monster
+        // they belonged to had already hit the temple, so the next keystroke was
+        // a typo against a target that no longer existed.
+        GameState state = playing();
+        enemyAt(state, "stone", 0);            // already on the breach point
+        state.handleInput("sto");
+        assertEquals("sto", state.getTypedBuffer(), "should be part-way in");
+
+        state.update();                        // it breaches on this tick
+
+        assertTrue(state.getTypedBuffer().isEmpty(),
+                "the engine kept letters aimed at an enemy that is gone");
+        assertTrue(state.consumeBufferInvalidated(),
+                "and the field was never told to clear itself");
+        assertFalse(state.consumeBufferInvalidated(), "the signal must be one-shot");
+    }
+
+    @Test
+    @DisplayName("a breach mid-prefix is covered, not just a locked target")
+    void breachDropsTheBufferEvenWhileAmbiguous() {
+        // The old guard only fired when the breaching enemy was the LOCKED
+        // target, and the lock is null for as long as a prefix still matches
+        // more than one enemy — which is exactly when a breach surprises you.
+        GameState state = playing();
+        enemyAt(state, "stone", 0);
+        enemyAt(state, "storm", 0);
+        state.handleInput("sto");              // matches both, so nothing locks
+
+        state.update();                        // both breach
+
+        assertTrue(state.getTypedBuffer().isEmpty(),
+                "a buffer with no live target left should have been dropped");
+    }
+
+    @Test
+    @DisplayName("a buffer another enemy still matches is left alone")
+    void aStillValidBufferSurvives() {
+        // Taking keystrokes that are still good would be its own small theft.
+        GameState state = playing();
+        enemyAt(state, "stone", 0);            // breaches immediately
+        safeEnemy(state, "storm");             // stays on the field
+        state.handleInput("sto");
+
+        state.update();
+
+        assertEquals("sto", state.getTypedBuffer(),
+                "the surviving enemy still matches, so the letters are still good");
+    }
+
     // ---- unlocks -----------------------------------------------------------
 
     @Test

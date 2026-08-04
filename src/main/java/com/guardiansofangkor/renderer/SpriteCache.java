@@ -1,5 +1,6 @@
 package com.guardiansofangkor.renderer;
 
+import com.guardiansofangkor.engine.Difficulty;
 import com.guardiansofangkor.entities.EnemyType;
 import com.guardiansofangkor.entities.PowerUpType;
 import com.guardiansofangkor.util.GameConfig;
@@ -133,13 +134,34 @@ public class SpriteCache {
      * The tallest this type is ever drawn, and therefore the only resolution
      * worth keeping.
      *
-     * <p>Takes the boss height into account for every type rather than only for
-     * the two that currently end a run — the roster's final boss is a tier
-     * setting, and a cache that silently degraded the day someone pointed a
-     * tier at a different monster would be a nasty thing to debug.
+     * <p>Derived from the tier table rather than hard-coded, so pointing a tier
+     * at a different final boss cannot silently leave that monster cached too
+     * small to draw at boss size.
      */
     private static int workingHeightFor(EnemyType type) {
-        return Math.max(type.getTargetHeight(), GameConfig.BOSS_HEIGHT);
+        // Only the types a tier actually ends on are ever drawn at BOSS_HEIGHT.
+        // Giving every type that headroom cost real sharpness: a Kmaoch drawn
+        // at 130 was being cached at 380 and then bilinearly reduced by 2.9x on
+        // every frame. Bilinear samples a 2x2 neighbourhood, so any reduction
+        // past 2x undersamples — which reads as a soft, shimmering sprite
+        // rather than as a small one.
+        //
+        // Cached at the size it is actually drawn, the per-frame blit is 1:1
+        // and the only scaling left is the one-time, high-quality reduction
+        // from the source art.
+        return isEverAFinalBoss(type)
+                ? Math.max(type.getTargetHeight(), GameConfig.BOSS_HEIGHT)
+                : type.getTargetHeight();
+    }
+
+    /** True when some tier ends on this type, so it is also drawn boss-sized. */
+    private static boolean isEverAFinalBoss(EnemyType type) {
+        for (Difficulty tier : Difficulty.values()) {
+            if (tier.getFinalBossType() == type) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

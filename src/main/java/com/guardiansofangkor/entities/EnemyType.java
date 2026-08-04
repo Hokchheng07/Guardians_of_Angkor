@@ -41,16 +41,24 @@ public enum EnemyType {
             105, 155, 2, 4,
             1.7, 0.11, 3.2, 0, 1, false),
 
-    /** Heavy. Long words, slow approach. Barely speeds up. Art pending. */
+    /**
+     * Heavy. Long words, slow approach. Barely speeds up.
+     *
+     * <p>The tallest thing in the roster short of a boss — taller than Yeak,
+     * who is the bulkiest. The two read as heavy in different ways, which is
+     * the point: Yeak is wide and solid, Pret is a gaunt column. Only the
+     * height is set here; width follows the trimmed art's own proportions, so
+     * making him taller cannot stretch him.
+     */
     PRET("Pret", "ប្រេត", "Heavy",
             "Pret.png", GroundBehavior.GROUNDED,
-            185, 0, 8, 12,
+            250, 0, 8, 12,
             0.65, 0.018, 1.0, 0, 1, true),
 
     /** Mimic. Its word shifts mid-type (Phase 10 behaviour). Floats. */
     KMAOCH("Kmaoch", "ខ្មោច", "Mimic",
             "Kmaoch.png", GroundBehavior.FLOATING,
-            130, 120, 4, 6,
+            175, 120, 4, 6,
             1.0, 0.06, 2.0, 0, 1, false),
 
     /** Mini-boss. Chains 2-3 words before dying. Coiled on the ground. */

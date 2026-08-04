@@ -151,6 +151,16 @@ public final class Main {
             keys.tick();
             panel.tick();
 
+            // The target the player was typing at left the field mid-word — it
+            // breached, or a Purge took it. The engine has already dropped the
+            // buffer; the field is Swing's and has to be told separately, or the
+            // next keystroke is measured against letters the engine forgot and
+            // the player is charged a typo for something that was taken from
+            // them.
+            if (state.consumeBufferInvalidated()) {
+                input.clearBuffer();
+            }
+
             if (state.isLevelJustCleared()) {
                 autosave.saveQuietly();
             }

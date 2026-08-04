@@ -144,6 +144,9 @@ public class GameState {
      */
     private String bossBuffer = "";
 
+    /** True for one tick after the typed buffer was dropped. See dropStaleBuffer. */
+    private boolean bufferInvalidated;
+
     /**
      * Difficulty tiers beaten at least once, as word-bank keys.
      *
@@ -221,6 +224,85 @@ public class GameState {
             lastLevelSeen = waveManager.getLevel();
             resolvedThisLevel = 0;
         }
+
+        // Last, after everything that can remove a target has run.
+        dropStaleBuffer();
+    }
+
+    /**
+     * Throws away half-typed input once the thing it was aimed at has gone.
+     *
+     * <p>Fixes a bug the player experiences as the word "sticking" to a monster
+     * that already hit them. Typing at an enemy that then breaches used to leave
+     * the letters sitting in the field: the engine's own buffer was cleared, but
+     * only when that enemy happened to be the LOCKED target — and the lock is
+     * null for as long as the prefix still matches more than one enemy, which is
+     * precisely when a breach is most likely to be a surprise. Even when it did
+     * clear, nothing told the text field, so the next keystroke was measured
+     * against a buffer the engine had already forgotten: a red flash and an
+     * accuracy penalty for an enemy that was taken away from them.
+     *
+     * <p>Checked once a tick against everything still alive rather than wired
+     * into each removal site, so a breach, a landed bolt, a lapsed pickup and
+     * the boss's own field sweep are all covered by one rule. A buffer that
+     * still matches something live is left alone — if another enemy shares the
+     * prefix, the player's keystrokes are still good and taking them would be
+     * its own small theft.
+     *
+     * <p>THIS IS THE ONLY PLACE {@code update} may clear the buffer, and that
+     * exclusivity is load-bearing. The removal sites used to reset the resolver
+     * themselves when the departing thing was the locked target. Left in
+     * alongside this check they emptied the buffer first, so the check found
+     * nothing stale, never raised the flag, and the text field was never told —
+     * which is the original bug surviving its own fix, for the single-target
+     * case that provokes it most often.
+     */
+    private void dropStaleBuffer() {
+        String buffer = getTypedBuffer();
+        if (buffer.isEmpty() || matchesSomethingLive(buffer)) {
+            return;
+        }
+        resolver.reset();
+        bossBuffer = "";
+        if (boss != null) {
+            boss.clearTyping();
+        }
+        // One-shot. The field lives in Swing and this class must not touch it,
+        // so the loop is told once and does the clearing.
+        bufferInvalidated = true;
+    }
+
+    /** True when {@code buffer} is still a live prefix of something typeable. */
+    private boolean matchesSomethingLive(String buffer) {
+        for (Enemy enemy : enemies) {
+            if (enemy.isActive() && enemy.getWord().startsWith(buffer)) {
+                return true;
+            }
+        }
+        for (Projectile projectile : projectiles) {
+            if (projectile.isActive() && projectile.getWord().startsWith(buffer)) {
+                return true;
+            }
+        }
+        for (PowerUp powerUp : powerUps) {
+            if (powerUp.isActive() && powerUp.getWord().startsWith(buffer)) {
+                return true;
+            }
+        }
+        return boss != null && boss.isTyping()
+                && boss.currentWord().startsWith(buffer);
+    }
+
+    /**
+     * True once when the typed buffer was dropped out from under the player.
+     *
+     * <p>Consumed by the game loop, which clears the input field. One-shot, so
+     * reading it is what acknowledges it.
+     */
+    public boolean consumeBufferInvalidated() {
+        boolean invalidated = bufferInvalidated;
+        bufferInvalidated = false;
+        return invalidated;
     }
 
     private void updateEffects() {
@@ -247,9 +329,9 @@ public class GameState {
         for (Enemy enemy : breached) {
             enemies.remove(enemy);
             resolvedThisLevel++;
-            if (resolver.getLockedTarget() == enemy) {
-                resolver.reset();
-            }
+            // Deliberately does NOT clear the buffer here. dropStaleBuffer owns
+            // that at the end of the tick — see the note there on why two
+            // authorities were worse than one.
             absorbOrLoseLife(enemy.getX(), enemy.getAnchorY(),
                     enemy.getType().breachDamage());
         }
@@ -261,9 +343,6 @@ public class GameState {
         for (Projectile projectile : projectiles) {
             projectile.update(timeScale);
             if (projectile.hasJustLanded()) {
-                if (resolver.getLockedTarget() == projectile) {
-                    resolver.reset();
-                }
                 absorbOrLoseLife(projectile.getX(), projectile.getY(),
                         GameConfig.DAMAGE_PROJECTILE);
             }
@@ -274,12 +353,10 @@ public class GameState {
     private void updatePowerUps() {
         for (PowerUp powerUp : powerUps) {
             powerUp.update();
-            if (powerUp.hasJustLapsed() && resolver.getLockedTarget() == powerUp) {
-                // The player was mid-way through claiming it when it faded.
-                // Clearing the lock stops the next keystroke reading as a typo
-                // against a target that no longer exists.
-                resolver.reset();
-            }
+            // A boon fading mid-claim is handled by dropStaleBuffer with
+            // everything else that can leave the field. Clearing the lock here
+            // as well would empty the buffer before that check ran, and the
+            // check would then find nothing to report.
         }
         powerUps.removeIf(p -> p.isExpired(GameConfig.DEFEAT_ANIMATION_TICKS));
     }
@@ -1089,6 +1166,7 @@ public class GameState {
         combo.reset();
         boss = null;
         bossBuffer = "";
+        bufferInvalidated = false;
         // Repeat tracking is per-run, so a fresh run gets the whole vocabulary
         // back rather than starting where the last one left off.
         wordBank.resetUsage();
