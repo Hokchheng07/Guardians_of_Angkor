@@ -266,6 +266,31 @@ the plate lands ON the bar and a pixel of rounding decides readability.
 There are tests asserting every spawn clears HUD_BAR_HEIGHT and that no
 grounded enemy ever leaves the plaza.
 
+## Concurrent enemy cap
+Difficulty.getMaxConcurrentEnemies (Easy 4, Medium 6, Hard 8) limits how
+many enemies are ALIVE at once. WaveManager holds the queue when the
+plaza is full — the spawn cooldown does not tick, so clearing one enemy
+never owes the player a backlog of everything that would have spawned
+while they were busy.
+
+This is a READING limit, not a screen-space one. Every live enemy is a
+word to scan and choose between, and past about six the player stops
+reading and starts guessing — prefix matching turns ambiguous at the
+same time, so the target they hit stops being the target they meant.
+
+It fixes a real gap. enemyCount plateaus but spawnIntervalTicks keeps
+shrinking to its floor, so every level past the plateau turned "more
+enemies" into "all the enemies at once": Medium's last wave put sixteen
+monsters up in nine seconds, and Hard's final six levels were identical
+to each other. The cap converts that into a queue that refills as fast
+as the player clears it. Count ACTIVE enemies only — a defeated one
+lingers through its death fade and would block a slot for a second.
+
+DO NOT conflate the two ceilings. enemyCount's cap (40) is a runaway
+guard for Endless and sets a level's LENGTH; the concurrent cap sets its
+DENSITY. They were the same number (20) once and that is exactly what
+made the late game flat.
+
 ## Difficulty
 All level scaling lives in engine/DifficultyCurve. Every curve is
 monotonic AND capped — an uncapped curve eventually produces an

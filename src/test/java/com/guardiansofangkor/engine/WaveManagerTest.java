@@ -36,6 +36,88 @@ class WaveManagerTest {
                 Difficulty.MEDIUM, new Random(42));
     }
 
+    // ---- the concurrent cap ------------------------------------------------
+
+    /**
+     * Plays a tier from level one, never killing anything that has not breached,
+     * and reports the most enemies alive at any moment.
+     */
+    private static int peakAlive(Difficulty tier, int throughLevel) {
+        WaveManager waves = new WaveManager(
+                new WordBank(Language.ENGLISH, new Random(7)), tier, new Random(7));
+        List<Enemy> field = new ArrayList<>();
+        int peak = 0;
+
+        for (int tick = 0; tick < 200_000 && waves.getLevel() <= throughLevel; tick++) {
+            field.addAll(waves.update(field));
+            for (Enemy enemy : field) {
+                enemy.update();
+            }
+            // Breaching is the only thing that removes an enemy here — nobody is
+            // typing. That is the worst case the cap has to hold under.
+            field.removeIf(Enemy::hasBreached);
+            peak = Math.max(peak, (int) field.stream().filter(Enemy::isActive).count());
+        }
+        return peak;
+    }
+
+    @Test
+    @DisplayName("the plaza never holds more enemies than the tier allows")
+    void concurrentCapHolds() {
+        // The reported bug: past the level where the enemy count stops climbing,
+        // the only thing still escalating was the spawn rate — so a late wave
+        // arrived all at once. Medium's last level put sixteen monsters on
+        // screen inside nine seconds, which is sixteen words to read.
+        for (Difficulty tier : List.of(Difficulty.EASY, Difficulty.MEDIUM,
+                Difficulty.HARD)) {
+            int peak = peakAlive(tier, tier.getFinalLevel());
+            assertTrue(peak <= tier.getMaxConcurrentEnemies(),
+                    tier + " put " + peak + " on screen at once, cap is "
+                            + tier.getMaxConcurrentEnemies());
+        }
+    }
+
+    @Test
+    @DisplayName("the cap is a reading limit, so it stays small")
+    void capsStaySmallEnoughToRead() {
+        // Every enemy alive is a word to scan and choose between. Past roughly
+        // half a dozen the player stops reading and starts guessing, and prefix
+        // matching turns ambiguous at the same time.
+        for (Difficulty tier : Difficulty.values()) {
+            assertTrue(tier.getMaxConcurrentEnemies() >= 3,
+                    tier + " is too sparse to be a wave");
+            assertTrue(tier.getMaxConcurrentEnemies() <= 8,
+                    tier + " allows " + tier.getMaxConcurrentEnemies()
+                            + " words on screen, which is past reading");
+        }
+        assertTrue(Difficulty.EASY.getMaxConcurrentEnemies()
+                        < Difficulty.HARD.getMaxConcurrentEnemies(),
+                "the cap should be part of a tier's identity, not one shared number");
+    }
+
+    @Test
+    @DisplayName("a level still sends everything it promised, just not at once")
+    void theCapDelaysRatherThanDrops() {
+        // The cap must not quietly shorten a level: the progress bar counts
+        // enemies resolved against DifficultyCurve.enemyCount, so a spawner that
+        // gave up early would leave the bar permanently short of full.
+        WaveManager waves = newManager();
+        List<Enemy> field = new ArrayList<>();
+        int spawned = 0;
+
+        for (int tick = 0; tick < 200_000 && waves.getLevel() <= 1; tick++) {
+            List<Enemy> arrived = waves.update(field);
+            spawned += arrived.size();
+            field.addAll(arrived);
+            for (Enemy enemy : field) {
+                enemy.update();
+            }
+            field.removeIf(Enemy::hasBreached);
+        }
+        assertEquals(DifficultyCurve.enemyCount(1, Difficulty.MEDIUM), spawned,
+                "the cap dropped enemies instead of delaying them");
+    }
+
     @Test
     @DisplayName("airborne descents hold 45 degrees, flanks stay level")
     void spawnGeometryMatchesRoute() {

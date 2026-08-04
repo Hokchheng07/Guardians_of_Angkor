@@ -73,6 +73,23 @@ public class WaveManager {
      *                      cleared level and to avoid duplicate words
      * @return enemies spawned this tick; usually empty
      */
+    /**
+     * True when the plaza already holds as many enemies as the tier allows.
+     *
+     * <p>Counts ACTIVE enemies only. A defeated one lingers through its death
+     * fade, and counting it would make every kill fail to free a slot for about
+     * a second — the player would clear something and watch nothing arrive.
+     */
+    private boolean isPlazaFull(List<Enemy> activeEnemies) {
+        int alive = 0;
+        for (Enemy enemy : activeEnemies) {
+            if (enemy.isActive()) {
+                alive++;
+            }
+        }
+        return alive >= difficulty.getMaxConcurrentEnemies();
+    }
+
     public List<Enemy> update(List<Enemy> activeEnemies) {
         List<Enemy> spawned = new ArrayList<>();
 
@@ -91,6 +108,14 @@ public class WaveManager {
         }
 
         if (remainingToSpawn > 0) {
+            if (isPlazaFull(activeEnemies)) {
+                // Hold the queue rather than the clock. The cooldown does not
+                // tick while the plaza is full, so clearing one enemy does not
+                // immediately owe the player a backlog of everything that would
+                // have spawned while they were busy — which is precisely the
+                // spiral this cap exists to stop.
+                return spawned;
+            }
             if (spawnCooldown > 0) {
                 spawnCooldown--;
             } else {

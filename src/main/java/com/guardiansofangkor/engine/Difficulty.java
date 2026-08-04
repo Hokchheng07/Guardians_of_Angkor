@@ -50,7 +50,7 @@ public enum Difficulty {
     EASY("Easy", "A steady tide. Shorter names, more time.", true,
             0.58, 1.50, -1, -2,
             EnemyType.NAGA, 10,
-            0.22, 1.25, 0.65,
+            0.22, 1.25, 0.65, 4,
             2, 2, 2),
 
     /**
@@ -65,7 +65,7 @@ public enum Difficulty {
     MEDIUM("Medium", "The tide turns. Longer names, less room.", true,
             0.79, 1.25, 0, -1,
             EnemyType.KRONG_REAP, 15,
-            0.21, 1.12, 0.82,
+            0.21, 1.12, 0.82, 6,
             3, 3, 3),
 
     /**
@@ -81,7 +81,7 @@ public enum Difficulty {
     HARD("Hard", "No tide at all. The temple gets no rest.", true,
             1.0, 1.0, 0, 0,
             EnemyType.KRONG_REAP, 20,
-            0.20, 1.0, 1.0,
+            0.20, 1.0, 1.0, 8,
             3, 3, 3),
 
     /**
@@ -94,7 +94,7 @@ public enum Difficulty {
     ENDLESS("Endless", "No last level. It ends when you do.", false,
             1.1, 0.9, 0, 0,
             null, Integer.MAX_VALUE,
-            0.16, 0.9, 1.05,
+            0.16, 0.9, 1.05, 8,
             3, 3, 3);
 
     private final String displayName;
@@ -109,6 +109,7 @@ public enum Difficulty {
     private final double powerUpDropChance;
     private final double powerUpDurationScale;
     private final double enemyCountScale;
+    private final int maxConcurrentEnemies;
     private final int bossParagraphsPerCycle;
     private final int bossSentencesPerParagraph;
     private final int bossCycles;
@@ -118,7 +119,7 @@ public enum Difficulty {
                int wordMinShift, int wordMaxShift,
                EnemyType finalBossType, int finalBossLevel,
                double powerUpDropChance, double powerUpDurationScale,
-               double enemyCountScale,
+               double enemyCountScale, int maxConcurrentEnemies,
                int bossParagraphsPerCycle, int bossSentencesPerParagraph,
                int bossCycles) {
         this.displayName = displayName;
@@ -133,6 +134,7 @@ public enum Difficulty {
         this.powerUpDropChance = powerUpDropChance;
         this.powerUpDurationScale = powerUpDurationScale;
         this.enemyCountScale = enemyCountScale;
+        this.maxConcurrentEnemies = maxConcurrentEnemies;
         this.bossParagraphsPerCycle = bossParagraphsPerCycle;
         this.bossSentencesPerParagraph = bossSentencesPerParagraph;
         this.bossCycles = bossCycles;
@@ -173,6 +175,30 @@ public enum Difficulty {
             case HARD -> MEDIUM;
             case ENDLESS -> HARD;
         };
+    }
+
+    /**
+     * Most enemies allowed on the plaza at once.
+     *
+     * <p>A READING limit, not a screen-space one. Every enemy alive is a word
+     * the player has to scan and choose between, and past roughly six they stop
+     * reading and start panicking — prefix matching also gets genuinely
+     * ambiguous, so the target they hit stops being the target they meant.
+     *
+     * <p>Without this the late game had no constraint at all. The per-level
+     * enemy count stops climbing once it hits its ceiling, but the spawn
+     * interval keeps shrinking, so every level after that turned "more enemies"
+     * into "all the enemies at the same time" — Medium's last wave arrived in
+     * eight seconds. The cap converts that into what it should always have
+     * been: a queue that refills as fast as you can clear it.
+     *
+     * <p>It is self-regulating and cannot stall a level. Clear quickly and the
+     * next one is already walking in; fall behind and the pressure stops
+     * growing while you recover. Enemies left alone still breach and still cost
+     * lives, so waiting is never free.
+     */
+    public int getMaxConcurrentEnemies() {
+        return maxConcurrentEnemies;
     }
 
     /** Multiplier on enemy speed. 1.0 at Hard. */

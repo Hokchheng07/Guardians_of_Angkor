@@ -45,9 +45,24 @@ public final class DifficultyCurve {
         // Utility class — not instantiable.
     }
 
-    /** Enemies in a level: starts at 4, climbs, capped so the screen stays readable. */
+    /**
+     * Enemies in a level: starts at 4 and climbs two a level.
+     *
+     * <p>The ceiling is a runaway guard for {@link Difficulty#ENDLESS}, which
+     * has no last level — NOT a readability limit. Readability is
+     * {@link Difficulty#getMaxConcurrentEnemies()}, which caps how many are
+     * alive at once; this caps how many a level sends in total, which is its
+     * LENGTH.
+     *
+     * <p>Those two were conflated at 20, and it made the late game flat. Once a
+     * tier hit the ceiling its levels stopped differing in anything but spawn
+     * rate — Medium reached it at level nine, so its last six levels sent the
+     * same sixteen monsters faster and faster, and Hard's last six were
+     * identical to each other in every respect. Raising it lets a late level be
+     * genuinely longer, which is what the concurrent cap now makes safe.
+     */
     public static int enemyCount(int level) {
-        return Math.min(4 + (Math.max(1, level) - 1) * 2, 20);
+        return Math.min(4 + (Math.max(1, level) - 1) * 2, 40);
     }
 
     /**
