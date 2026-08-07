@@ -1,8 +1,15 @@
-# Guardians of Angkor — Word Defense
+# Guardians of Angkor — engineering context
 
 Java Swing typing-defense game (ISTAD OOP course project). Player types
 words displayed above approaching enemies to defeat them before they
 reach the temple.
+
+**This file is the rules the code must obey — invariants, and the reasons
+behind them.** It is loaded into every Claude Code session through a one-line
+`@context.md` import in `CLAUDE.md`; edit this file, never that one.
+
+For the narrative version — what was built, what broke, and why — see
+`document.md`. That one is written for people.
 
 ## Core mechanic — target resolution
 Enemy targeting is prefix-based, not pre-locked: after each keystroke,
