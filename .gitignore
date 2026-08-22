@@ -40,5 +40,5 @@ bin/
 .vscode/
 
 ### Mac OS ###
-.DS_Store_to_delete/
+.DS_Store
 _to_delete/
