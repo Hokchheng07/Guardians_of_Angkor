@@ -1,13 +1,19 @@
 package com.guardiansofangkor;
 
+import com.guardiansofangkor.audio.AudioManager;
+import com.guardiansofangkor.audio.AudioManager.Sfx;
+import com.guardiansofangkor.audio.AudioManager.Track;
+import com.guardiansofangkor.engine.CharacterType;
 import com.guardiansofangkor.engine.GameLoop;
 import com.guardiansofangkor.engine.GameState;
+import com.guardiansofangkor.engine.GameState.SoundEvent;
 import com.guardiansofangkor.engine.MenuState;
 import com.guardiansofangkor.i18n.FontManager;
 import com.guardiansofangkor.i18n.Language;
 import com.guardiansofangkor.input.KeyboardHandler;
 import com.guardiansofangkor.input.TypingInputField;
 import com.guardiansofangkor.matching.ResolveResult;
+import com.guardiansofangkor.renderer.CharacterSelectionPanel;
 import com.guardiansofangkor.renderer.GamePanel;
 import com.guardiansofangkor.renderer.MenuPanel;
 import com.guardiansofangkor.renderer.SpriteCache;
@@ -26,6 +32,8 @@ import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Font;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 
 /**
  * Entry point. Assembles the window, wires the front end to the game, restores
@@ -45,6 +53,7 @@ import java.awt.Font;
 public final class Main {
 
     private static final String CARD_MENU = "menu";
+    private static final String CARD_CHARACTER_SELECT = "character_select";
     private static final String CARD_GAME = "game";
 
     public static void main(String[] args) {
@@ -75,6 +84,8 @@ public final class Main {
     }
 
     private static void launch() {
+        AudioManager.getInstance().preloadAll();
+
         Language language = Language.ENGLISH;
 
         SaveManager saveManager = new SaveManager();
@@ -110,9 +121,11 @@ public final class Main {
         MenuState menuState = new MenuState(saved.hasResumableRun());
         menuState.setProgress(state.getProgress());
         MenuPanel menuPanel = new MenuPanel(menuState, sprites);
+        CharacterSelectionPanel charSelectPanel = new CharacterSelectionPanel();
 
         JPanel root = new JPanel(new CardLayout());
         root.add(menuPanel, CARD_MENU);
+        root.add(charSelectPanel, CARD_CHARACTER_SELECT);
         root.add(gameRoot, CARD_GAME);
 
         // The game's shortcuts are window-scoped, so they must be muted while
@@ -135,16 +148,22 @@ public final class Main {
             ResolveResult result = state.handleInput(text);
             switch (result.status()) {
                 case TYPO -> {
+                    AudioManager.getInstance().playSFX(Sfx.HIT_WRONG);
                     input.flashError(GameConfig.TYPO_FLASH_TICKS);
                     input.revertTo(result.validBuffer());
                 }
-                case COMPLETED -> input.clearBuffer();
+                case COMPLETED -> {
+                    AudioManager.getInstance().playSFX(Sfx.HIT_CORRECT);
+                    input.clearBuffer();
+                }
                 default -> {
                     // Ambiguous or locked — leave the buffer as the player typed it.
                 }
             }
             panel.repaint();
         }));
+
+        boolean[] wasGameOver = new boolean[]{false};
 
         GameLoop loop = new GameLoop(state, () -> {
             input.tick();
@@ -161,15 +180,37 @@ public final class Main {
                 input.clearBuffer();
             }
 
+            for (SoundEvent event : state.consumeSoundEvents()) {
+                switch (event) {
+                    case ENEMY_SPAWNED -> AudioManager.getInstance().playSFX(Sfx.ENEMY_SPAWN);
+                    case BOSS_SPAWNED -> AudioManager.getInstance().playSFX(Sfx.BOSS_SPAWN);
+                    case POWERUP_CLAIMED -> AudioManager.getInstance().playSFX(Sfx.POWERUP_COLLECT);
+                }
+            }
+
             if (state.isLevelJustCleared()) {
+                AudioManager.getInstance().playSFX(Sfx.WAVE_COMPLETE);
                 autosave.saveQuietly();
             }
-            if (state.isGameOver() && input.isEnabled()) {
-                // Stop accepting typing and offer the restart chord immediately,
-                // so the player does not have to discover Tab on their own.
-                input.setEnabled(false);
-                keys.forceArmRestart();
-                autosave.saveQuietly();
+            if (state.isGameOver()) {
+                if (!wasGameOver[0]) {
+                    wasGameOver[0] = true;
+                    AudioManager.getInstance().stopMusic();
+                    if (state.isVictory()) {
+                        AudioManager.getInstance().playSFX(Sfx.VICTORY);
+                    } else {
+                        AudioManager.getInstance().playSFX(Sfx.GAME_OVER);
+                    }
+                }
+                if (input.isEnabled()) {
+                    // Stop accepting typing and offer the restart chord immediately,
+                    // so the player does not have to discover Tab on their own.
+                    input.setEnabled(false);
+                    keys.forceArmRestart();
+                    autosave.saveQuietly();
+                }
+            } else {
+                wasGameOver[0] = false;
             }
 
             panel.setRestartArmed(keys.isRestartArmed());
@@ -181,8 +222,10 @@ public final class Main {
             ((CardLayout) root.getLayout()).show(root, CARD_GAME);
             input.resetForNewRun();
             input.requestFocusInWindow();
+            wasGameOver[0] = false;
             loop.clearFailures();
             loop.start();
+            AudioManager.getInstance().switchMusic(Track.GAMEPLAY_THEME, true);
             panel.repaint();
         };
 
@@ -195,9 +238,32 @@ public final class Main {
             // on the way back to the menu, not on their next launch.
             menuState.setProgress(state.getProgress());
             menuPanel.activateScreen();
+            AudioManager.getInstance().switchMusic(Track.MENU_THEME, true);
         };
 
         // ---- menu actions --------------------------------------------------
+
+        menuPanel.setOnScreenChanged(screen -> {
+            if (screen == MenuState.Screen.CHARACTER_SELECTION) {
+                menuPanel.deactivateScreen();
+                ((CardLayout) root.getLayout()).show(root, CARD_CHARACTER_SELECT);
+            }
+        });
+
+        charSelectPanel.setOnSelect(() -> menuGuard.run(() -> {
+            CharacterType selected = charSelectPanel.getSelectedCharacter();
+            menuState.setSelectedCharacter(selected);
+            state.getPlayer().setCharacterType(selected);
+            state.restartWith(menuState.getSelectedDifficulty());
+            autosave.saveQuietly();
+            showGame.run();
+        }));
+
+        charSelectPanel.setOnBack(() -> menuGuard.run(() -> {
+            menuState.openDifficulty();
+            ((CardLayout) root.getLayout()).show(root, CARD_MENU);
+            menuPanel.activateCurrentScreen();
+        }));
 
         menuPanel.setOnStartRun(() -> menuGuard.run(() -> {
             state.restartWith(menuState.getSelectedDifficulty());
@@ -213,6 +279,7 @@ public final class Main {
 
         menuPanel.setOnExit(() -> menuGuard.run(() -> {
             autosave.saveQuietly();
+            AudioManager.getInstance().shutdown();
             System.exit(0);
         }));
 
@@ -229,7 +296,9 @@ public final class Main {
             state.restart();
             input.resetForNewRun();
             input.requestFocusInWindow();
+            wasGameOver[0] = false;
             autosave.saveQuietly();
+            AudioManager.getInstance().switchMusic(Track.GAMEPLAY_THEME, true);
             panel.repaint();
         }));
 
@@ -262,10 +331,17 @@ public final class Main {
 
         frame.pack();
         frame.setLocationRelativeTo(null);
+        frame.addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosing(WindowEvent e) {
+                AudioManager.getInstance().shutdown();
+            }
+        });
         frame.setVisible(true);
 
         ((CardLayout) root.getLayout()).show(root, CARD_MENU);
         menuPanel.activateScreen();
+        AudioManager.getInstance().switchMusic(Track.MENU_THEME, true);
     }
 
     /** Shows an error the player can actually read, falling back to the console. */

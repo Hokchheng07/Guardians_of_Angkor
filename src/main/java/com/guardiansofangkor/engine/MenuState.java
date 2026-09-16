@@ -20,7 +20,8 @@ public class MenuState {
         MAIN,
 
         /** Difficulty picker, reached from New Game. */
-        DIFFICULTY
+        DIFFICULTY,
+        CHARACTER_SELECTION
     }
 
     /** What the caller should do in response to an activation. */
@@ -36,6 +37,9 @@ public class MenuState {
 
         /** Move to the difficulty picker. */
         OPEN_DIFFICULTY,
+
+        /** Move to the character selection screen. */
+        OPEN_CHARACTER_SELECTION,
 
         /** Begin a fresh run on {@link MenuState#getSelectedDifficulty()}. */
         START_RUN,
@@ -64,6 +68,7 @@ public class MenuState {
     private Screen screen = Screen.MAIN;
     private int mainIndex;
     private int difficultyIndex = Difficulty.defaultChoice().ordinal();
+    private CharacterType selectedCharacter = CharacterType.PREAH_REAM;
 
     /** Whether a resumable run exists, which decides if Continue is usable. */
     private boolean continueAvailable;
@@ -156,7 +161,16 @@ public class MenuState {
                 screen = Screen.DIFFICULTY;
                 difficultyIndex = Difficulty.defaultChoice().ordinal();
             }
-            case BACK -> screen = Screen.MAIN;
+            case OPEN_CHARACTER_SELECTION -> {
+                screen = Screen.CHARACTER_SELECTION;
+            }
+            case BACK -> {
+                if (screen == Screen.CHARACTER_SELECTION) {
+                    screen = Screen.DIFFICULTY;
+                } else {
+                    screen = Screen.MAIN;
+                }
+            }
             default -> {
                 // START_RUN, RESUME_RUN and EXIT are the caller's business.
             }
@@ -202,13 +216,13 @@ public class MenuState {
             flashLocked(difficulty.getDisplayName() + " is not ready yet.");
             return Outcome.NONE;
         }
-        return Outcome.START_RUN;
+        return Outcome.OPEN_CHARACTER_SELECTION;
     }
 
     /**
      * Backs out of the current screen.
      *
-     * @return {@link Outcome#BACK} on the difficulty screen, or
+     * @return {@link Outcome#BACK} on the character selection or difficulty screen, or
      *         {@link Outcome#EXIT} when already at the top
      */
     public Outcome back() {
@@ -216,6 +230,11 @@ public class MenuState {
         if (pressTicks > 0 || pendingOutcome != Outcome.NONE) {
             // A press is already committed; do not race it.
             return Outcome.NONE;
+        }
+        if (screen == Screen.CHARACTER_SELECTION) {
+            pendingOutcome = Outcome.BACK;
+            pressTicks = PRESS_TICKS;
+            return Outcome.PENDING;
         }
         if (screen == Screen.DIFFICULTY) {
             pendingOutcome = Outcome.BACK;
@@ -352,6 +371,28 @@ public class MenuState {
 
     public int getSelectedIndex() {
         return currentIndex();
+    }
+
+    public CharacterType getSelectedCharacter() {
+        return selectedCharacter;
+    }
+
+    public void setSelectedCharacter(CharacterType selectedCharacter) {
+        if (selectedCharacter != null) {
+            this.selectedCharacter = selectedCharacter;
+        }
+    }
+
+    public void openDifficulty() {
+        screen = Screen.DIFFICULTY;
+        pendingOutcome = Outcome.NONE;
+        pressTicks = 0;
+    }
+
+    public void openCharacterSelection() {
+        screen = Screen.CHARACTER_SELECTION;
+        pendingOutcome = Outcome.NONE;
+        pressTicks = 0;
     }
 
     public boolean isContinueAvailable() {

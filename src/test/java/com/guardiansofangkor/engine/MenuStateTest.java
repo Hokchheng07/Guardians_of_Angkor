@@ -164,12 +164,13 @@ class MenuStateTest {
     }
 
     @Test
-    @DisplayName("Medium starts a run once Easy has been cleared")
+    @DisplayName("Medium opens character selection once Easy has been cleared")
     void mediumStartsRun() {
         MenuState state = atDifficultyWithCleared(Difficulty.EASY);
         state.select(Difficulty.MEDIUM);
 
-        assertEquals(MenuState.Outcome.START_RUN, press(state));
+        assertEquals(MenuState.Outcome.OPEN_CHARACTER_SELECTION, press(state));
+        assertEquals(MenuState.Screen.CHARACTER_SELECTION, state.getScreen());
     }
 
     // ---- every built tier is open ------------------------------------------
@@ -188,12 +189,13 @@ class MenuStateTest {
     }
 
     @Test
-    @DisplayName("Hard starts a run on a fresh save")
+    @DisplayName("Hard opens character selection on a fresh save")
     void hardStartsRunWithoutClearingAnything() {
         MenuState state = atDifficulty();
         state.select(Difficulty.HARD);
 
-        assertEquals(MenuState.Outcome.START_RUN, press(state));
+        assertEquals(MenuState.Outcome.OPEN_CHARACTER_SELECTION, press(state));
+        assertEquals(MenuState.Screen.CHARACTER_SELECTION, state.getScreen());
     }
 
     @Test
@@ -241,11 +243,12 @@ class MenuStateTest {
     }
 
     @Test
-    @DisplayName("Easy starts a run")
+    @DisplayName("Easy opens character selection")
     void easyStartsRun() {
         MenuState state = atDifficulty();
 
-        assertEquals(MenuState.Outcome.START_RUN, press(state));
+        assertEquals(MenuState.Outcome.OPEN_CHARACTER_SELECTION, press(state));
+        assertEquals(MenuState.Screen.CHARACTER_SELECTION, state.getScreen());
     }
 
     @Test
@@ -450,5 +453,28 @@ class MenuStateTest {
             assertTrue(difficulty.getTagline().length() <= 48,
                     difficulty + " tagline is too long for the panel");
         }
+    }
+
+    @Test
+    @DisplayName("back from Character Selection returns to Difficulty")
+    void backFromCharacterSelectionReturnsToDifficulty() {
+        MenuState state = atDifficulty();
+        state.select(Difficulty.EASY);
+        press(state);
+        assertEquals(MenuState.Screen.CHARACTER_SELECTION, state.getScreen());
+
+        assertEquals(MenuState.Outcome.PENDING, state.back());
+        assertEquals(MenuState.Outcome.BACK, settle(state));
+        assertEquals(MenuState.Screen.DIFFICULTY, state.getScreen());
+    }
+
+    @Test
+    @DisplayName("selected character defaults to PREAH_REAM and can be updated")
+    void characterSelectionDefaultsAndUpdates() {
+        MenuState state = new MenuState();
+        assertEquals(CharacterType.PREAH_REAM, state.getSelectedCharacter());
+
+        state.setSelectedCharacter(CharacterType.YEAK);
+        assertEquals(CharacterType.YEAK, state.getSelectedCharacter());
     }
 }

@@ -1,5 +1,6 @@
 package com.guardiansofangkor.entities;
 
+import com.guardiansofangkor.engine.CharacterType;
 import com.guardiansofangkor.util.GameConfig;
 
 /**
@@ -18,6 +19,7 @@ public class Player {
 
     private final double x;
     private final double feetY;
+    private CharacterType characterType = CharacterType.PREAH_REAM;
 
     /** Counts down while the firing pose is held. */
     private int actionTicks;
@@ -31,12 +33,25 @@ public class Player {
     private int totalShots;
 
     public Player() {
-        this(GameConfig.TEMPLE_CENTER_X, GameConfig.PLAYER_FEET_Y);
+        this(GameConfig.TEMPLE_CENTER_X, GameConfig.PLAYER_FEET_Y, CharacterType.PREAH_REAM);
     }
 
     public Player(double x, double feetY) {
+        this(x, feetY, CharacterType.PREAH_REAM);
+    }
+
+    public Player(double x, double feetY, CharacterType characterType) {
         this.x = x;
         this.feetY = feetY;
+        this.characterType = characterType != null ? characterType : CharacterType.PREAH_REAM;
+    }
+
+    public CharacterType getCharacterType() {
+        return characterType;
+    }
+
+    public void setCharacterType(CharacterType characterType) {
+        this.characterType = characterType != null ? characterType : CharacterType.PREAH_REAM;
     }
 
     public void update() {

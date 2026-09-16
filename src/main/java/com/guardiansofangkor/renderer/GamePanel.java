@@ -1,5 +1,6 @@
 package com.guardiansofangkor.renderer;
 
+import com.guardiansofangkor.engine.CharacterType;
 import com.guardiansofangkor.engine.GameState;
 import com.guardiansofangkor.entities.AttackPhase;
 import com.guardiansofangkor.entities.Enemy;
@@ -694,10 +695,11 @@ public class GamePanel extends JPanel {
 
     private void drawPlayer(Graphics2D g2, Player player) {
         boolean firing = player.isFiring();
-        BufferedImage sprite = sprites.player(firing);
+        CharacterType characterType = player.getCharacterType();
+        BufferedImage sprite = sprites.player(characterType, firing);
 
         int height = GameConfig.PLAYER_HEIGHT;
-        int width = sprites.playerWidth(firing, height);
+        int width = sprites.playerWidth(characterType, firing, height);
         int cx = (int) Math.round(player.getX());
         int feetY = (int) Math.round(player.getFeetY() + player.getRecoil() * 0.4);
         int topY = feetY - height;
@@ -706,7 +708,7 @@ public class GamePanel extends JPanel {
         g2.fill(new Ellipse2D.Double(
                 cx - width * 0.3, feetY - 9, width * 0.6, width * 0.16));
 
-        drawPlayerRimLight(g2, firing, cx, topY, width, height);
+        drawPlayerRimLight(g2, characterType, firing, cx, topY, width, height);
 
         if (sprite != null) {
             g2.drawImage(sprite, cx - width / 2, topY, width, height, null);
@@ -729,9 +731,9 @@ public class GamePanel extends JPanel {
      * purpose: this is a rim light, not a spotlight, and pushing it further
      * makes him look like he is on fire rather than lit from behind.
      */
-    private void drawPlayerRimLight(Graphics2D g2, boolean firing,
+    private void drawPlayerRimLight(Graphics2D g2, CharacterType characterType, boolean firing,
                                     int cx, int topY, int width, int height) {
-        BufferedImage glow = sprites.playerGlow(firing, height);
+        BufferedImage glow = sprites.playerGlow(characterType, firing, height);
         if (glow == null) {
             return;
         }

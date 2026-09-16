@@ -1,5 +1,6 @@
 package com.guardiansofangkor.renderer;
 
+import com.guardiansofangkor.engine.CharacterType;
 import com.guardiansofangkor.engine.Difficulty;
 import com.guardiansofangkor.entities.EnemyType;
 import com.guardiansofangkor.entities.PowerUpType;
@@ -66,8 +67,6 @@ public class SpriteCache {
 
     private static final String BACKGROUND_PATH = "/images/Background.png";
     private static final String MENU_BACKGROUND_PATH = "/images/Main-Menu-Background.png";
-    private static final String PLAYER_IDLE_PATH = "/images/Prea_Ream(idle).png";
-    private static final String PLAYER_ACTION_PATH = "/images/Preas_Ream(Action).png";
 
     private final Map<EnemyType, BufferedImage> sprites = new EnumMap<>(EnemyType.class);
     private final Map<EnemyType, BufferedImage> silhouettes = new EnumMap<>(EnemyType.class);
@@ -84,14 +83,12 @@ public class SpriteCache {
     private BufferedImage menuBackground;
     private boolean menuBackgroundAttempted;
 
-    private BufferedImage playerIdle;
-    private BufferedImage playerAction;
-    private boolean playerAttempted;
+    private final Map<CharacterType, BufferedImage> playerIdleMap = new EnumMap<>(CharacterType.class);
+    private final Map<CharacterType, BufferedImage> playerActionMap = new EnumMap<>(CharacterType.class);
+    private final Map<CharacterType, Boolean> playerAttemptedMap = new EnumMap<>(CharacterType.class);
 
-    private BufferedImage playerGlowIdle;
-    private BufferedImage playerGlowAction;
-    private boolean glowIdleAttempted;
-    private boolean glowActionAttempted;
+    private final Map<CharacterType, BufferedImage> playerGlowIdleMap = new EnumMap<>(CharacterType.class);
+    private final Map<CharacterType, BufferedImage> playerGlowActionMap = new EnumMap<>(CharacterType.class);
     private int glowBuiltForHeight = -1;
 
     /**
@@ -236,38 +233,57 @@ public class SpriteCache {
     /**
      * Preah Ream's sprite for the requested pose.
      *
-     * <p>Both poses are loaded together so the swap on the first shot does not
-     * cause a one-frame stall while the action image decodes.
-     *
      * @param firing true for the drawn-bow pose, false for idle
      */
     public BufferedImage player(boolean firing) {
-        if (!playerAttempted) {
-            playerAttempted = true;
-            BufferedImage idle = read(PLAYER_IDLE_PATH);
-            BufferedImage action = read(PLAYER_ACTION_PATH);
-            // Preah Ream is the biggest source in the game at 896x1200 and is
-            // redrawn every frame, twice over once the rim light is counted.
-            playerIdle = toWorkingCopy(safeTrim(idle), GameConfig.PLAYER_HEIGHT);
-            playerAction = toWorkingCopy(safeTrim(action), GameConfig.PLAYER_HEIGHT);
+        return player(CharacterType.PREAH_REAM, firing);
+    }
 
-            if (playerIdle == null && playerAction == null) {
-                System.out.println("[SpriteCache] No Preah Ream art found — "
-                        + "drawing a placeholder guardian.");
+    /**
+     * Character sprite for the requested character and pose.
+     *
+     * <p>Both poses are loaded together so the swap on the first shot does not
+     * cause a one-frame stall while the action image decodes.
+     *
+     * @param type the character type
+     * @param firing true for the action pose, false for idle
+     */
+    public BufferedImage player(CharacterType type, boolean firing) {
+        if (type == null) {
+            type = CharacterType.PREAH_REAM;
+        }
+        if (!Boolean.TRUE.equals(playerAttemptedMap.get(type))) {
+            playerAttemptedMap.put(type, Boolean.TRUE);
+            BufferedImage idle = read(type.getImagePath());
+            BufferedImage action = read(type.getActionImagePath());
+
+            playerIdleMap.put(type, toWorkingCopy(safeTrim(idle), GameConfig.PLAYER_HEIGHT));
+            playerActionMap.put(type, toWorkingCopy(safeTrim(action), GameConfig.PLAYER_HEIGHT));
+
+            if (playerIdleMap.get(type) == null && playerActionMap.get(type) == null) {
+                System.out.println("[SpriteCache] No art found for " + type.getDisplayName()
+                        + " — drawing a placeholder guardian.");
             }
         }
         // Fall back to whichever pose exists, so a single missing file does not
         // make the hero vanish mid-shot.
-        BufferedImage wanted = firing ? playerAction : playerIdle;
+        BufferedImage actionImg = playerActionMap.get(type);
+        BufferedImage idleImg = playerIdleMap.get(type);
+        BufferedImage wanted = firing ? actionImg : idleImg;
         if (wanted != null) {
             return wanted;
         }
-        return firing ? playerIdle : playerAction;
+        return firing ? idleImg : actionImg;
     }
 
-    /** Width for Preah Ream at a given height, preserving his aspect ratio. */
+    /** Width for Preah Ream at a given height, preserving aspect ratio. */
     public int playerWidth(boolean firing, int height) {
-        BufferedImage image = player(firing);
+        return playerWidth(CharacterType.PREAH_REAM, firing, height);
+    }
+
+    /** Width for the character at a given height, preserving aspect ratio. */
+    public int playerWidth(CharacterType type, boolean firing, int height) {
+        BufferedImage image = player(type, firing);
         if (image == null || image.getHeight() == 0) {
             return (int) Math.round(height * 0.6);
         }
@@ -276,48 +292,46 @@ public class SpriteCache {
     }
 
     /**
-     * A soft gold halo matching Preah Ream's silhouette, drawn behind him so he
-     * separates from the temple behind.
-     *
-     * <p>Built by scaling his silhouette to display size, padding it, and
-     * running a separable Gaussian blur. Done at <em>display</em> size rather
-     * than source size and cached per pose — blurring the full 896x1200 source
-     * every frame would cost hundreds of millions of operations and stall the
-     * loop.
-     *
-     * @param firing which pose to build the halo for
-     * @param height the on-screen height he is drawn at
-     * @return the halo, or null when there is no art to derive one from
+     * A soft gold halo matching Preah Ream's silhouette.
      */
     public BufferedImage playerGlow(boolean firing, int height) {
+        return playerGlow(CharacterType.PREAH_REAM, firing, height);
+    }
+
+    /**
+     * A soft gold halo matching the character's silhouette, drawn behind them so they
+     * separate from the temple behind.
+     *
+     * @param type the character type
+     * @param firing which pose to build the halo for
+     * @param height the on-screen height drawn at
+     * @return the halo, or null when there is no art to derive one from
+     */
+    public BufferedImage playerGlow(CharacterType type, boolean firing, int height) {
+        if (type == null) {
+            type = CharacterType.PREAH_REAM;
+        }
         if (glowBuiltForHeight != height) {
             // Display size changed, so the cached halos are the wrong scale.
-            playerGlowIdle = null;
-            playerGlowAction = null;
-            glowIdleAttempted = false;
-            glowActionAttempted = false;
+            playerGlowIdleMap.clear();
+            playerGlowActionMap.clear();
             glowBuiltForHeight = height;
         }
 
-        // Tracked with a flag rather than a null check, so a failed build is not
-        // retried on every single frame.
-        if (firing ? glowActionAttempted : glowIdleAttempted) {
-            return firing ? playerGlowAction : playerGlowIdle;
-        }
-        if (firing) {
-            glowActionAttempted = true;
-        } else {
-            glowIdleAttempted = true;
+        Map<CharacterType, BufferedImage> glowMap = firing ? playerGlowActionMap : playerGlowIdleMap;
+        if (glowMap.containsKey(type)) {
+            return glowMap.get(type);
         }
 
-        BufferedImage source = player(firing);
+        BufferedImage source = player(type, firing);
         if (source == null) {
+            glowMap.put(type, null);
             return null;
         }
 
         BufferedImage built;
         try {
-            built = buildGlow(source, playerWidth(firing, height), height);
+            built = buildGlow(source, playerWidth(type, firing, height), height);
         } catch (RuntimeException | OutOfMemoryError e) {
             // Building the halo allocates a padded canvas and runs two convolve
             // passes. If either fails, the hero simply draws without a rim
@@ -327,11 +341,7 @@ public class SpriteCache {
             built = null;
         }
 
-        if (firing) {
-            playerGlowAction = built;
-        } else {
-            playerGlowIdle = built;
-        }
+        glowMap.put(type, built);
         return built;
     }
 

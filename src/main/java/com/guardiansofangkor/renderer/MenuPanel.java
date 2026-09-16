@@ -102,6 +102,13 @@ public class MenuPanel extends JPanel {
         repaint();
     }
 
+    /** Resumes animation and takes keyboard focus without resetting menu state. */
+    public void activateCurrentScreen() {
+        animator.start();
+        requestFocusInWindow();
+        repaint();
+    }
+
     /** Stops animating when the menu is not on screen. */
     public void deactivateScreen() {
         animator.stop();
@@ -147,7 +154,7 @@ public class MenuPanel extends JPanel {
             case START_RUN -> onStartRun.run();
             case RESUME_RUN -> onResumeRun.run();
             case EXIT -> onExit.run();
-            case OPEN_DIFFICULTY, BACK -> onScreenChanged.accept(state.getScreen());
+            case OPEN_DIFFICULTY, OPEN_CHARACTER_SELECTION, BACK -> onScreenChanged.accept(state.getScreen());
             case PENDING, NONE -> {
                 // Still depressing, or a locked entry that has already explained
                 // itself. Nothing to do either way.

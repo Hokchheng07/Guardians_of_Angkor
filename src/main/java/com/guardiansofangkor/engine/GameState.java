@@ -31,6 +31,15 @@ import java.util.Set;
  */
 public class GameState {
 
+    /**
+     * Discrete one-shot game occurrences surfaced for the audio and render layer.
+     */
+    public enum SoundEvent {
+        ENEMY_SPAWNED,
+        BOSS_SPAWNED,
+        POWERUP_CLAIMED
+    }
+
     private final List<Enemy> enemies = new ArrayList<>();
     private final List<Projectile> projectiles = new ArrayList<>();
     private final List<PowerUp> powerUps = new ArrayList<>();
@@ -146,6 +155,9 @@ public class GameState {
 
     /** True for one tick after the typed buffer was dropped. See dropStaleBuffer. */
     private boolean bufferInvalidated;
+
+    /** Discrete events surfaced for audio/rendering layers, consumed and cleared once per tick. */
+    private final List<SoundEvent> soundEvents = new ArrayList<>();
 
     /**
      * Difficulty tiers beaten at least once, as word-bank keys.
@@ -303,6 +315,19 @@ public class GameState {
         boolean invalidated = bufferInvalidated;
         bufferInvalidated = false;
         return invalidated;
+    }
+
+    /**
+     * Discrete sound events queued during recent simulation ticks, returned and cleared in one shot.
+     * Consumed once per tick by the audio/presentation layer.
+     */
+    public List<SoundEvent> consumeSoundEvents() {
+        if (soundEvents.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<SoundEvent> events = new ArrayList<>(soundEvents);
+        soundEvents.clear();
+        return events;
     }
 
     private void updateEffects() {
@@ -505,6 +530,7 @@ public class GameState {
         boss = new BossFight(difficulty.getFinalBossType(), script,
                 difficulty.getBossSentencesPerParagraph(), difficulty, random);
 
+        soundEvents.add(SoundEvent.BOSS_SPAWNED);
         powerUps.clear();
         resolver.reset();
         effects.add(new VisualEffect(
@@ -790,6 +816,7 @@ public class GameState {
         List<Enemy> spawned = waveManager.update(enemies);
         for (Enemy enemy : spawned) {
             enemies.add(enemy);
+            soundEvents.add(SoundEvent.ENEMY_SPAWNED);
             // Materialise in a puff so on-screen spawning does not read as popping in.
             effects.add(new VisualEffect(
                     VisualEffect.Kind.SPAWN_POOF,
@@ -1034,6 +1061,7 @@ public class GameState {
         powerUp.claim();
         powerUpsCollected++;
         score += GameConfig.TARGET_FPS;
+        soundEvents.add(SoundEvent.POWERUP_CLAIMED);
 
         effects.add(new VisualEffect(
                 VisualEffect.Kind.BOON_CLAIMED,
@@ -1167,6 +1195,7 @@ public class GameState {
         boss = null;
         bossBuffer = "";
         bufferInvalidated = false;
+        soundEvents.clear();
         // Repeat tracking is per-run, so a fresh run gets the whole vocabulary
         // back rather than starting where the last one left off.
         wordBank.resetUsage();
