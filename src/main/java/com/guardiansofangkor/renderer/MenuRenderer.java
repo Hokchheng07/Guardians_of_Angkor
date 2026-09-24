@@ -4,6 +4,7 @@ import com.guardiansofangkor.engine.Difficulty;
 import com.guardiansofangkor.engine.MenuItem;
 import com.guardiansofangkor.engine.MenuState;
 import com.guardiansofangkor.i18n.FontManager;
+import com.guardiansofangkor.i18n.Language;
 import com.guardiansofangkor.util.GameConfig;
 
 import java.awt.AlphaComposite;
@@ -111,6 +112,10 @@ public class MenuRenderer {
     private static final int DIFFICULTY_HEADING_Y = ENTRIES_Y;
     private static final int DIFFICULTY_ENTRIES_Y = ENTRIES_Y + 22;
 
+    /** The options screen has the same shape — heading, then a short list. */
+    private static final int OPTIONS_HEADING_Y = ENTRIES_Y;
+    private static final int OPTIONS_ENTRIES_Y = ENTRIES_Y + 22;
+
     // ---- panel fill --------------------------------------------------------
 
     private static final Color PANEL_TOP = new Color(0x1E, 0x19, 0x14, 247);
@@ -162,8 +167,10 @@ public class MenuRenderer {
 
         if (state.getScreen() == MenuState.Screen.MAIN) {
             drawMainEntries(g2, state, glowPhase);
-        } else {
+        } else if (state.getScreen() == MenuState.Screen.DIFFICULTY) {
             drawDifficultyEntries(g2, state, glowPhase);
+        } else {
+            drawOptionsEntries(g2, state, glowPhase);
         }
 
         drawLockedMessage(g2, state);
@@ -183,7 +190,11 @@ public class MenuRenderer {
      * bounds changed the instant the cursor entered them.
      */
     public static Rectangle entryBounds(int index, MenuState.Screen screen) {
-        int top = screen == MenuState.Screen.MAIN ? ENTRIES_Y : DIFFICULTY_ENTRIES_Y;
+        int top = switch (screen) {
+            case MAIN -> ENTRIES_Y;
+            case DIFFICULTY -> DIFFICULTY_ENTRIES_Y;
+            case OPTIONS -> OPTIONS_ENTRIES_Y;
+        };
         return new Rectangle(CONTENT_X, top + index * ENTRY_PITCH, CONTENT_W, BUTTON_H);
     }
 
@@ -319,6 +330,59 @@ public class MenuRenderer {
         g2.setFont(taglineFont);
         g2.setColor(Palette.GOLD_WARM);
         String tagline = state.getSelectedDifficulty().getTagline();
+        FontMetrics fm = g2.getFontMetrics();
+        g2.drawString(tagline, CENTRE_X - fm.stringWidth(tagline) / 2, y + 14);
+
+        g2.setFont(hintFont);
+        g2.setColor(Palette.alpha(Palette.GOLD_FAINT, 0.9));
+        String back = "ESC  ·  back";
+        g2.drawString(back, CENTRE_X - g2.getFontMetrics().stringWidth(back) / 2, y + 40);
+    }
+
+    /**
+     * The language picker. Deliberately the same shape as
+     * {@link #drawDifficultyEntries} — a heading, a short list of buttons, and
+     * a back hint — because it is the same kind of choice: pick one of a few
+     * named options and go back to the main list.
+     *
+     * <p>Unlike a difficulty, a language is never locked or unbuilt, so every
+     * entry here always takes the enabled, buildable path through
+     * {@link #drawButton} — there is no dark/SOON state to reach.
+     */
+    private void drawOptionsEntries(Graphics2D g2, MenuState state, double glowPhase) {
+        g2.setColor(Palette.alpha(Palette.GOLD_FAINT, 0.95));
+        g2.setFont(hintFont);
+        drawTracked(g2, "CHOOSE YOUR TONGUE", CENTRE_X, OPTIONS_HEADING_Y, 2.6);
+
+        Language[] languages = Language.values();
+        Font savedPrimary = primaryButtonFont;
+        Font savedSecondary = secondaryButtonFont;
+        for (int i = 0; i < languages.length; i++) {
+            Language language = languages[i];
+            boolean selected = state.getSelectedLanguage() == language;
+
+            // The Khmer label needs a Khmer-capable face, or it draws as empty
+            // boxes even though the button itself works fine — swap the fonts
+            // for just this one entry rather than threading a Font parameter
+            // through drawButton and its two callees for a single special case.
+            primaryButtonFont = FontManager.uiFont(language, 15, Font.BOLD);
+            secondaryButtonFont = FontManager.uiFont(language, 14, Font.BOLD);
+
+            drawButton(g2, language.getDisplayName(),
+                    entryBounds(i, MenuState.Screen.OPTIONS).y,
+                    selected, state.isEnabled(language), false,
+                    glowPhase, pressFor(state, selected));
+        }
+        primaryButtonFont = savedPrimary;
+        secondaryButtonFont = savedSecondary;
+
+        int y = OPTIONS_ENTRIES_Y + languages.length * ENTRY_PITCH;
+
+        g2.setFont(taglineFont);
+        g2.setColor(Palette.GOLD_WARM);
+        String tagline = FontManager.isKhmerAvailable()
+                ? "Changes the words you type, right away."
+                : "Changes the words you type. Khmer needs its font files added first.";
         FontMetrics fm = g2.getFontMetrics();
         g2.drawString(tagline, CENTRE_X - fm.stringWidth(tagline) / 2, y + 14);
 

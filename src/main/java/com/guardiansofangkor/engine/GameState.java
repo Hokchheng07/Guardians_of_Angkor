@@ -37,8 +37,15 @@ public class GameState {
     private final List<VisualEffect> effects = new ArrayList<>();
     private final TargetResolver resolver = new TargetResolver();
     private final WaveManager waveManager;
-    private final WordBank wordBank;
-    private final Language language;
+
+    /**
+     * Not final: chosen at the menu before this state exists, but can also be
+     * changed later from the Options screen. Changed only via
+     * {@link #setLanguage(Language)}, which is what keeps this field and the
+     * word bank it feeds in sync with each other.
+     */
+    private WordBank wordBank;
+    private Language language;
     private final Player player = new Player();
 
     /** Timed boons and banked shield charges. */
@@ -1462,6 +1469,30 @@ public class GameState {
         this.difficulty = difficulty == null ? Difficulty.defaultChoice() : difficulty;
         waveManager.setDifficulty(this.difficulty);
         restart();
+    }
+
+    /**
+     * Switches the typing language, in place, without restarting the run.
+     *
+     * <p>Unlike difficulty, language does not decide pacing or which boss ends
+     * the game — it only decides which script the word bank hands out — so
+     * there is no structural reason to force a restart the way
+     * {@link #restartWith(Difficulty)} does. A no-op if the language has not
+     * actually changed, so the caller does not need to check first.
+     *
+     * <p>Words already on screen keep the language they spawned with; only the
+     * <em>next</em> word drawn changes. The caller (the menu, in practice)
+     * still owns telling the UI layer to swap the typing font to match — this
+     * class only knows about the word bank, not Swing.
+     */
+    public void setLanguage(Language language) {
+        Language resolved = language == null ? Language.ENGLISH : language;
+        if (resolved == this.language) {
+            return;
+        }
+        this.language = resolved;
+        this.wordBank = new WordBank(this.language, this.random);
+        waveManager.setWordBank(this.wordBank);
     }
 
     /**

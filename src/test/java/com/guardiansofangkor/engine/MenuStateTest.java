@@ -73,10 +73,10 @@ class MenuStateTest {
         // Skipping them would make the highlight jump past items the player can
         // plainly see, which is more confusing than landing on one.
         MenuState state = new MenuState();
-        state.select(MenuItem.OPTIONS);
+        state.select(MenuItem.BESTIARY);
 
-        assertEquals(MenuItem.OPTIONS, state.getSelectedItem());
-        assertFalse(state.isEnabled(MenuItem.OPTIONS));
+        assertEquals(MenuItem.BESTIARY, state.getSelectedItem());
+        assertFalse(state.isEnabled(MenuItem.BESTIARY));
     }
 
     @Test
@@ -378,7 +378,7 @@ class MenuStateTest {
     @DisplayName("a locked entry starts no press at all")
     void lockedEntryStartsNoPress() {
         MenuState state = new MenuState();
-        state.select(MenuItem.OPTIONS);
+        state.select(MenuItem.BESTIARY);
 
         assertEquals(MenuState.Outcome.NONE, state.activate());
         assertFalse(state.isPressed(), "there is nothing to animate");
@@ -404,7 +404,7 @@ class MenuStateTest {
     @DisplayName("the locked message fades on its own")
     void lockedMessageFades() {
         MenuState state = new MenuState();
-        state.select(MenuItem.OPTIONS);
+        state.select(MenuItem.BESTIARY);
         state.activate();
         assertTrue(state.getLockedMessageAlpha() > 0);
 
@@ -420,7 +420,7 @@ class MenuStateTest {
     @DisplayName("navigating away clears a stale locked message")
     void backClearsLockedMessage() {
         MenuState state = new MenuState();
-        state.select(MenuItem.OPTIONS);
+        state.select(MenuItem.BESTIARY);
         state.activate();
 
         state.back();

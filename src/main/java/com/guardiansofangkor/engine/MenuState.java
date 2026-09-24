@@ -1,5 +1,7 @@
 package com.guardiansofangkor.engine;
 
+import com.guardiansofangkor.i18n.Language;
+
 /**
  * Navigation state for the front end: which screen is showing, what is
  * highlighted, and what activating it should do.
@@ -20,7 +22,10 @@ public class MenuState {
         MAIN,
 
         /** Difficulty picker, reached from New Game. */
-        DIFFICULTY
+        DIFFICULTY,
+
+        /** Language picker, reached from Options. */
+        OPTIONS
     }
 
     /** What the caller should do in response to an activation. */
@@ -37,8 +42,14 @@ public class MenuState {
         /** Move to the difficulty picker. */
         OPEN_DIFFICULTY,
 
+        /** Move to the language picker. */
+        OPEN_OPTIONS,
+
         /** Begin a fresh run on {@link MenuState#getSelectedDifficulty()}. */
         START_RUN,
+
+        /** Apply {@link MenuState#getSelectedLanguage()} and return to the main list. */
+        SET_LANGUAGE,
 
         /** Resume the saved run. */
         RESUME_RUN,
@@ -64,6 +75,15 @@ public class MenuState {
     private Screen screen = Screen.MAIN;
     private int mainIndex;
     private int difficultyIndex = Difficulty.defaultChoice().ordinal();
+
+    /**
+     * Highlighted entry on the Options screen. Seeded to the game's actual
+     * current language via {@link #setSelectedLanguage(Language)} right after
+     * construction — unlike {@code difficultyIndex}, this is not reset back to
+     * a default each time the screen opens, because the point of opening it is
+     * to see and change what is already active.
+     */
+    private int languageIndex = Language.ENGLISH.ordinal();
 
     /** Whether a resumable run exists, which decides if Continue is usable. */
     private boolean continueAvailable;
@@ -121,9 +141,11 @@ public class MenuState {
             return Outcome.NONE;
         }
 
-        Outcome resolved = screen == Screen.MAIN
-                ? resolveMainItem()
-                : resolveDifficulty();
+        Outcome resolved = switch (screen) {
+            case MAIN -> resolveMainItem();
+            case DIFFICULTY -> resolveDifficulty();
+            case OPTIONS -> resolveOptions();
+        };
 
         if (resolved == Outcome.NONE) {
             return Outcome.NONE;
@@ -156,9 +178,10 @@ public class MenuState {
                 screen = Screen.DIFFICULTY;
                 difficultyIndex = Difficulty.defaultChoice().ordinal();
             }
-            case BACK -> screen = Screen.MAIN;
+            case OPEN_OPTIONS -> screen = Screen.OPTIONS;
+            case SET_LANGUAGE, BACK -> screen = Screen.MAIN;
             default -> {
-                // START_RUN, RESUME_RUN and EXIT are the caller's business.
+                // START_RUN and RESUME_RUN are the caller's business. EXIT is too.
             }
         }
         return outcome;
@@ -183,6 +206,7 @@ public class MenuState {
         return switch (item) {
             case NEW_GAME -> Outcome.OPEN_DIFFICULTY;
             case CONTINUE -> Outcome.RESUME_RUN;
+            case OPTIONS -> Outcome.OPEN_OPTIONS;
             case EXIT -> Outcome.EXIT;
             default -> Outcome.NONE;
         };
@@ -206,9 +230,18 @@ public class MenuState {
     }
 
     /**
+     * Decides what pressing a language entry does. Both languages are always
+     * selectable — there is no "not built yet" state for either — so unlike
+     * {@link #resolveDifficulty()} this never refuses.
+     */
+    private Outcome resolveOptions() {
+        return Outcome.SET_LANGUAGE;
+    }
+
+    /**
      * Backs out of the current screen.
      *
-     * @return {@link Outcome#BACK} on the difficulty screen, or
+     * @return {@link Outcome#BACK} on the difficulty or options screen, or
      *         {@link Outcome#EXIT} when already at the top
      */
     public Outcome back() {
@@ -217,7 +250,7 @@ public class MenuState {
             // A press is already committed; do not race it.
             return Outcome.NONE;
         }
-        if (screen == Screen.DIFFICULTY) {
+        if (screen == Screen.DIFFICULTY || screen == Screen.OPTIONS) {
             pendingOutcome = Outcome.BACK;
             pressTicks = PRESS_TICKS;
             return Outcome.PENDING;
@@ -235,6 +268,12 @@ public class MenuState {
     public void select(Difficulty difficulty) {
         if (screen == Screen.DIFFICULTY && difficulty != null) {
             difficultyIndex = difficulty.ordinal();
+        }
+    }
+
+    public void select(Language language) {
+        if (screen == Screen.OPTIONS && language != null) {
+            languageIndex = language.ordinal();
         }
     }
 
@@ -277,6 +316,11 @@ public class MenuState {
         // longer a lock, but it is still the record of what has actually been
         // beaten, which the end-of-run card and the save file both want.
         return difficulty != null && difficulty.isImplemented();
+    }
+
+    /** Both languages are always playable — there is nothing yet to earn or build. */
+    public boolean isEnabled(Language language) {
+        return language != null;
     }
 
     /** Which tiers the player has earned. */
@@ -350,6 +394,23 @@ public class MenuState {
         return Difficulty.values()[difficultyIndex];
     }
 
+    public Language getSelectedLanguage() {
+        return Language.values()[languageIndex];
+    }
+
+    /**
+     * Seeds the Options screen's highlight to the game's actual current
+     * language. Called once from outside right after construction — the same
+     * pattern {@link #setProgress(DifficultyProgress)} already uses — because
+     * {@code MenuState} has no way to know what language the caller started
+     * with on its own.
+     */
+    public void setSelectedLanguage(Language language) {
+        if (language != null) {
+            languageIndex = language.ordinal();
+        }
+    }
+
     public int getSelectedIndex() {
         return currentIndex();
     }
@@ -363,20 +424,26 @@ public class MenuState {
     }
 
     private int itemCount() {
-        return screen == Screen.MAIN
-                ? MenuItem.values().length
-                : Difficulty.values().length;
+        return switch (screen) {
+            case MAIN -> MenuItem.values().length;
+            case DIFFICULTY -> Difficulty.values().length;
+            case OPTIONS -> Language.values().length;
+        };
     }
 
     private int currentIndex() {
-        return screen == Screen.MAIN ? mainIndex : difficultyIndex;
+        return switch (screen) {
+            case MAIN -> mainIndex;
+            case DIFFICULTY -> difficultyIndex;
+            case OPTIONS -> languageIndex;
+        };
     }
 
     private void setIndex(int index) {
-        if (screen == Screen.MAIN) {
-            mainIndex = index;
-        } else {
-            difficultyIndex = index;
+        switch (screen) {
+            case MAIN -> mainIndex = index;
+            case DIFFICULTY -> difficultyIndex = index;
+            case OPTIONS -> languageIndex = index;
         }
     }
 }

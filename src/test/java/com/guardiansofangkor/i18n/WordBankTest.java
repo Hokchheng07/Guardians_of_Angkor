@@ -14,7 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("WordBank — word supply, difficulty banding and graceful fallback")
-class WordBankTest {
+class   WordBankTest {
 
     private static WordBank bank(long seed) {
         return new WordBank(Language.ENGLISH, new Random(seed));

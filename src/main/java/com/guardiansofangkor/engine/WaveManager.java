@@ -30,7 +30,7 @@ public class WaveManager {
     /** Pause between a level being cleared and the next starting. */
     private static final int INTERMISSION_TICKS = GameConfig.TARGET_FPS * 2;
 
-    private final WordBank wordBank;
+    private WordBank wordBank;
     private final Random random;
 
     /**
@@ -296,6 +296,20 @@ public class WaveManager {
      */
     public void setDifficulty(Difficulty difficulty) {
         this.difficulty = difficulty == null ? Difficulty.defaultChoice() : difficulty;
+    }
+
+    /**
+     * Switches the vocabulary a fresh spawn draws from. Mirrors
+     * {@link #setDifficulty(Difficulty)}: the word bank is a dependency handed
+     * in, not something this class builds itself, so swapping it here is the
+     * same shape of change as swapping the difficulty was.
+     *
+     * <p>Words already in play on the field are untouched — this only changes
+     * what the <em>next</em> spawn asks for, exactly like changing difficulty
+     * mid-run does not retroactively rename an enemy that already has a word.
+     */
+    public void setWordBank(WordBank wordBank) {
+        this.wordBank = wordBank == null ? new WordBank(null) : wordBank;
     }
 
     /** True when the level just begun is this tier's final boss level. */

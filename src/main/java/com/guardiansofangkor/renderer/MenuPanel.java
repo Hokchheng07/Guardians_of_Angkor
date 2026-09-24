@@ -3,6 +3,7 @@ package com.guardiansofangkor.renderer;
 import com.guardiansofangkor.engine.Difficulty;
 import com.guardiansofangkor.engine.MenuItem;
 import com.guardiansofangkor.engine.MenuState;
+import com.guardiansofangkor.i18n.Language;
 import com.guardiansofangkor.util.CrashGuard;
 import com.guardiansofangkor.util.GameConfig;
 
@@ -47,6 +48,7 @@ public class MenuPanel extends JPanel {
     private Runnable onResumeRun = () -> { };
     private Runnable onExit = () -> { };
     private Consumer<MenuState.Screen> onScreenChanged = screen -> { };
+    private Consumer<Language> onLanguageChanged = language -> { };
 
     public MenuPanel(MenuState state, SpriteCache sprites) {
         this.state = state == null ? new MenuState() : state;
@@ -147,7 +149,8 @@ public class MenuPanel extends JPanel {
             case START_RUN -> onStartRun.run();
             case RESUME_RUN -> onResumeRun.run();
             case EXIT -> onExit.run();
-            case OPEN_DIFFICULTY, BACK -> onScreenChanged.accept(state.getScreen());
+            case SET_LANGUAGE -> onLanguageChanged.accept(state.getSelectedLanguage());
+            case OPEN_DIFFICULTY, OPEN_OPTIONS, BACK -> onScreenChanged.accept(state.getScreen());
             case PENDING, NONE -> {
                 // Still depressing, or a locked entry that has already explained
                 // itself. Nothing to do either way.
@@ -161,17 +164,19 @@ public class MenuPanel extends JPanel {
      * @return true when the cursor is over an entry
      */
     private boolean hoverAt(int mouseX, int mouseY) {
-        int count = state.getScreen() == MenuState.Screen.MAIN
-                ? MenuItem.values().length
-                : Difficulty.values().length;
+        int count = switch (state.getScreen()) {
+            case MAIN -> MenuItem.values().length;
+            case DIFFICULTY -> Difficulty.values().length;
+            case OPTIONS -> Language.values().length;
+        };
 
         for (int i = 0; i < count; i++) {
             Rectangle bounds = MenuRenderer.entryBounds(i, state.getScreen());
             if (bounds.contains(mouseX, mouseY)) {
-                if (state.getScreen() == MenuState.Screen.MAIN) {
-                    state.select(MenuItem.values()[i]);
-                } else {
-                    state.select(Difficulty.values()[i]);
+                switch (state.getScreen()) {
+                    case MAIN -> state.select(MenuItem.values()[i]);
+                    case DIFFICULTY -> state.select(Difficulty.values()[i]);
+                    case OPTIONS -> state.select(Language.values()[i]);
                 }
                 setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
                 repaint();
@@ -232,6 +237,10 @@ public class MenuPanel extends JPanel {
 
     public void setOnScreenChanged(Consumer<MenuState.Screen> onScreenChanged) {
         this.onScreenChanged = onScreenChanged == null ? screen -> { } : onScreenChanged;
+    }
+
+    public void setOnLanguageChanged(Consumer<Language> onLanguageChanged) {
+        this.onLanguageChanged = onLanguageChanged == null ? language -> { } : onLanguageChanged;
     }
 
     public MenuState getState() {

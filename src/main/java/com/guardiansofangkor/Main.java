@@ -75,10 +75,13 @@ public final class Main {
     }
 
     private static void launch() {
-        Language language = Language.ENGLISH;
-
         SaveManager saveManager = new SaveManager();
         SaveData saved = saveManager.load();
+
+        // The player's last choice, remembered across launches. SaveData
+        // already carries this field — see save/SaveData.java — it just was
+        // not read back here until the language picker existed to set it.
+        Language language = saved.language();
 
         GameState state = new GameState(language);
         // Unlocks are needed the instant the menu opens, which is before the
@@ -109,6 +112,7 @@ public final class Main {
 
         MenuState menuState = new MenuState(saved.hasResumableRun());
         menuState.setProgress(state.getProgress());
+        menuState.setSelectedLanguage(state.getLanguage());
         MenuPanel menuPanel = new MenuPanel(menuState, sprites);
 
         JPanel root = new JPanel(new CardLayout());
@@ -214,6 +218,20 @@ public final class Main {
         menuPanel.setOnExit(() -> menuGuard.run(() -> {
             autosave.saveQuietly();
             System.exit(0);
+        }));
+
+        menuPanel.setOnLanguageChanged(chosen -> menuGuard.run(() -> {
+            state.setLanguage(chosen);
+            // GameState only knows about the word bank; the typing field's
+            // font is Swing, and Main is where the two are wired together, so
+            // this half of the switch has to happen here rather than inside
+            // GameState.setLanguage itself.
+            input.setTypingFont(FontManager.wordFont(chosen, 22, Font.BOLD));
+            // toSaveData() already carries the current language (see
+            // GameState.toSaveData), so this one call both remembers the
+            // choice for next launch and covers the run already in progress.
+            autosave.saveQuietly();
+            panel.repaint();
         }));
 
         // ---- game controls -------------------------------------------------
