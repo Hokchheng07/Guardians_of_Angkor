@@ -3,15 +3,17 @@ package com.guardiansofangkor.engine;
 /**
  * Entries on the main menu, in the order the design lists them.
  *
- * <p>Options and Bestiary are placeholders — present in the design, not yet
- * built. They render disabled rather than being dropped, so the menu keeps the
- * proportions the artwork was composed around.
+ * <p>Bestiary is still a placeholder — present in the design, not yet built.
+ * It renders disabled rather than being dropped, so the menu keeps the
+ * proportions the artwork was composed around. Options opens the language and
+ * volume settings; see {@link MenuState.Screen#OPTIONS}.
  */
 public enum MenuItem {
 
     NEW_GAME("New Game", true),
     CONTINUE("Continue", true),
-    OPTIONS("Options", false),
+    SANDBOX("Sandbox", true),
+    OPTIONS("Options", true),
     BESTIARY("Bestiary", false),
     EXIT("Exit", true);
 

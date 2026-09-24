@@ -59,6 +59,81 @@ class SaveManagerTest {
     }
 
     @Test
+    @DisplayName("the chosen hero round-trips with the run")
+    void heroRoundTrips(@TempDir Path dir) {
+        SaveManager manager = new SaveManager(dir.resolve("progress.properties"));
+        SaveData original = new SaveData(3, 90, 2, Language.ENGLISH, 90, 3,
+                java.util.Set.of("easy"), "apsara");
+
+        assertTrue(manager.save(original));
+        SaveData loaded = manager.load();
+
+        assertEquals("apsara", loaded.heroKey());
+        assertEquals(original, loaded);
+    }
+
+    @Test
+    @DisplayName("a save written before heroes existed loads with no hero")
+    void oldSavesHaveNoHero(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve("progress.properties");
+        Files.writeString(file, "wave=4\nscore=120\nlives=2\nlanguage=en\n");
+
+        SaveData loaded = new SaveManager(file).load();
+
+        assertEquals(4, loaded.wave());
+        assertEquals("", loaded.heroKey(), "blank, which the engine reads as the default hero");
+    }
+
+    @Test
+    @DisplayName("language and volumes round-trip")
+    void settingsRoundTrip(@TempDir Path dir) {
+        SaveManager manager = new SaveManager(dir.resolve("progress.properties"));
+        SaveData original = SaveData.empty().withSettings(Language.KHMER,
+                new com.guardiansofangkor.audio.AudioSettings(35, 90, 10));
+
+        assertTrue(manager.save(original));
+        SaveData loaded = manager.load();
+
+        assertEquals(Language.KHMER, loaded.language());
+        assertEquals(new com.guardiansofangkor.audio.AudioSettings(35, 90, 10), loaded.audio());
+    }
+
+    @Test
+    @DisplayName("a save from before the sliders opens at default volume, not muted")
+    void oldSavesAreNotMuted(@TempDir Path dir) throws IOException {
+        Path file = dir.resolve("progress.properties");
+        Files.writeString(file, "wave=4\nscore=120\nlives=2\nlanguage=en\n");
+
+        assertEquals(com.guardiansofangkor.audio.AudioSettings.defaults(),
+                new SaveManager(file).load().audio());
+    }
+
+    @Test
+    @DisplayName("withSettings changes only the settings")
+    void withSettingsKeepsRun() {
+        SaveData run = new SaveData(6, 800, 2, Language.ENGLISH, 900, 7,
+                java.util.Set.of("easy"), "apsara");
+        SaveData changed = run.withSettings(Language.KHMER,
+                new com.guardiansofangkor.audio.AudioSettings(10, 20, 30));
+
+        assertEquals(6, changed.wave());
+        assertEquals(800, changed.score());
+        assertTrue(changed.hasResumableRun(), "the saved run must survive a settings change");
+        assertEquals("apsara", changed.heroKey());
+        assertEquals(Language.KHMER, changed.language());
+    }
+
+    @Test
+    @DisplayName("bests and clears keep the hero")
+    void copiesKeepHero() {
+        SaveData data = new SaveData(3, 90, 2, Language.ENGLISH, 90, 3,
+                java.util.Set.of(), "apsara");
+
+        assertEquals("apsara", data.withBests(500, 9).heroKey());
+        assertEquals("apsara", data.withCleared("easy").heroKey());
+    }
+
+    @Test
     @DisplayName("a hand-edited unlock list is cleaned up rather than trusted")
     void clearedTiersAreNormalised(@TempDir Path dir) throws IOException {
         Path file = dir.resolve("progress.properties");

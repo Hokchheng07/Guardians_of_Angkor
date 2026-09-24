@@ -3,6 +3,7 @@ package com.guardiansofangkor.engine;
 import com.guardiansofangkor.entities.ApproachPath;
 import com.guardiansofangkor.entities.Enemy;
 import com.guardiansofangkor.entities.EnemyType;
+import com.guardiansofangkor.entities.Hero;
 import com.guardiansofangkor.entities.Projectile;
 import com.guardiansofangkor.entities.VisualEffect;
 import com.guardiansofangkor.i18n.Language;
@@ -90,6 +91,94 @@ class GameStateTest {
             state.getPlayer().update();
         }
         assertFalse(state.getPlayer().isFiring(), "should settle back to the idle pose");
+    }
+
+    @Test
+    @DisplayName("the hero turns toward the side the shot went to")
+    void heroFacesTarget() {
+        GameState state = playing();
+        Enemy enemy = safeEnemy(state, "ash");
+
+        state.handleInput("ash");
+
+        assertEquals(enemy.getX() < state.getPlayer().getX(),
+                state.getPlayer().isAimingLeft());
+
+        state.getPlayer().aimAt(state.getPlayer().getX() - 100);
+        assertTrue(state.getPlayer().isAimingLeft());
+        state.getPlayer().aimAt(state.getPlayer().getX() + 100);
+        assertFalse(state.getPlayer().isAimingLeft());
+        state.getPlayer().aimAt(state.getPlayer().getX());
+        assertFalse(state.getPlayer().isAimingLeft(), "dead centre counts as right");
+    }
+
+    @Test
+    @DisplayName("a finished word marks its impact major; a mid-word shot does not")
+    void finishedWordImpactIsMajor() {
+        GameState state = playing();
+        safeEnemy(state, "ashen");
+
+        state.handleInput("a");
+        assertTrue(state.getEffects().stream()
+                        .filter(e -> e.getKind() == VisualEffect.Kind.IMPACT)
+                        .noneMatch(VisualEffect::isMajor),
+                "a letter typed is a hit, not a finish");
+
+        state.handleInput("ashen");
+        assertTrue(state.getEffects().stream()
+                        .filter(e -> e.getKind() == VisualEffect.Kind.IMPACT)
+                        .anyMatch(VisualEffect::isMajor),
+                "finishing the word should land the heavier impact");
+    }
+
+    @Test
+    @DisplayName("the hero is chosen with the tier and saved with the run")
+    void heroIsSavedAndRestored() {
+        GameState state = new GameState(Language.ENGLISH);
+        assertEquals(Hero.defaultChoice(), state.getHero());
+
+        state.restartWith(Difficulty.EASY, Hero.APSARA);
+        assertEquals(Hero.APSARA, state.getHero());
+        assertEquals("apsara", state.toSaveData().heroKey());
+
+        GameState resumed = new GameState(Language.ENGLISH);
+        resumed.restoreFrom(state.toSaveData());
+        assertEquals(Hero.APSARA, resumed.getHero());
+    }
+
+    @Test
+    @DisplayName("switching language changes the next words, not the run")
+    void languageSwitchesInPlace() {
+        GameState state = playing();
+        Enemy onField = safeEnemy(state, "ash");
+
+        state.setLanguage(Language.KHMER);
+
+        assertEquals(Language.KHMER, state.getLanguage());
+        assertEquals(Language.KHMER, state.toSaveData().language());
+        assertEquals("ash", onField.getWord(), "words already out keep their language");
+        assertTrue(onField.isActive(), "the run is not restarted");
+
+        state.setLanguage(null);
+        assertEquals(Language.ENGLISH, state.getLanguage(), "null falls back to English");
+    }
+
+    @Test
+    @DisplayName("the hero changes nothing about how a run plays")
+    void heroIsCosmetic() {
+        GameState ream = playing();
+        GameState apsara = new GameState(Language.ENGLISH);
+        apsara.restartWith(ream.getDifficulty(), Hero.APSARA);
+        apsara.skipIntro();
+        safeEnemy(ream, "ash");
+        safeEnemy(apsara, "ash");
+
+        ream.handleInput("ash");
+        apsara.handleInput("ash");
+
+        assertEquals(ream.getScore(), apsara.getScore());
+        assertEquals(ream.getLives(), apsara.getLives());
+        assertEquals(ream.getEffects().size(), apsara.getEffects().size());
     }
 
     @Test

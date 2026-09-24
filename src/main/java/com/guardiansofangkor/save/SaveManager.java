@@ -1,5 +1,6 @@
 package com.guardiansofangkor.save;
 
+import com.guardiansofangkor.audio.AudioSettings;
 import com.guardiansofangkor.i18n.Language;
 
 import java.io.IOException;
@@ -45,6 +46,20 @@ public class SaveManager {
      * reads as "nothing cleared yet" instead of failing to parse.
      */
     private static final String KEY_CLEARED = "clearedTiers";
+
+    /**
+     * The hero of the saved run. Absent in saves from older builds, which read
+     * as blank and resolve to the default hero.
+     */
+    private static final String KEY_HERO = "hero";
+
+    /**
+     * Volume sliders, 0-100. Absent keys read as the default for that slider,
+     * not as 0 — an older save must not open the game muted.
+     */
+    private static final String KEY_MASTER_VOLUME = "masterVolume";
+    private static final String KEY_SFX_VOLUME = "sfxVolume";
+    private static final String KEY_MUSIC_VOLUME = "musicVolume";
 
     private final Path saveFile;
 
@@ -95,7 +110,17 @@ public class SaveManager {
                 Language.fromCode(props.getProperty(KEY_LANGUAGE)),
                 readInt(props, KEY_BEST_SCORE),
                 readInt(props, KEY_BEST_WAVE),
-                readTiers(props));
+                readTiers(props),
+                props.getProperty(KEY_HERO, ""),
+                readAudio(props));
+    }
+
+    private static AudioSettings readAudio(Properties props) {
+        AudioSettings fallback = AudioSettings.defaults();
+        return new AudioSettings(
+                readInt(props, KEY_MASTER_VOLUME, fallback.master()),
+                readInt(props, KEY_SFX_VOLUME, fallback.sfx()),
+                readInt(props, KEY_MUSIC_VOLUME, fallback.music()));
     }
 
     /** Splits the cleared-tier list. Blank, absent or malformed reads as empty. */
@@ -131,6 +156,10 @@ public class SaveManager {
         props.setProperty(KEY_BEST_SCORE, Integer.toString(data.bestScore()));
         props.setProperty(KEY_BEST_WAVE, Integer.toString(data.bestWave()));
         props.setProperty(KEY_CLEARED, String.join(",", data.clearedTiers()));
+        props.setProperty(KEY_HERO, data.heroKey());
+        props.setProperty(KEY_MASTER_VOLUME, Integer.toString(data.audio().master()));
+        props.setProperty(KEY_SFX_VOLUME, Integer.toString(data.audio().sfx()));
+        props.setProperty(KEY_MUSIC_VOLUME, Integer.toString(data.audio().music()));
 
         try {
             Path parent = saveFile.getParent();
@@ -176,11 +205,19 @@ public class SaveManager {
     }
 
     private static int readInt(Properties props, String key) {
+        return readInt(props, key, 0);
+    }
+
+    private static int readInt(Properties props, String key, int fallback) {
+        String raw = props.getProperty(key);
+        if (raw == null) {
+            return fallback;
+        }
         try {
-            return Integer.parseInt(props.getProperty(key, "0").trim());
+            return Integer.parseInt(raw.trim());
         } catch (NumberFormatException e) {
             // A hand-edited or corrupted value should not sink the whole load.
-            return 0;
+            return fallback;
         }
     }
 }

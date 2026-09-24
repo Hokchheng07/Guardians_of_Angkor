@@ -19,6 +19,34 @@ import com.guardiansofangkor.util.GameConfig;
  * frequently reorders Khmer diacritics.
  */
 public enum EnemyType {
+    /**
+     * The Punisher (Garuda). A hovering enemy that lunges forward
+     * every time the player makes a typo against any target.
+     */
+    GARUDA("Punisher", "គ្រុឌ", "Punisher",
+            "Punisher.png", GroundBehavior.FLOATING,
+            150, 120, 4, 7,
+            0.15, 0.02, 1.0, 0, 1, false),
+
+    SMING("Obscurer", "ស្មឹង", "Obscurer",
+            "Sming.png", GroundBehavior.GROUNDED,
+            160, 0, 5, 8,
+            0.45, 0.02, 1.0, 0, 1, false),
+
+    SPLITTER("Splitter", "រូបចម្លាក់", "Splitter",
+            "Splitter.png", GroundBehavior.GROUNDED,
+            190, 0, 4, 7,
+            0.55, 0.025, 1.2, 0, 1, false),
+
+    ARAK("Arak", "អារក្ស", "Summoner",
+            "Arak.png", GroundBehavior.GROUNDED,
+            230, 0, 7, 10,
+            0.35, 0.015, 0.8, 0, 1, true),
+
+    CHARGER("Charger", "គោព្រៃ", "Charger",
+            "Demonbull.png", GroundBehavior.GROUNDED,
+            160, 0, 5, 7,
+            0.3, 0.02, 0.6, 0, 1, false),
 
     /** Common. Bread-and-butter enemy. */
     BEISACH("Beisach", "បិសាច", "Common",

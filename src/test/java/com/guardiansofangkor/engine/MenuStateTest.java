@@ -1,5 +1,8 @@
 package com.guardiansofangkor.engine;
 
+import com.guardiansofangkor.audio.AudioSettings;
+import com.guardiansofangkor.entities.Hero;
+import com.guardiansofangkor.i18n.Language;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -37,9 +40,15 @@ class MenuStateTest {
         return MenuState.Outcome.NONE;
     }
 
-    private static MenuState atDifficulty() {
+    private static MenuState atHero() {
         MenuState state = new MenuState();
         state.select(MenuItem.NEW_GAME);
+        press(state);
+        return state;
+    }
+
+    private static MenuState atDifficulty() {
+        MenuState state = atHero();
         press(state);
         return state;
     }
@@ -73,10 +82,10 @@ class MenuStateTest {
         // Skipping them would make the highlight jump past items the player can
         // plainly see, which is more confusing than landing on one.
         MenuState state = new MenuState();
-        state.select(MenuItem.OPTIONS);
+        state.select(MenuItem.BESTIARY);
 
-        assertEquals(MenuItem.OPTIONS, state.getSelectedItem());
-        assertFalse(state.isEnabled(MenuItem.OPTIONS));
+        assertEquals(MenuItem.BESTIARY, state.getSelectedItem());
+        assertFalse(state.isEnabled(MenuItem.BESTIARY));
     }
 
     @Test
@@ -91,12 +100,241 @@ class MenuStateTest {
     }
 
     @Test
-    @DisplayName("New Game opens the difficulty picker")
-    void newGameOpensDifficulty() {
+    @DisplayName("New Game opens the hero picker")
+    void newGameOpensHero() {
         MenuState state = new MenuState();
+
+        assertEquals(MenuState.Outcome.OPEN_HERO, press(state));
+        assertEquals(MenuState.Screen.HERO, state.getScreen());
+    }
+
+    // ---- options screen ----------------------------------------------------
+
+    private static MenuState atOptions() {
+        MenuState state = new MenuState();
+        state.select(MenuItem.OPTIONS);
+        press(state);
+        return state;
+    }
+
+    @Test
+    @DisplayName("Options is available and opens the settings on the language row")
+    void optionsOpens() {
+        MenuState state = new MenuState();
+        assertTrue(state.isEnabled(MenuItem.OPTIONS));
+        state.select(MenuItem.OPTIONS);
+
+        assertEquals(MenuState.Outcome.OPEN_OPTIONS, press(state));
+        assertEquals(MenuState.Screen.OPTIONS, state.getScreen());
+        assertEquals(MenuState.OptionRow.LANGUAGE, state.getSelectedOption());
+    }
+
+    @Test
+    @DisplayName("left and right switch the language, and Enter does too")
+    void languageToggles() {
+        MenuState state = atOptions();
+        state.setLanguage(Language.ENGLISH);
+
+        assertTrue(state.adjust(1));
+        assertEquals(Language.KHMER, state.getLanguage());
+        assertTrue(state.adjust(-1));
+        assertEquals(Language.ENGLISH, state.getLanguage());
+
+        assertEquals(MenuState.Outcome.SETTINGS_CHANGED, state.activate(),
+                "Enter on the language row applies at once, with no press delay");
+        assertEquals(Language.KHMER, state.getLanguage());
+    }
+
+    @Test
+    @DisplayName("sliders step by five and stop at 0 and 100")
+    void slidersStepAndClamp() {
+        MenuState state = atOptions();
+        state.setAudio(new AudioSettings(100, 3, 50));
+
+        state.select(MenuState.OptionRow.MASTER);
+        assertFalse(state.adjust(1), "already at the top, nothing changes");
+        assertTrue(state.adjust(-1));
+        assertEquals(95, state.getAudio().master());
+
+        state.select(MenuState.OptionRow.SFX);
+        assertTrue(state.adjust(-1));
+        assertEquals(0, state.getAudio().sfx(), "clamped, not negative");
+
+        state.select(MenuState.OptionRow.MUSIC);
+        assertTrue(state.setSlider(MenuState.OptionRow.MUSIC, 72));
+        assertEquals(72, state.getAudio().music());
+        assertFalse(state.setSlider(MenuState.OptionRow.MUSIC, 72), "same value is no change");
+    }
+
+    @Test
+    @DisplayName("every row is reachable and the highlight wraps")
+    void optionRowsWrap() {
+        MenuState state = atOptions();
+
+        state.moveUp();
+        assertEquals(MenuState.OptionRow.BACK, state.getSelectedOption());
+        state.moveDown();
+        assertEquals(MenuState.OptionRow.LANGUAGE, state.getSelectedOption());
+    }
+
+    @Test
+    @DisplayName("Back, by row or by Escape, returns to the main list and keeps the settings")
+    void optionsBackKeepsSettings() {
+        MenuState state = atOptions();
+        state.adjust(1);
+        state.select(MenuState.OptionRow.BACK);
+
+        assertEquals(MenuState.Outcome.BACK, press(state));
+        assertEquals(MenuState.Screen.MAIN, state.getScreen());
+        assertEquals(Language.KHMER, state.getLanguage());
+
+        state.select(MenuItem.OPTIONS);
+        press(state);
+        assertEquals(MenuState.Outcome.PENDING, state.back());
+        assertEquals(MenuState.Outcome.BACK, settle(state));
+        assertEquals(MenuState.Screen.MAIN, state.getScreen());
+    }
+
+    @Test
+    @DisplayName("settings only change on the Options screen")
+    void adjustIgnoredElsewhere() {
+        MenuState state = new MenuState();
+
+        assertFalse(state.adjust(1));
+        assertEquals(Language.ENGLISH, state.getLanguage());
+    }
+
+    @Test
+    @DisplayName("effective volume is master times channel")
+    void gainsStack() {
+        AudioSettings audio = new AudioSettings(50, 80, 100);
+
+        assertEquals(0.4, audio.sfxGain(), 1e-9);
+        assertEquals(0.5, audio.musicGain(), 1e-9);
+        assertEquals(0.0, audio.withMaster(0).sfxGain(), 1e-9, "master mutes everything");
+    }
+
+    // ---- hero screen -------------------------------------------------------
+
+    @Test
+    @DisplayName("confirming a hero from New Game opens the difficulty picker")
+    void heroLeadsToDifficulty() {
+        MenuState state = atHero();
 
         assertEquals(MenuState.Outcome.OPEN_DIFFICULTY, press(state));
         assertEquals(MenuState.Screen.DIFFICULTY, state.getScreen());
+    }
+
+    @Test
+    @DisplayName("Sandbox opens the hero picker, and confirming starts the Sandbox")
+    void sandboxPicksHeroThenStarts() {
+        MenuState state = new MenuState();
+        state.select(MenuItem.SANDBOX);
+
+        assertEquals(MenuState.Outcome.OPEN_HERO, press(state));
+        assertTrue(state.isHeroForSandbox());
+        state.select(Hero.APSARA);
+
+        assertEquals(MenuState.Outcome.START_SANDBOX, press(state),
+                "the Sandbox has no tier to choose");
+        assertEquals(Hero.APSARA, state.getSelectedHero());
+    }
+
+    @Test
+    @DisplayName("the hero picker opens on the last hero played")
+    void heroPickerOpensOnPreferred() {
+        MenuState state = new MenuState();
+        state.setPreferredHero(Hero.APSARA);
+        state.select(MenuItem.NEW_GAME);
+        press(state);
+
+        assertEquals(Hero.APSARA, state.getSelectedHero());
+    }
+
+    @Test
+    @DisplayName("a new player's picker opens on the default hero")
+    void heroPickerDefaultsToPreahReam() {
+        assertEquals(Hero.defaultChoice(), atHero().getSelectedHero());
+        assertEquals(Hero.PREAH_REAM, Hero.defaultChoice());
+    }
+
+    @Test
+    @DisplayName("every hero is reachable and the highlight wraps")
+    void heroHighlightWraps() {
+        MenuState state = atHero();
+
+        state.moveDown();
+        assertEquals(Hero.APSARA, state.getSelectedHero());
+        state.moveDown();
+        assertEquals(Hero.PREAH_REAM, state.getSelectedHero(), "wraps back to the first");
+        state.moveUp();
+        assertEquals(Hero.APSARA, state.getSelectedHero(), "and the other way");
+    }
+
+    @Test
+    @DisplayName("starting a run remembers the hero for next time")
+    void startingRunRemembersHero() {
+        MenuState state = atHero();
+        state.select(Hero.APSARA);
+        press(state);
+
+        assertEquals(MenuState.Outcome.START_RUN, press(state));
+        assertEquals(Hero.APSARA, state.getPreferredHero());
+
+        state.reset();
+        state.select(MenuItem.NEW_GAME);
+        press(state);
+        assertEquals(Hero.APSARA, state.getSelectedHero());
+    }
+
+    @Test
+    @DisplayName("browsing heroes without starting does not change the remembered one")
+    void browsingDoesNotRemember() {
+        MenuState state = atHero();
+        state.select(Hero.APSARA);
+        state.back();
+        settle(state);
+
+        assertEquals(Hero.PREAH_REAM, state.getPreferredHero());
+        state.select(MenuItem.NEW_GAME);
+        press(state);
+        assertEquals(Hero.PREAH_REAM, state.getSelectedHero(),
+                "a previous browse must not become the new default");
+    }
+
+    @Test
+    @DisplayName("back from the difficulty picker returns to the hero, still chosen")
+    void backFromDifficultyReturnsToHero() {
+        MenuState state = atHero();
+        state.select(Hero.APSARA);
+        press(state);
+
+        assertEquals(MenuState.Outcome.PENDING, state.back());
+        assertEquals(MenuState.Outcome.BACK, settle(state));
+        assertEquals(MenuState.Screen.HERO, state.getScreen());
+        assertEquals(Hero.APSARA, state.getSelectedHero());
+    }
+
+    @Test
+    @DisplayName("hero save keys round-trip, and unknown keys fall back")
+    void heroKeysRoundTrip() {
+        for (Hero hero : Hero.values()) {
+            assertEquals(hero, Hero.fromKey(hero.getKey()));
+            assertEquals(hero, Hero.fromKey("  " + hero.getKey().toUpperCase() + " "));
+        }
+        assertEquals(Hero.defaultChoice(), Hero.fromKey(null));
+        assertEquals(Hero.defaultChoice(), Hero.fromKey(""));
+        assertEquals(Hero.defaultChoice(), Hero.fromKey("garuda"));
+    }
+
+    @Test
+    @DisplayName("every hero carries a tagline short enough for the panel")
+    void everyHeroHasATagline() {
+        for (Hero hero : Hero.values()) {
+            assertNotEquals("", hero.getTagline().trim(), hero + " needs a tagline");
+            assertTrue(hero.getTagline().length() <= 48,
+                    hero + " tagline is too long for the panel");
+        }
     }
 
     @Test
@@ -278,9 +516,13 @@ class MenuStateTest {
     }
 
     @Test
-    @DisplayName("back returns to the main list without exiting")
+    @DisplayName("back steps out one screen at a time without exiting")
     void backReturnsToMain() {
         MenuState state = atDifficulty();
+
+        assertEquals(MenuState.Outcome.PENDING, state.back());
+        assertEquals(MenuState.Outcome.BACK, settle(state));
+        assertEquals(MenuState.Screen.HERO, state.getScreen());
 
         assertEquals(MenuState.Outcome.PENDING, state.back());
         assertEquals(MenuState.Outcome.BACK, settle(state));
@@ -303,7 +545,6 @@ class MenuStateTest {
         state.back();
         settle(state);
 
-        state.select(MenuItem.NEW_GAME);
         press(state);
 
         assertEquals(Difficulty.EASY, state.getSelectedDifficulty(),
@@ -331,8 +572,8 @@ class MenuStateTest {
         MenuState state = new MenuState();
         state.activate();
 
-        assertEquals(MenuState.Outcome.OPEN_DIFFICULTY, settle(state));
-        assertEquals(MenuState.Screen.DIFFICULTY, state.getScreen());
+        assertEquals(MenuState.Outcome.OPEN_HERO, settle(state));
+        assertEquals(MenuState.Screen.HERO, state.getScreen());
         assertFalse(state.isPressed());
     }
 
@@ -356,7 +597,7 @@ class MenuStateTest {
         assertEquals(MenuState.Outcome.NONE, state.activate(),
                 "a second press while one is running is dropped");
 
-        assertEquals(MenuState.Outcome.OPEN_DIFFICULTY, settle(state));
+        assertEquals(MenuState.Outcome.OPEN_HERO, settle(state));
         assertEquals(MenuState.Outcome.NONE, state.pollReady(),
                 "and only one outcome ever arrives");
     }
@@ -378,7 +619,7 @@ class MenuStateTest {
     @DisplayName("a locked entry starts no press at all")
     void lockedEntryStartsNoPress() {
         MenuState state = new MenuState();
-        state.select(MenuItem.OPTIONS);
+        state.select(MenuItem.BESTIARY);
 
         assertEquals(MenuState.Outcome.NONE, state.activate());
         assertFalse(state.isPressed(), "there is nothing to animate");
@@ -404,7 +645,7 @@ class MenuStateTest {
     @DisplayName("the locked message fades on its own")
     void lockedMessageFades() {
         MenuState state = new MenuState();
-        state.select(MenuItem.OPTIONS);
+        state.select(MenuItem.BESTIARY);
         state.activate();
         assertTrue(state.getLockedMessageAlpha() > 0);
 
@@ -420,7 +661,7 @@ class MenuStateTest {
     @DisplayName("navigating away clears a stale locked message")
     void backClearsLockedMessage() {
         MenuState state = new MenuState();
-        state.select(MenuItem.OPTIONS);
+        state.select(MenuItem.BESTIARY);
         state.activate();
 
         state.back();

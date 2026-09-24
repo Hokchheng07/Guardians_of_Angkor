@@ -1,5 +1,9 @@
 package com.guardiansofangkor.engine;
 
+import com.guardiansofangkor.audio.AudioSettings;
+import com.guardiansofangkor.entities.Hero;
+import com.guardiansofangkor.i18n.Language;
+
 /**
  * Navigation state for the front end: which screen is showing, what is
  * highlighted, and what activating it should do.
@@ -19,8 +23,45 @@ public class MenuState {
         /** Title and the main entry list. */
         MAIN,
 
-        /** Difficulty picker, reached from New Game. */
-        DIFFICULTY
+        /** Hero picker, reached from New Game and from Sandbox. */
+        HERO,
+
+        /** Difficulty picker, reached from the hero picker on the way to a run. */
+        DIFFICULTY,
+
+        /** Language and volume settings, reached from Options. */
+        OPTIONS
+    }
+
+    /**
+     * Rows on the Options screen, top to bottom.
+     *
+     * <p>Up and Down move between rows; Left and Right change the highlighted
+     * one. Settings take effect the moment they change rather than on a
+     * confirm button — a volume slider you have to confirm is a slider you
+     * cannot hear while you move it.
+     */
+    public enum OptionRow {
+        LANGUAGE("Language"),
+        MASTER("Master Volume"),
+        SFX("Effects"),
+        MUSIC("Music"),
+        BACK("Back");
+
+        private final String label;
+
+        OptionRow(String label) {
+            this.label = label;
+        }
+
+        public String getLabel() {
+            return label;
+        }
+
+        /** True for the three volume rows. */
+        public boolean isSlider() {
+            return this == MASTER || this == SFX || this == MUSIC;
+        }
     }
 
     /** What the caller should do in response to an activation. */
@@ -34,14 +75,29 @@ public class MenuState {
          */
         PENDING,
 
+        /** Move to the hero picker. */
+        OPEN_HERO,
+
         /** Move to the difficulty picker. */
         OPEN_DIFFICULTY,
+
+        /** Move to the Options screen. */
+        OPEN_OPTIONS,
+
+        /**
+         * A setting changed — read {@link MenuState#getLanguage()} and
+         * {@link MenuState#getAudio()} and apply them. Arrives immediately, with
+         * no press delay, because the change is already visible on screen.
+         */
+        SETTINGS_CHANGED,
 
         /** Begin a fresh run on {@link MenuState#getSelectedDifficulty()}. */
         START_RUN,
 
         /** Resume the saved run. */
         RESUME_RUN,
+
+        START_SANDBOX,
 
         /** Return to the main list. */
         BACK,
@@ -64,6 +120,27 @@ public class MenuState {
     private Screen screen = Screen.MAIN;
     private int mainIndex;
     private int difficultyIndex = Difficulty.defaultChoice().ordinal();
+    private int heroIndex = Hero.defaultChoice().ordinal();
+
+    /**
+     * The hero the picker opens on — the one last played, restored from the
+     * save. Browsing without confirming does not change it.
+     */
+    private Hero preferredHero = Hero.defaultChoice();
+
+    /**
+     * Whether the hero picker was opened from Sandbox rather than New Game.
+     * The same screen leads two places: New Game still has a tier to choose,
+     * the Sandbox does not.
+     */
+    private boolean heroForSandbox;
+
+    /** Highlighted row on the Options screen. */
+    private int optionIndex;
+
+    /** The settings the Options screen shows and edits; seeded from the save. */
+    private Language language = Language.ENGLISH;
+    private AudioSettings audio = AudioSettings.defaults();
 
     /** Whether a resumable run exists, which decides if Continue is usable. */
     private boolean continueAvailable;
@@ -121,9 +198,24 @@ public class MenuState {
             return Outcome.NONE;
         }
 
-        Outcome resolved = screen == Screen.MAIN
-                ? resolveMainItem()
-                : resolveDifficulty();
+        if (screen == Screen.OPTIONS) {
+            OptionRow row = getSelectedOption();
+            if (row == OptionRow.BACK) {
+                return back();
+            }
+            // Enter on the language row flips it, same as an arrow key would.
+            // On a slider it does nothing: there is no one value to jump to.
+            return row == OptionRow.LANGUAGE && adjust(1)
+                    ? Outcome.SETTINGS_CHANGED
+                    : Outcome.NONE;
+        }
+
+        Outcome resolved = switch (screen) {
+            case MAIN -> resolveMainItem();
+            case HERO -> resolveHero();
+            case DIFFICULTY -> resolveDifficulty();
+            case OPTIONS -> Outcome.NONE;
+        };
 
         if (resolved == Outcome.NONE) {
             return Outcome.NONE;
@@ -152,11 +244,22 @@ public class MenuState {
         pendingOutcome = Outcome.NONE;
 
         switch (outcome) {
+            case OPEN_HERO -> {
+                screen = Screen.HERO;
+                heroIndex = preferredHero.ordinal();
+            }
             case OPEN_DIFFICULTY -> {
                 screen = Screen.DIFFICULTY;
                 difficultyIndex = Difficulty.defaultChoice().ordinal();
             }
-            case BACK -> screen = Screen.MAIN;
+            case OPEN_OPTIONS -> {
+                screen = Screen.OPTIONS;
+                optionIndex = 0;
+            }
+            // One step back at a time: the tier list returns to the hero it
+            // was reached from, still highlighted, rather than all the way out.
+            case BACK -> screen = screen == Screen.DIFFICULTY ? Screen.HERO : Screen.MAIN;
+            case START_RUN, START_SANDBOX -> preferredHero = getSelectedHero();
             default -> {
                 // START_RUN, RESUME_RUN and EXIT are the caller's business.
             }
@@ -181,11 +284,23 @@ public class MenuState {
             return Outcome.NONE;
         }
         return switch (item) {
-            case NEW_GAME -> Outcome.OPEN_DIFFICULTY;
+            case NEW_GAME -> openHero(false);
             case CONTINUE -> Outcome.RESUME_RUN;
+            case SANDBOX -> openHero(true);
+            case OPTIONS -> Outcome.OPEN_OPTIONS;
             case EXIT -> Outcome.EXIT;
             default -> Outcome.NONE;
         };
+    }
+
+    private Outcome openHero(boolean forSandbox) {
+        heroForSandbox = forSandbox;
+        return Outcome.OPEN_HERO;
+    }
+
+    /** Confirming a hero moves on to the tier, or straight into the Sandbox. */
+    private Outcome resolveHero() {
+        return heroForSandbox ? Outcome.START_SANDBOX : Outcome.OPEN_DIFFICULTY;
     }
 
     /**
@@ -208,8 +323,9 @@ public class MenuState {
     /**
      * Backs out of the current screen.
      *
-     * @return {@link Outcome#BACK} on the difficulty screen, or
-     *         {@link Outcome#EXIT} when already at the top
+     * @return {@link Outcome#PENDING} (becoming {@link Outcome#BACK}) on the
+     *         hero, difficulty and options screens, or {@link Outcome#EXIT} when
+     *         already at the top
      */
     public Outcome back() {
         clearLockedFlash();
@@ -217,7 +333,7 @@ public class MenuState {
             // A press is already committed; do not race it.
             return Outcome.NONE;
         }
-        if (screen == Screen.DIFFICULTY) {
+        if (screen != Screen.MAIN) {
             pendingOutcome = Outcome.BACK;
             pressTicks = PRESS_TICKS;
             return Outcome.PENDING;
@@ -232,6 +348,105 @@ public class MenuState {
         }
     }
 
+    public void select(OptionRow row) {
+        if (screen == Screen.OPTIONS && row != null) {
+            optionIndex = row.ordinal();
+        }
+    }
+
+    // ---- options -----------------------------------------------------------
+
+    /**
+     * Changes the highlighted option by one step: the next language, or a
+     * slider nudged by {@link AudioSettings#STEP}.
+     *
+     * @param direction negative for left, positive for right
+     * @return true when a setting actually changed, so the caller applies it
+     */
+    public boolean adjust(int direction) {
+        if (screen != Screen.OPTIONS || direction == 0) {
+            return false;
+        }
+        OptionRow row = getSelectedOption();
+        if (row == OptionRow.LANGUAGE) {
+            Language[] all = Language.values();
+            int step = direction > 0 ? 1 : -1;
+            language = all[(language.ordinal() + step + all.length) % all.length];
+            return true;
+        }
+        if (row.isSlider()) {
+            int delta = direction > 0 ? AudioSettings.STEP : -AudioSettings.STEP;
+            return setSlider(row, sliderValue(row) + delta);
+        }
+        return false;
+    }
+
+    /**
+     * Sets a volume row outright, e.g. from a mouse drag.
+     *
+     * @return true when the value actually changed
+     */
+    public boolean setSlider(OptionRow row, int value) {
+        if (row == null || !row.isSlider()) {
+            return false;
+        }
+        AudioSettings before = audio;
+        audio = switch (row) {
+            case MASTER -> audio.withMaster(value);
+            case SFX -> audio.withSfx(value);
+            case MUSIC -> audio.withMusic(value);
+            default -> audio;
+        };
+        return !audio.equals(before);
+    }
+
+    /** Picks a language outright, e.g. from a click on it. */
+    public boolean chooseLanguage(Language chosen) {
+        if (chosen == null || chosen == language) {
+            return false;
+        }
+        language = chosen;
+        return true;
+    }
+
+    /** A volume row's current value, 0 to 100. */
+    public int sliderValue(OptionRow row) {
+        return switch (row) {
+            case MASTER -> audio.master();
+            case SFX -> audio.sfx();
+            case MUSIC -> audio.music();
+            default -> 0;
+        };
+    }
+
+    public OptionRow getSelectedOption() {
+        return OptionRow.values()[optionIndex];
+    }
+
+    public Language getLanguage() {
+        return language;
+    }
+
+    /** Seeds the language from the save. */
+    public void setLanguage(Language language) {
+        this.language = language == null ? Language.ENGLISH : language;
+    }
+
+    public AudioSettings getAudio() {
+        return audio;
+    }
+
+    /** Seeds the volumes from the save. */
+    public void setAudio(AudioSettings audio) {
+        this.audio = audio == null ? AudioSettings.defaults() : audio;
+    }
+
+    public void select(Hero hero) {
+        if (screen == Screen.HERO && hero != null) {
+            heroIndex = hero.ordinal();
+        }
+    }
+
     public void select(Difficulty difficulty) {
         if (screen == Screen.DIFFICULTY && difficulty != null) {
             difficultyIndex = difficulty.ordinal();
@@ -243,6 +458,9 @@ public class MenuState {
         screen = Screen.MAIN;
         mainIndex = 0;
         difficultyIndex = Difficulty.defaultChoice().ordinal();
+        heroIndex = preferredHero.ordinal();
+        heroForSandbox = false;
+        optionIndex = 0;
         pendingOutcome = Outcome.NONE;
         pressTicks = 0;
         clearLockedFlash();
@@ -346,6 +564,25 @@ public class MenuState {
         return MenuItem.values()[mainIndex];
     }
 
+    public Hero getSelectedHero() {
+        return Hero.values()[heroIndex];
+    }
+
+    /** The hero the picker opens on. */
+    public Hero getPreferredHero() {
+        return preferredHero;
+    }
+
+    /** Sets the hero the picker opens on, e.g. from the save or the last run. */
+    public void setPreferredHero(Hero hero) {
+        preferredHero = hero == null ? Hero.defaultChoice() : hero;
+    }
+
+    /** True when the hero picker leads into the Sandbox rather than a run. */
+    public boolean isHeroForSandbox() {
+        return heroForSandbox;
+    }
+
     public Difficulty getSelectedDifficulty() {
         return Difficulty.values()[difficultyIndex];
     }
@@ -363,20 +600,29 @@ public class MenuState {
     }
 
     private int itemCount() {
-        return screen == Screen.MAIN
-                ? MenuItem.values().length
-                : Difficulty.values().length;
+        return switch (screen) {
+            case MAIN -> MenuItem.values().length;
+            case HERO -> Hero.values().length;
+            case DIFFICULTY -> Difficulty.values().length;
+            case OPTIONS -> OptionRow.values().length;
+        };
     }
 
     private int currentIndex() {
-        return screen == Screen.MAIN ? mainIndex : difficultyIndex;
+        return switch (screen) {
+            case MAIN -> mainIndex;
+            case HERO -> heroIndex;
+            case DIFFICULTY -> difficultyIndex;
+            case OPTIONS -> optionIndex;
+        };
     }
 
     private void setIndex(int index) {
-        if (screen == Screen.MAIN) {
-            mainIndex = index;
-        } else {
-            difficultyIndex = index;
+        switch (screen) {
+            case MAIN -> mainIndex = index;
+            case HERO -> heroIndex = index;
+            case DIFFICULTY -> difficultyIndex = index;
+            case OPTIONS -> optionIndex = index;
         }
     }
 }

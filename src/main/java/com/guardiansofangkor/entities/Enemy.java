@@ -48,16 +48,17 @@ public class Enemy implements WordTarget {
      */
     private double y;
 
-    private final double spawnX;
-    private final double spawnY;
+    private double spawnX;
+    private double spawnY;
     private final double targetY;
 
+
     /** Unit travel vector, derived from the route's run and rise. */
-    private final double unitX;
-    private final double unitY;
+    private double unitX;
+    private double unitY;
 
     /** +1 marching rightward (spawned on the left), -1 marching leftward. */
-    private final int direction;
+    private int direction;
 
     private double speed;
 
@@ -73,6 +74,83 @@ public class Enemy implements WordTarget {
     // ---- ranged attack state ----------------------------------------------
 
     private AttackPhase attackPhase = AttackPhase.NONE;
+
+    // ---- obscurer state ----
+    private double obscureTimerTicks = 0;
+    private boolean isObscured = false;
+
+    public boolean isObscured() {
+        return isObscured;
+    }
+
+// ---- summoner state ----
+    private double summonCooldownTicks = 180;
+    private double summonPhaseTicks = 0;
+    private boolean isSummoning = false;
+    private boolean summonSpawnDue = false;
+    private boolean hasSpawnedThisPhase = false; // <-- NEW FLAG!
+
+    public boolean isSummoning() {
+        return isSummoning;
+    }
+
+    public boolean isSummonSpawnDue() {
+        return summonSpawnDue;
+    }
+
+    public void clearSummonSpawnDue() {
+        this.summonSpawnDue = false;
+    }
+
+    /** Instantly repositions an enemy (used to spawn minions around the Arak). */
+    public void setPosition(double x, double y) {
+        this.x = x;
+        this.y = y;
+    }
+
+    // ---- charger state ----
+    private boolean isSprinting = false;
+
+    public void triggerSprint() {
+        this.isSprinting = true;
+    }
+
+    public void dashForward(double distance) {
+        // FIX: Multiply by direction so it lunges toward the temple!
+        this.x += this.direction * this.unitX * distance;
+
+        // Push it down its Y-axis trajectory as well, capping it at the floor/hover height
+        if (this.y < this.targetY) {
+            this.y = Math.min(this.targetY, this.y + this.unitY * distance);
+        }
+    }
+
+    public void redeployAt(double newX, double newY, double templeX) {
+        this.x = newX;
+        this.y = newY;
+        this.spawnX = newX;
+        this.spawnY = newY;
+
+        // Aim at the temple (+1 for marching right, -1 for marching left)
+        this.direction = (newX > templeX) ? -1 : 1;
+
+        // Calculate a new travel vector from this spot to the temple
+        double horizontal = Math.abs(templeX - newX);
+        double rise = this.targetY - newY;
+        double length = Math.hypot(horizontal, rise);
+
+        if (length < 0.0001) {
+            this.unitX = 1;
+            this.unitY = 0;
+        } else {
+            this.unitX = horizontal / length;
+            this.unitY = rise / length;
+        }
+    }
+
+    public boolean isSprinting() {
+        return isSprinting;
+    }
 
     /**
      * Attack timers are fractional rather than whole ticks so Slow Tide slows
@@ -169,6 +247,36 @@ public class Enemy implements WordTarget {
             defeatTicks++;
             return;
         }
+// ARAK SUMMON LOGIC: Stop, summon, continue
+        if (type == EnemyType.ARAK && alive && staggerTicks == 0) {
+            if (!isSummoning) {
+                summonCooldownTicks -= scale;
+                if (summonCooldownTicks <= 0 && isOnScreen()) {
+                    isSummoning = true;
+                    summonPhaseTicks = 0;
+                }
+            } else {
+                summonPhaseTicks += scale;
+                if (summonPhaseTicks >= 50) {
+                    isSummoning = false;
+                    summonCooldownTicks = 350;
+                    hasSpawnedThisPhase = false; // Reset the lock for the next cast!
+                } else if (summonPhaseTicks >= 25 && !hasSpawnedThisPhase) {
+                    summonSpawnDue = true;
+                    hasSpawnedThisPhase = true;  // Lock it so it only fires ONCE!
+                }
+                return;
+            }
+        }
+
+        // SMING OBSCURE LOGIC: Toggle the hidden text effect every 2 seconds
+        if (type == EnemyType.SMING && alive && staggerTicks == 0) {
+            obscureTimerTicks += scale;
+            if (obscureTimerTicks >= 120) { // 120 ticks = 2 seconds
+                isObscured = !isObscured;
+                obscureTimerTicks = 0;
+            }
+        }
 
         if (staggerTicks > 0) {
             // Recoiling from losing a word — hold position so the player gets a
@@ -191,11 +299,30 @@ public class Enemy implements WordTarget {
     }
 
     private void march(double scale) {
-        x += direction * speed * unitX * scale;
+        double currentSpeed = speed;
+
+        // If this is a Charger and it has been provoked, move 6x faster!
+        if (isSprinting && type == EnemyType.CHARGER) {
+            currentSpeed *= 6.0;
+        }
+
+        x += direction * currentSpeed * unitX * scale;
 
         if (y < targetY) {
-            y = Math.min(targetY, y + speed * unitY * scale);
+            y = Math.min(targetY, y + currentSpeed * unitY * scale);
         }
+        {
+            if (isSummoning) {
+                return; // Plant position while casting
+            }
+
+            x += direction * speed * unitX * scale;
+
+            if (y < targetY) {
+                y = Math.min(targetY, y + speed * unitY * scale);
+            }
+        }
+
     }
 
     // ---- word chain --------------------------------------------------------

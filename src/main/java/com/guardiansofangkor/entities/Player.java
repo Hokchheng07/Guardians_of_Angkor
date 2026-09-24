@@ -30,6 +30,13 @@ public class Player {
 
     private int totalShots;
 
+    /**
+     * Which side the last shot went to. Only a hero with directional attack
+     * poses shows it, but it is tracked for everyone so the choice of hero
+     * never changes what the engine does.
+     */
+    private boolean aimingLeft;
+
     public Player() {
         this(GameConfig.TEMPLE_CENTER_X, GameConfig.PLAYER_FEET_Y);
     }
@@ -69,6 +76,20 @@ public class Player {
         return true;
     }
 
+    /**
+     * Records where the next shot is headed, so the renderer can turn a hero
+     * with left and right attack poses toward it. Straight ahead counts as
+     * right, which keeps the pose stable for a target dead centre.
+     */
+    public void aimAt(double targetX) {
+        aimingLeft = targetX < x;
+    }
+
+    /** True when the last shot went to the hero's left. */
+    public boolean isAimingLeft() {
+        return aimingLeft;
+    }
+
     /** True while the drawn-bow pose should be shown. */
     public boolean isFiring() {
         return actionTicks > 0;
@@ -80,6 +101,7 @@ public class Player {
         shotCooldown = 0;
         recoil = 0;
         totalShots = 0;
+        aimingLeft = false;
     }
 
     public double getX() {

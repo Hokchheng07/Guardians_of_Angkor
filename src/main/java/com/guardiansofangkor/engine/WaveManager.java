@@ -30,7 +30,7 @@ public class WaveManager {
     /** Pause between a level being cleared and the next starting. */
     private static final int INTERMISSION_TICKS = GameConfig.TARGET_FPS * 2;
 
-    private final WordBank wordBank;
+    private WordBank wordBank;
     private final Random random;
 
     /**
@@ -171,6 +171,10 @@ public class WaveManager {
         return spawnOne(activeEnemies == null ? List.of() : activeEnemies,
                 type, reservedWords == null ? List.of() : reservedWords);
     }
+    /** Spawns a specific enemy type on demand for Sandbox mode. */
+    public Enemy spawnSpecific(EnemyType type, List<Enemy> activeEnemies) {
+        return spawnOne(activeEnemies == null ? List.of() : activeEnemies, type, List.of());
+    }
 
     private Enemy spawnOne(List<Enemy> activeEnemies, EnemyType type,
                            List<String> reservedWords) {
@@ -296,6 +300,15 @@ public class WaveManager {
      */
     public void setDifficulty(Difficulty difficulty) {
         this.difficulty = difficulty == null ? Difficulty.defaultChoice() : difficulty;
+    }
+
+    /**
+     * Switches the vocabulary the next spawn draws from, e.g. after a language
+     * change. Words already in play are untouched — only what the next spawn
+     * asks for changes.
+     */
+    public void setWordBank(WordBank wordBank) {
+        this.wordBank = wordBank == null ? new WordBank(null) : wordBank;
     }
 
     /** True when the level just begun is this tier's final boss level. */
