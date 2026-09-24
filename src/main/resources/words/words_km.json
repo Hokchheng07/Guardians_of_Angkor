@@ -1,0 +1,329 @@
+{
+  "language": "km",
+  "_readme": "STARTER SET, not yet reviewed by a native speaker. Bands are graded by GraphemeCounter (java.text.BreakIterator), same rule as the English file -- but Java's BreakIterator does NOT merge Khmer coeng (subscript consonant) sequences into one grapheme the way some other Unicode libraries do, so counts run higher than they look. Verified against the actual game code: tiny<=2, short=3, medium=4, long=5-6, epic=7-8. tricky and lore are thematic, not length-gated, same as the English file. A word lives in exactly one pool. IMPORTANT: EnemyType's minWordLength/maxWordLength windows were tuned against the English bands -- they will rarely get an exact match against these Khmer bands and will lean on WordBank's closest-length fallback instead. That's not a bug (the fallback exists for this), but pacing/difficulty-feel should be re-tuned per language before shipping Khmer.",
+  "pools": {
+    "tiny": [
+      "ដី",
+      "ថ្ម",
+      "ផ្កា",
+      "ភ្នំ",
+      "ព្រៃ",
+      "ខែ",
+      "ឆ្នាំ",
+      "ធ្នូ",
+      "បី",
+      "ប្រាំ",
+      "ទឹក",
+      "មេឃ",
+      "សិលា",
+      "គាថា",
+      "ដាវ",
+      "ខែល",
+      "ភ័យ",
+      "មួយ",
+      "ពីរ",
+      "បួន",
+      "របាំ",
+      "កំដៅ"
+    ],
+    "short": [
+      "ភ្លើង",
+      "ខ្យល់",
+      "ផ្កាយ",
+      "ស្រុក",
+      "ទន្លេ",
+      "ភ្លៀង",
+      "រន្ទះ",
+      "ខ្មោច",
+      "ព្រួញ",
+      "ភ្លេង",
+      "រស្មី",
+      "ពន្លឺ",
+      "ចារឹក",
+      "បិសាច",
+      "កាំបិត",
+      "អាវុធ",
+      "កំហឹង",
+      "ងងឹត"
+    ],
+    "medium": [
+      "តន្ត្រី",
+      "សមុទ្រ",
+      "ចម្លាក់",
+      "វិញ្ញាណ",
+      "ព្រលឹង",
+      "បណ្តាសា",
+      "ចម្បាំង",
+      "សត្រូវ",
+      "ក្លាហាន",
+      "ចម្រៀង",
+      "ជោគជ័យ"
+    ],
+    "long": [
+      "ព្រះច័ន្ទ",
+      "ព្រះអាទិត្យ",
+      "មន្តអាគម",
+      "រូបសំណាក"
+    ],
+    "epic": [
+      "ក្រុងអង្គរ",
+      "ប្រាសាទបុរាណ",
+      "ព្រះរាជាណាចក្រ",
+      "អច្ឆរិយភាព",
+      "អរិយធម៌ខ្មែរ",
+      "សិលាចារឹកបុរាណ"
+    ],
+    "lore": [
+      "យក្ស",
+      "នាគ",
+      "អារក្ស",
+      "ទេវតា",
+      "អប្សរា",
+      "ប្រាសាទ",
+      "ព្រះវិហារ"
+    ],
+    "tricky": [
+      "ត្រជាក់",
+      "ជ័យវរ្ម័ន"
+    ]
+  },
+  "bossPools": {
+    "novice": [
+      "ខ្លា",
+      "តោ",
+      "ដំរី",
+      "ស្វា",
+      "ក្រពើ"
+    ],
+    "adept": [
+      "មារ",
+      "គ្រោង",
+      "ភូតខ្មោច"
+    ],
+    "master": [
+      "អសុរ",
+      "ស្តេចយក្ស"
+    ],
+    "legend": [
+      "ព្រះយម",
+      "គ្រោងឆ្អឹង"
+    ]
+  },
+  "projectile": [
+    "ដី",
+    "ថ្ម",
+    "ផ្កា",
+    "ភ្នំ",
+    "ព្រៃ",
+    "ធ្នូ",
+    "ទឹក",
+    "ភ្លើង",
+    "ខ្មោច",
+    "ដាវ",
+    "ខែល",
+    "ព្រួញ",
+    "ភ័យ",
+    "មួយ",
+    "ពីរ"
+  ],
+  "action": [
+    "រត់",
+    "គេច",
+    "លាក់",
+    "ចាប់",
+    "ស្រែក",
+    "ដេញ",
+    "ចាំ",
+    "ក្រោក",
+    "ការពារ",
+    "វាយ",
+    "ជម្នះ",
+    "ឈ្នះ",
+    "ទប់",
+    "ក្រាប",
+    "លុត",
+    "ស្តាប់",
+    "មើល",
+    "និយាយ"
+  ],
+  "difficulties": {
+    "easy": {
+      "bands": [
+        {
+          "throughLevel": 3,
+          "pools": [
+            "tiny",
+            "short"
+          ],
+          "boss": "novice"
+        },
+        {
+          "throughLevel": 7,
+          "pools": [
+            "tiny",
+            "short",
+            "medium"
+          ],
+          "boss": "novice"
+        },
+        {
+          "throughLevel": 11,
+          "pools": [
+            "short",
+            "medium",
+            "lore"
+          ],
+          "boss": "adept"
+        },
+        {
+          "throughLevel": 15,
+          "pools": [
+            "short",
+            "medium",
+            "lore",
+            "tricky"
+          ],
+          "boss": "adept"
+        }
+      ]
+    },
+    "medium": {
+      "bands": [
+        {
+          "throughLevel": 4,
+          "pools": [
+            "tiny",
+            "short",
+            "medium"
+          ],
+          "boss": "novice"
+        },
+        {
+          "throughLevel": 9,
+          "pools": [
+            "short",
+            "medium",
+            "long",
+            "lore"
+          ],
+          "boss": "adept"
+        },
+        {
+          "throughLevel": 15,
+          "pools": [
+            "short",
+            "medium",
+            "long",
+            "lore",
+            "tricky"
+          ],
+          "boss": "master"
+        }
+      ]
+    },
+    "hard": {
+      "bands": [
+        {
+          "throughLevel": 6,
+          "pools": [
+            "short",
+            "medium",
+            "long",
+            "lore",
+            "tricky"
+          ],
+          "boss": "adept"
+        },
+        {
+          "throughLevel": 13,
+          "pools": [
+            "short",
+            "medium",
+            "long",
+            "epic",
+            "lore",
+            "tricky"
+          ],
+          "boss": "master"
+        },
+        {
+          "throughLevel": 20,
+          "pools": [
+            "medium",
+            "long",
+            "epic",
+            "lore",
+            "tricky"
+          ],
+          "boss": "legend"
+        }
+      ]
+    },
+    "endless": {
+      "bands": [
+        {
+          "throughLevel": 4,
+          "pools": [
+            "tiny",
+            "short",
+            "medium"
+          ],
+          "boss": "novice"
+        },
+        {
+          "throughLevel": 9,
+          "pools": [
+            "short",
+            "medium",
+            "long",
+            "lore"
+          ],
+          "boss": "adept"
+        },
+        {
+          "throughLevel": 19,
+          "pools": [
+            "short",
+            "medium",
+            "long",
+            "epic",
+            "lore",
+            "tricky"
+          ],
+          "boss": "master"
+        },
+        {
+          "throughLevel": 99,
+          "pools": [
+            "medium",
+            "long",
+            "epic",
+            "lore",
+            "tricky"
+          ],
+          "boss": "legend"
+        }
+      ]
+    }
+  },
+  "bossParagraphs": {
+    "easy": [
+      [
+        "នាគរស់នៅក្នុងប្រាសាទបុរាណ។",
+        "អារក្សរក្សាប្រាសាទកុំឲ្យខ្មោចចូល។"
+      ],
+      [
+        "យក្សចេញពីក្រោមទឹក។",
+        "អ្នកយាមថែរក្សាកន្លែងនេះរាល់យប់។"
+      ]
+    ],
+    "medium": [
+      [
+        "អ្នកត្រូវសរសេរអក្សរដើម្បីបំបាត់មន្តអាគម។",
+        "អារក្សឈរនៅលើកំពូលប្រាសាទ។",
+        "កុំបោះបង់ចោលទីនេះឡើយ។"
+      ]
+    ]
+  },
+  "_themesNote": "Vocabulary drawn from nature, Angkor-era temple/architecture terms, and Reamker-adjacent mythology (naga, yeak, mara, garuda-omitted-for-now), matching the English file's Angkor theme."
+}

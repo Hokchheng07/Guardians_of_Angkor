@@ -2,8 +2,11 @@ package com.guardiansofangkor.renderer;
 
 import com.guardiansofangkor.engine.Difficulty;
 import com.guardiansofangkor.engine.MenuItem;
+import com.guardiansofangkor.audio.AudioSettings;
 import com.guardiansofangkor.engine.MenuState;
+import com.guardiansofangkor.entities.Hero;
 import com.guardiansofangkor.i18n.FontManager;
+import com.guardiansofangkor.i18n.Language;
 import com.guardiansofangkor.util.GameConfig;
 
 import java.awt.AlphaComposite;
@@ -19,7 +22,8 @@ import java.awt.geom.RoundRectangle2D;
 import java.awt.image.BufferedImage;
 
 /**
- * Paints the front end: title, main entries and the difficulty picker.
+ * Paints the front end: title, main entries, the hero picker and the
+ * difficulty picker.
  *
  * <p>Follows the design's composition — a floating panel inset from the left
  * edge, with the temple scene wrapping visibly around it on three sides so it
@@ -111,6 +115,56 @@ public class MenuRenderer {
     private static final int DIFFICULTY_HEADING_Y = ENTRIES_Y;
     private static final int DIFFICULTY_ENTRIES_Y = ENTRIES_Y + 22;
 
+    // ---- hero cards --------------------------------------------------------
+    //
+    // The hero picker keeps the panel — its list is the keyboard's target, the
+    // same as every other screen — and puts the heroes themselves in the scene
+    // to its right, full height, because a portrait is the whole point of
+    // choosing one. Both cards are always visible; the selected one is lit and
+    // posed, the other stands idle and dimmed.
+
+    private static final int CARD_W = 330;
+    private static final int CARD_H = 610;
+    private static final int CARD_GAP = 44;
+    private static final int CARD_Y = (GameConfig.SCREEN_HEIGHT - CARD_H) / 2;
+
+    /** Cards are centred in the scene area to the right of the panel. */
+    private static final int SCENE_X = PANEL_X + PANEL_W;
+    private static final int CARDS_X = SCENE_X
+            + (GameConfig.SCREEN_WIDTH - SCENE_X - (CARD_W * 2 + CARD_GAP)) / 2;
+
+    /** Where the hero's feet rest inside the card. */
+    private static final int CARD_FEET_OFFSET = 492;
+    private static final int CARD_NAME_OFFSET = 536;
+    private static final int CARD_EPITHET_OFFSET = 566;
+    private static final int CARD_ARC = 12;
+
+    // ---- options card ------------------------------------------------------
+    //
+    // Same arrangement as the hero picker: the panel keeps the title and the
+    // key hints, and the settings themselves sit on one wide stone card in the
+    // scene, because a slider needs more width than the panel has.
+
+    private static final int OPT_CARD_X = SCENE_X + 60;
+    private static final int OPT_CARD_W = GameConfig.SCREEN_WIDTH - 60 - OPT_CARD_X;
+    private static final int OPT_CARD_Y = 84;
+    private static final int OPT_CARD_H = 552;
+
+    private static final int OPT_ROWS_Y = OPT_CARD_Y + 112;
+    private static final int OPT_ROW_PITCH = 76;
+    private static final int OPT_ROW_H = 60;
+    private static final int OPT_ROW_X = OPT_CARD_X + 40;
+    private static final int OPT_ROW_W = OPT_CARD_W - 80;
+
+    /** Where a row's control starts, after its label. */
+    private static final int OPT_CONTROL_X = OPT_ROW_X + 250;
+    private static final int OPT_CONTROL_RIGHT = OPT_ROW_X + OPT_ROW_W - 24;
+
+    /** The slider track stops short of the right edge to leave room for its value. */
+    private static final int OPT_TRACK_RIGHT = OPT_CONTROL_RIGHT - 64;
+    private static final int OPT_SEGMENT_H = 38;
+    private static final int OPT_BACK_W = 220;
+
     // ---- panel fill --------------------------------------------------------
 
     private static final Color PANEL_TOP = new Color(0x1E, 0x19, 0x14, 247);
@@ -136,6 +190,10 @@ public class MenuRenderer {
     private Font taglineFont;
     private Font footerFont;
     private Font hintFont;
+    private Font heroNameFont;
+    private Font heroEpithetFont;
+    private Font optionLabelFont;
+    private Font optionValueFont;
 
     public MenuRenderer() {
         // Three faces, as the design specifies: a decorative display face for the
@@ -149,21 +207,31 @@ public class MenuRenderer {
         this.taglineFont = FontManager.bodyFont(13, Font.ITALIC);
         this.footerFont = FontManager.bodyFont(11, Font.ITALIC);
         this.hintFont = FontManager.uiSerifFont(12, Font.PLAIN);
+        this.heroNameFont = FontManager.displayFont(28, Font.BOLD);
+        this.heroEpithetFont = FontManager.bodyFont(16, Font.ITALIC);
+        this.optionLabelFont = FontManager.uiSerifFont(15, Font.BOLD);
+        this.optionValueFont = FontManager.uiSerifFont(16, Font.BOLD);
     }
 
     /**
      * @param glowPhase advancing radians, used to breathe the selected entry
      */
-    public void draw(Graphics2D g2, MenuState state, BufferedImage background,
+    public void draw(Graphics2D g2, MenuState state, SpriteCache sprites,
                      double glowPhase) {
-        drawBackdrop(g2, background);
+        drawBackdrop(g2, sprites.menuBackground());
+        if (state.getScreen() == MenuState.Screen.HERO) {
+            drawHeroCards(g2, state, sprites, glowPhase);
+        } else if (state.getScreen() == MenuState.Screen.OPTIONS) {
+            drawOptionsCard(g2, state, glowPhase);
+        }
         drawPanel(g2);
         drawTitleBlock(g2);
 
-        if (state.getScreen() == MenuState.Screen.MAIN) {
-            drawMainEntries(g2, state, glowPhase);
-        } else {
-            drawDifficultyEntries(g2, state, glowPhase);
+        switch (state.getScreen()) {
+            case MAIN -> drawMainEntries(g2, state, glowPhase);
+            case HERO -> drawHeroEntries(g2, state, glowPhase);
+            case DIFFICULTY -> drawDifficultyEntries(g2, state, glowPhase);
+            case OPTIONS -> drawOptionsHints(g2, state);
         }
 
         drawLockedMessage(g2, state);
@@ -185,6 +253,42 @@ public class MenuRenderer {
     public static Rectangle entryBounds(int index, MenuState.Screen screen) {
         int top = screen == MenuState.Screen.MAIN ? ENTRIES_Y : DIFFICULTY_ENTRIES_Y;
         return new Rectangle(CONTENT_X, top + index * ENTRY_PITCH, CONTENT_W, BUTTON_H);
+    }
+
+    /** Where Options row {@code index} is drawn, for mouse hit-testing. */
+    public static Rectangle optionRowBounds(int index) {
+        return new Rectangle(OPT_ROW_X, OPT_ROWS_Y + index * OPT_ROW_PITCH, OPT_ROW_W, OPT_ROW_H);
+    }
+
+    /**
+     * The draggable span of a volume row: the track itself, full row height so
+     * the knob is easy to catch.
+     */
+    public static Rectangle sliderTrackBounds(MenuState.OptionRow row) {
+        Rectangle r = optionRowBounds(row.ordinal());
+        return new Rectangle(OPT_CONTROL_X, r.y, OPT_TRACK_RIGHT - OPT_CONTROL_X, r.height);
+    }
+
+    /** The slider value under a mouse x, 0 to 100. */
+    public static int sliderValueAt(int mouseX) {
+        double t = (mouseX - OPT_CONTROL_X) / (double) (OPT_TRACK_RIGHT - OPT_CONTROL_X);
+        t = Math.max(0, Math.min(1, t));
+        return (int) Math.round(AudioSettings.MIN + t * (AudioSettings.MAX - AudioSettings.MIN));
+    }
+
+    /** One language's segment in the Language row. */
+    public static Rectangle languageSegmentBounds(int index) {
+        Rectangle r = optionRowBounds(MenuState.OptionRow.LANGUAGE.ordinal());
+        int count = Language.values().length;
+        int gap = 10;
+        int w = (OPT_CONTROL_RIGHT - OPT_CONTROL_X - gap * (count - 1)) / count;
+        int y = r.y + (r.height - OPT_SEGMENT_H) / 2;
+        return new Rectangle(OPT_CONTROL_X + index * (w + gap), y, w, OPT_SEGMENT_H);
+    }
+
+    /** Where hero card {@code index} is drawn, for mouse hit-testing. */
+    public static Rectangle heroCardBounds(int index) {
+        return new Rectangle(CARDS_X + index * (CARD_W + CARD_GAP), CARD_Y, CARD_W, CARD_H);
     }
 
     // ---- backdrop and panel ------------------------------------------------
@@ -328,6 +432,441 @@ public class MenuRenderer {
         g2.drawString(back, CENTRE_X - g2.getFontMetrics().stringWidth(back) / 2, y + 40);
     }
 
+    // ---- options -----------------------------------------------------------
+
+    private void drawOptionsHints(Graphics2D g2, MenuState state) {
+        g2.setColor(Palette.alpha(Palette.GOLD_FAINT, 0.95));
+        g2.setFont(hintFont);
+        drawTracked(g2, "SETTINGS", CENTRE_X, DIFFICULTY_HEADING_Y, 2.6);
+
+        int y = DIFFICULTY_ENTRIES_Y + 18;
+        String[] hints = {
+                "UP / DOWN  ·  choose",
+                "LEFT / RIGHT  ·  adjust",
+                "ENTER  ·  switch language",
+                "ESC  ·  back"};
+        g2.setColor(Palette.alpha(Palette.GOLD_FAINT, 0.9));
+        for (String hint : hints) {
+            g2.drawString(hint, CENTRE_X - g2.getFontMetrics().stringWidth(hint) / 2, y);
+            y += 22;
+        }
+
+        // Say what the highlighted row does — the language one is the only
+        // setting that changes gameplay, so it is worth being precise about.
+        g2.setFont(taglineFont);
+        g2.setColor(Palette.GOLD_WARM);
+        String note = switch (state.getSelectedOption()) {
+            case LANGUAGE -> "The words you type, from the next one on.";
+            case MASTER -> "Scales every sound in the game.";
+            case SFX -> "Bows, bolts, hits and chimes.";
+            case MUSIC -> "The temple's soundtrack.";
+            case BACK -> "Settings are saved as you change them.";
+        };
+        FontMetrics fm = g2.getFontMetrics();
+        g2.drawString(note, CENTRE_X - fm.stringWidth(note) / 2, y + 14);
+
+        if (state.getLanguage() == Language.KHMER && !FontManager.isKhmerAvailable()) {
+            g2.setFont(hintFont);
+            g2.setColor(Palette.alpha(Palette.DANGER, 0.9));
+            String warn = "Khmer font missing - see fonts/README";
+            g2.drawString(warn, CENTRE_X - g2.getFontMetrics().stringWidth(warn) / 2, y + 40);
+        }
+    }
+
+    private void drawOptionsCard(Graphics2D g2, MenuState state, double glowPhase) {
+        RoundRectangle2D card = new RoundRectangle2D.Double(
+                OPT_CARD_X, OPT_CARD_Y, OPT_CARD_W, OPT_CARD_H, CARD_ARC, CARD_ARC);
+        for (int i = 5; i >= 1; i--) {
+            g2.setColor(new Color(0, 0, 0, 16));
+            g2.fill(new RoundRectangle2D.Double(OPT_CARD_X - i, OPT_CARD_Y - i + 3,
+                    OPT_CARD_W + i * 2, OPT_CARD_H + i * 2, CARD_ARC + i, CARD_ARC + i));
+        }
+        g2.setPaint(new LinearGradientPaint(
+                OPT_CARD_X, OPT_CARD_Y, OPT_CARD_X, OPT_CARD_Y + OPT_CARD_H,
+                new float[] {0f, 0.55f, 1f},
+                new Color[] {
+                        Palette.alpha(PANEL_TOP, 0.9),
+                        Palette.alpha(PANEL_MID, 0.88),
+                        Palette.alpha(PANEL_BOTTOM, 0.95)}));
+        g2.fill(card);
+        Ornament.drawStoneTexture(g2, card, 0.08);
+        g2.setColor(Palette.alpha(Palette.GOLD, 0.55));
+        g2.setStroke(new BasicStroke(1.5f));
+        g2.draw(card);
+
+        int size = 26;
+        Ornament.drawCornerBracket(g2, OPT_CARD_X + 8, OPT_CARD_Y + 8, size, 0, Palette.GOLD, 0.8);
+        Ornament.drawCornerBracket(g2, OPT_CARD_X + OPT_CARD_W - 8 - size, OPT_CARD_Y + 8,
+                size, 1, Palette.GOLD, 0.8);
+        Ornament.drawCornerBracket(g2, OPT_CARD_X + 8, OPT_CARD_Y + OPT_CARD_H - 8 - size,
+                size, 2, Palette.GOLD, 0.8);
+        Ornament.drawCornerBracket(g2, OPT_CARD_X + OPT_CARD_W - 8 - size,
+                OPT_CARD_Y + OPT_CARD_H - 8 - size, size, 3, Palette.GOLD, 0.8);
+
+        int cx = OPT_CARD_X + OPT_CARD_W / 2;
+        DisplayText.drawCentred(g2, "OPTIONS", heroNameFont, cx, OPT_CARD_Y + 50,
+                Palette.GOLD_LIGHT, Palette.GOLD_LIGHT, Palette.GOLD, 0.45f, 1f);
+        Ornament.drawNagaDivider(g2, cx, OPT_CARD_Y + 82, 1.1, Palette.GOLD);
+
+        for (MenuState.OptionRow row : MenuState.OptionRow.values()) {
+            boolean selected = state.getSelectedOption() == row;
+            if (row == MenuState.OptionRow.BACK) {
+                drawOptionsBack(g2, state, selected, glowPhase);
+            } else {
+                drawOptionRow(g2, state, row, selected, glowPhase);
+            }
+        }
+    }
+
+    private void drawOptionRow(Graphics2D g2, MenuState state, MenuState.OptionRow row,
+                               boolean selected, double glowPhase) {
+        Rectangle r = optionRowBounds(row.ordinal());
+        RoundRectangle2D plate = new RoundRectangle2D.Double(
+                r.x, r.y, r.width, r.height, BUTTON_ARC, BUTTON_ARC);
+
+        // The highlighted row is the one the arrow keys act on, so it has to be
+        // unmistakable: a lit plate and a breathing gold edge.
+        double pulse = 0.5 + 0.5 * Math.sin(glowPhase);
+        g2.setColor(selected ? new Color(0x30, 0x20, 0x18, 200) : new Color(0x1E, 0x19, 0x14, 120));
+        g2.fill(plate);
+        g2.setColor(Palette.alpha(Palette.GOLD, selected ? 0.55 + 0.3 * pulse : 0.22));
+        g2.setStroke(new BasicStroke(selected ? 1.8f : 1.1f));
+        g2.draw(plate);
+
+        int midY = r.y + r.height / 2;
+        g2.setFont(optionLabelFont);
+        g2.setColor(selected ? Palette.GOLD_LIGHT : Palette.GOLD_MID);
+        String label = row.getLabel().toUpperCase(java.util.Locale.ROOT);
+        FontMetrics fm = g2.getFontMetrics();
+        int labelWidth = (int) Math.ceil(trackedWidth(fm, label, 2.0));
+        drawTracked(g2, label, r.x + 28 + labelWidth / 2, midY + fm.getAscent() / 2 - 2, 2.0);
+        if (selected) {
+            Ornament.drawLotusFlame(g2, r.x + 14, midY, 0.7, false,
+                    Palette.GOLD_LIGHT, Palette.GOLD_LIGHT);
+        }
+
+        if (row == MenuState.OptionRow.LANGUAGE) {
+            drawLanguageSegments(g2, state, selected);
+        } else {
+            drawSlider(g2, state.sliderValue(row), midY, selected);
+        }
+    }
+
+    private void drawLanguageSegments(Graphics2D g2, MenuState state, boolean rowSelected) {
+        Language[] all = Language.values();
+        for (int i = 0; i < all.length; i++) {
+            Language language = all[i];
+            boolean chosen = state.getLanguage() == language;
+            Rectangle s = languageSegmentBounds(i);
+            RoundRectangle2D seg = new RoundRectangle2D.Double(
+                    s.x, s.y, s.width, s.height, BUTTON_ARC, BUTTON_ARC);
+            if (chosen) {
+                g2.setPaint(new LinearGradientPaint(s.x, s.y, s.x, s.y + s.height,
+                        new float[] {0f, 0.5f, 1f},
+                        new Color[] {PILL_TOP, PILL_MID, PILL_BOTTOM}));
+                g2.fill(seg);
+                g2.setColor(Palette.GOLD_LIGHT);
+            } else {
+                g2.setColor(new Color(0x18, 0x14, 0x0E, 200));
+                g2.fill(seg);
+                g2.setColor(Palette.alpha(Palette.GOLD, rowSelected ? 0.5 : 0.3));
+            }
+            g2.setStroke(new BasicStroke(1.3f));
+            g2.draw(seg);
+
+            // Each language names itself in its own script, so the Khmer entry
+            // needs a Khmer-capable face or it draws as empty boxes.
+            String name = language == Language.ENGLISH
+                    ? language.getDisplayName().toUpperCase(java.util.Locale.ROOT)
+                    : language.getDisplayName();
+            Font font = language.requiresKhmerFont()
+                    ? FontManager.uiFont(language, 16, Font.BOLD)
+                    : optionValueFont;
+            g2.setFont(font);
+            g2.setColor(chosen ? Palette.STONE_DARK : Palette.GOLD_MID);
+            FontMetrics fm = g2.getFontMetrics();
+            int baseline = s.y + (s.height - fm.getHeight()) / 2 + fm.getAscent();
+            if (language == Language.ENGLISH) {
+                drawTracked(g2, name, s.x + s.width / 2, baseline, 2.0);
+            } else {
+                g2.drawString(name, s.x + (s.width - fm.stringWidth(name)) / 2, baseline);
+            }
+        }
+    }
+
+    private void drawSlider(Graphics2D g2, int value, int midY, boolean selected) {
+        double t = (value - AudioSettings.MIN) / (double) (AudioSettings.MAX - AudioSettings.MIN);
+        int trackW = OPT_TRACK_RIGHT - OPT_CONTROL_X;
+        int trackH = 6;
+        int fillW = (int) Math.round(trackW * t);
+
+        g2.setColor(Palette.PROGRESS_TRACK);
+        g2.fill(new RoundRectangle2D.Double(OPT_CONTROL_X, midY - trackH / 2.0,
+                trackW, trackH, trackH, trackH));
+        if (fillW > 0) {
+            g2.setPaint(new GradientPaint(OPT_CONTROL_X, 0, Palette.GOLD_DIM,
+                    OPT_TRACK_RIGHT, 0, Palette.GOLD_LIGHT));
+            g2.fill(new RoundRectangle2D.Double(OPT_CONTROL_X, midY - trackH / 2.0,
+                    fillW, trackH, trackH, trackH));
+        }
+
+        // Tick marks every quarter, so a value can be judged at a glance.
+        g2.setColor(Palette.alpha(Palette.GOLD, 0.35));
+        for (int i = 0; i <= 4; i++) {
+            int x = OPT_CONTROL_X + trackW * i / 4;
+            g2.fillRect(x, midY + 9, 1, 5);
+        }
+
+        double knobR = selected ? 11 : 9;
+        double kx = OPT_CONTROL_X + fillW;
+        if (selected) {
+            g2.setColor(Palette.alpha(Palette.GOLD, 0.3));
+            g2.fill(new java.awt.geom.Ellipse2D.Double(
+                    kx - knobR - 5, midY - knobR - 5, (knobR + 5) * 2, (knobR + 5) * 2));
+        }
+        g2.setColor(selected ? Palette.GOLD_LIGHT : Palette.GOLD);
+        g2.fill(new java.awt.geom.Ellipse2D.Double(kx - knobR, midY - knobR, knobR * 2, knobR * 2));
+        g2.setColor(Palette.STONE_DARK);
+        g2.setStroke(new BasicStroke(1.5f));
+        g2.draw(new java.awt.geom.Ellipse2D.Double(kx - knobR, midY - knobR, knobR * 2, knobR * 2));
+
+        g2.setFont(optionValueFont);
+        g2.setColor(selected ? Palette.GOLD_LIGHT : Palette.GOLD_MID);
+        String text = Integer.toString(value);
+        FontMetrics fm = g2.getFontMetrics();
+        g2.drawString(text, OPT_CONTROL_RIGHT - fm.stringWidth(text), midY + fm.getAscent() / 2 - 2);
+    }
+
+    private void drawOptionsBack(Graphics2D g2, MenuState state, boolean selected,
+                                 double glowPhase) {
+        Rectangle r = optionBackBounds();
+        drawButtonAt(g2, "BACK", r.x, r.y + (r.height - BUTTON_H) / 2, r.width,
+                selected, glowPhase, pressFor(state, selected));
+    }
+
+    /** The Back button on the Options card. */
+    public static Rectangle optionBackBounds() {
+        Rectangle row = optionRowBounds(MenuState.OptionRow.BACK.ordinal());
+        return new Rectangle(row.x + (row.width - OPT_BACK_W) / 2, row.y, OPT_BACK_W, row.height);
+    }
+
+    private void drawHeroEntries(Graphics2D g2, MenuState state, double glowPhase) {
+        g2.setColor(Palette.alpha(Palette.GOLD_FAINT, 0.95));
+        g2.setFont(hintFont);
+        drawTracked(g2, "CHOOSE YOUR GUARDIAN", CENTRE_X, DIFFICULTY_HEADING_Y, 2.6);
+
+        Hero[] heroes = Hero.values();
+        for (int i = 0; i < heroes.length; i++) {
+            boolean selected = state.getSelectedHero() == heroes[i];
+            drawButton(g2,
+                    heroes[i].getDisplayName().toUpperCase(java.util.Locale.ROOT),
+                    entryBounds(i, MenuState.Screen.HERO).y,
+                    selected, true, false, glowPhase, pressFor(state, selected));
+        }
+
+        int y = DIFFICULTY_ENTRIES_Y + heroes.length * ENTRY_PITCH;
+
+        g2.setFont(taglineFont);
+        g2.setColor(Palette.GOLD_WARM);
+        String tagline = state.getSelectedHero().getTagline();
+        FontMetrics fm = g2.getFontMetrics();
+        g2.drawString(tagline, CENTRE_X - fm.stringWidth(tagline) / 2, y + 14);
+
+        g2.setFont(hintFont);
+        g2.setColor(Palette.alpha(Palette.GOLD_FAINT, 0.9));
+        // Say where Enter goes: the same screen leads to a tier or into the
+        // Sandbox, and the player should not have to press to find out which.
+        String next = state.isHeroForSandbox() ? "ENTER  ·  sandbox" : "ENTER  ·  choose trial";
+        g2.drawString(next, CENTRE_X - g2.getFontMetrics().stringWidth(next) / 2, y + 40);
+        String back = "ESC  ·  back";
+        g2.drawString(back, CENTRE_X - g2.getFontMetrics().stringWidth(back) / 2, y + 60);
+    }
+
+    private void drawHeroCards(Graphics2D g2, MenuState state, SpriteCache sprites,
+                               double glowPhase) {
+        Hero[] heroes = Hero.values();
+        for (int i = 0; i < heroes.length; i++) {
+            drawHeroCard(g2, sprites, heroes[i], heroCardBounds(i),
+                    state.getSelectedHero() == heroes[i], glowPhase);
+        }
+    }
+
+    /**
+     * One hero, full length, on a stone card.
+     *
+     * <p>The selected hero is shown mid-attack. One with left and right poses
+     * sways between them, crossfading so the turn reads as a dance rather than
+     * a cut; the other hero stands idle, dimmed, so which one Enter will pick
+     * is never in doubt.
+     */
+    private void drawHeroCard(Graphics2D g2, SpriteCache sprites, Hero hero,
+                              Rectangle card, boolean selected, double glowPhase) {
+        double pulse = 0.5 + 0.5 * Math.sin(glowPhase);
+        RoundRectangle2D plate = new RoundRectangle2D.Double(
+                card.x, card.y, card.width, card.height, CARD_ARC, CARD_ARC);
+
+        if (selected) {
+            Graphics2D glow = (Graphics2D) g2.create();
+            try {
+                glow.setComposite(AlphaComposite.getInstance(
+                        AlphaComposite.SRC_OVER, (float) (0.18 + 0.14 * pulse)));
+                glow.setColor(Palette.GOLD);
+                for (int i = 5; i >= 1; i--) {
+                    glow.setStroke(new BasicStroke(i * 3f));
+                    glow.draw(new RoundRectangle2D.Double(card.x - i, card.y - i,
+                            card.width + i * 2, card.height + i * 2,
+                            CARD_ARC + i, CARD_ARC + i));
+                }
+            } finally {
+                glow.dispose();
+            }
+        }
+
+        g2.setPaint(new LinearGradientPaint(
+                card.x, card.y, card.x, card.y + card.height,
+                new float[] {0f, 0.55f, 1f},
+                new Color[] {
+                        Palette.alpha(PANEL_TOP, selected ? 0.82 : 0.7),
+                        Palette.alpha(PANEL_MID, selected ? 0.78 : 0.66),
+                        Palette.alpha(PANEL_BOTTOM, 0.94)}));
+        g2.fill(plate);
+        Ornament.drawStoneTexture(g2, plate, 0.08);
+
+        // A warm light behind the figure, so a dark-robed hero still separates
+        // from a dark card.
+        int cx = card.x + card.width / 2;
+        int feetY = card.y + CARD_FEET_OFFSET;
+        int figureH = SpriteCache.HERO_PORTRAIT_HEIGHT;
+        g2.setPaint(new java.awt.RadialGradientPaint(
+                new java.awt.geom.Point2D.Double(cx, feetY - figureH * 0.45),
+                figureH * 0.55f,
+                new float[] {0f, 1f},
+                new Color[] {
+                        Palette.alpha(Palette.GOLD, selected ? 0.22 + 0.06 * pulse : 0.08),
+                        Palette.alpha(Palette.GOLD, 0)}));
+        g2.fill(plate);
+
+        drawHeroFigure(g2, sprites, hero, selected, cx, feetY, figureH, glowPhase);
+
+        // The hero not chosen is dimmed with stone laid over the whole card,
+        // not by drawing the figure translucent — a see-through figure lets the
+        // moon and temple show through their body.
+        if (!selected) {
+            g2.setColor(Palette.alpha(Palette.STONE_DARK, 0.5));
+            g2.fill(plate);
+        }
+
+        // Frame and corners over the figure, so scarves reaching the edge are
+        // tucked behind the stone rather than spilling past it.
+        g2.setColor(Palette.alpha(Palette.GOLD, selected ? 0.85 : 0.35));
+        g2.setStroke(new BasicStroke(selected ? 2f : 1.3f));
+        g2.draw(plate);
+        double opacity = selected ? 0.9 : 0.4;
+        int size = 26;
+        Ornament.drawCornerBracket(g2, card.x + 8, card.y + 8, size, 0, Palette.GOLD, opacity);
+        Ornament.drawCornerBracket(g2, card.x + card.width - 8 - size, card.y + 8, size, 1,
+                Palette.GOLD, opacity);
+        Ornament.drawCornerBracket(g2, card.x + 8, card.y + card.height - 8 - size, size, 2,
+                Palette.GOLD, opacity);
+        Ornament.drawCornerBracket(g2, card.x + card.width - 8 - size,
+                card.y + card.height - 8 - size, size, 3, Palette.GOLD, opacity);
+
+        // Name plate.
+        Ornament.drawGoldRule(g2, cx, card.y + CARD_NAME_OFFSET - 26, card.width * 0.7,
+                Palette.GOLD, selected ? 0.7 : 0.35);
+        DisplayText.drawCentred(g2, hero.getDisplayName().toUpperCase(java.util.Locale.ROOT),
+                heroNameFont, cx, card.y + CARD_NAME_OFFSET,
+                selected ? Palette.GOLD_LIGHT : Palette.GOLD_DIM,
+                selected ? Palette.GOLD_LIGHT : Palette.GOLD_DIM,
+                selected ? Palette.GOLD : null, 0.45f, 1f);
+
+        g2.setFont(heroEpithetFont);
+        g2.setColor(selected ? Palette.GOLD_WARM : Palette.GOLD_GHOST);
+        FontMetrics fm = g2.getFontMetrics();
+        String epithet = hero.getEpithet();
+        g2.drawString(epithet, cx - fm.stringWidth(epithet) / 2,
+                card.y + CARD_EPITHET_OFFSET);
+
+        drawHeroCrest(g2, sprites, hero, cx, card.y + 34, selected);
+    }
+
+    private void drawHeroFigure(Graphics2D g2, SpriteCache sprites, Hero hero,
+                                boolean selected, int cx, int feetY, int height,
+                                double glowPhase) {
+        if (!selected) {
+            drawPortrait(g2, sprites, hero, SpriteCache.Pose.IDLE, cx, feetY, height, 1f);
+            return;
+        }
+        if (!hero.hasDirectionalAttack()) {
+            drawPortrait(g2, sprites, hero, SpriteCache.Pose.ATTACK_RIGHT,
+                    cx, feetY, height, 1f);
+            return;
+        }
+        // Holds each side for most of the cycle and crossfades through the
+        // middle — a steep sine, clamped.
+        double toRight = Math.max(0, Math.min(1, 0.5 + Math.sin(glowPhase) * 2.2));
+        if (toRight < 1) {
+            drawPortrait(g2, sprites, hero, SpriteCache.Pose.ATTACK_LEFT,
+                    cx, feetY, height, (float) (1 - toRight));
+        }
+        if (toRight > 0) {
+            drawPortrait(g2, sprites, hero, SpriteCache.Pose.ATTACK_RIGHT,
+                    cx, feetY, height, (float) toRight);
+        }
+    }
+
+    private void drawPortrait(Graphics2D g2, SpriteCache sprites, Hero hero,
+                              SpriteCache.Pose pose, int cx, int feetY, int height,
+                              float alpha) {
+        BufferedImage image = sprites.heroPortrait(hero, pose);
+        int width = sprites.heroPortraitWidth(hero, pose, height);
+        // Wide poses are narrowed to fit the card rather than cropped, so the
+        // whole figure and her scarves always show.
+        int maxWidth = CARD_W - 24;
+        if (width > maxWidth) {
+            height = (int) Math.round(height * maxWidth / (double) width);
+            width = maxWidth;
+        }
+        Graphics2D pg = (Graphics2D) g2.create();
+        try {
+            pg.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
+            if (image != null) {
+                pg.drawImage(image, cx - width / 2, feetY - height, width, height, null);
+            } else {
+                pg.setColor(Palette.STONE_MID);
+                pg.fill(new RoundRectangle2D.Double(
+                        cx - width / 2.0, feetY - height, width, height, 20, 20));
+            }
+        } finally {
+            pg.dispose();
+        }
+    }
+
+    /**
+     * A small emblem at the top of the card: the hero's crest from their own
+     * effect sheet when it has one (Apsara's ruby lotus), otherwise the
+     * lotus-bud prang the rest of the interface already uses.
+     */
+    private void drawHeroCrest(Graphics2D g2, SpriteCache sprites, Hero hero,
+                               int cx, int cy, boolean selected) {
+        Graphics2D cg = (Graphics2D) g2.create();
+        try {
+            cg.setComposite(AlphaComposite.getInstance(
+                    AlphaComposite.SRC_OVER, selected ? 1f : 0.45f));
+            BufferedImage crest = sprites.shotFx(hero, SpriteCache.ShotFx.CREST);
+            if (crest != null) {
+                int h = 40;
+                int w = (int) Math.round(h * crest.getWidth() / (double) crest.getHeight());
+                cg.drawImage(crest, cx - w / 2, cy - h / 2, w, h, null);
+            } else {
+                cg.setColor(Palette.GOLD);
+                cg.fill(Ornament.budPath(cx, cy + 16, 20, 34));
+            }
+        } finally {
+            cg.dispose();
+        }
+    }
+
     /**
      * One menu entry.
      *
@@ -367,6 +906,17 @@ public class MenuRenderer {
             drawPrimaryButton(g2, label, x, top, width, glowPhase, pressProgress);
         } else {
             drawSecondaryButton(g2, label, x, top, width, selected, enabled, unbuilt);
+        }
+    }
+
+    /** A button at an arbitrary position — selected is gold, otherwise stone. */
+    private void drawButtonAt(Graphics2D g2, String label, int x, int y, int width,
+                              boolean selected, double glowPhase, double pressProgress) {
+        int top = y + (int) Math.round(2 * pressProgress);
+        if (selected) {
+            drawPrimaryButton(g2, label, x, top, width, glowPhase, pressProgress);
+        } else {
+            drawSecondaryButton(g2, label, x, top, width, false, true, false);
         }
     }
 

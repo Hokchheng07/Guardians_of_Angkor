@@ -3,6 +3,7 @@ package com.guardiansofangkor;
 import com.guardiansofangkor.engine.GameLoop;
 import com.guardiansofangkor.engine.GameState;
 import com.guardiansofangkor.engine.MenuState;
+import com.guardiansofangkor.entities.Hero;
 import com.guardiansofangkor.i18n.FontManager;
 import com.guardiansofangkor.i18n.Language;
 import com.guardiansofangkor.input.KeyboardHandler;
@@ -10,6 +11,7 @@ import com.guardiansofangkor.input.TypingInputField;
 import com.guardiansofangkor.matching.ResolveResult;
 import com.guardiansofangkor.renderer.GamePanel;
 import com.guardiansofangkor.renderer.MenuPanel;
+import com.guardiansofangkor.renderer.SandboxTray;
 import com.guardiansofangkor.renderer.SpriteCache;
 import com.guardiansofangkor.save.AutosaveHook;
 import com.guardiansofangkor.save.SaveData;
@@ -26,6 +28,7 @@ import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Font;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Entry point. Assembles the window, wires the front end to the game, restores
@@ -75,18 +78,39 @@ public final class Main {
     }
 
     private static void launch() {
-        Language language = Language.ENGLISH;
-
         SaveManager saveManager = new SaveManager();
         SaveData saved = saveManager.load();
+
+        // The player's last choice from the Options screen, remembered across
+        // launches.
+        Language language = saved.language();
 
         GameState state = new GameState(language);
         // Unlocks are needed the instant the menu opens, which is before the
         // player has decided whether to resume anything — so they are seeded
         // separately from the run itself.
         state.restoreProgress(saved);
+        // The hero too: the autosave writes whatever the state holds, so a
+        // launch-and-quit must not quietly reset the player's pick to default.
+        state.setHero(Hero.fromKey(saved.heroKey()));
 
-        AutosaveHook autosave = new AutosaveHook(saveManager, state::toSaveData);
+        // The volume sliders belong to the menu, not the run, so they are
+        // layered onto the run's snapshot here. Without it every autosave would
+        // write the defaults back over the player's volumes. Seeded from the
+        // save before the menu exists, because the shutdown hook can fire first.
+        //
+        // Until a run starts this session, the state holds no run at all —
+        // level 0 — and saving it would overwrite the run on disk that Continue
+        // is offering. So before then, the loaded save is written back with
+        // only the settings changed.
+        MenuState menuState = new MenuState(saved.hasResumableRun());
+        menuState.setLanguage(language);
+        menuState.setAudio(saved.audio());
+        AtomicBoolean runTouched = new AtomicBoolean(false);
+        AutosaveHook autosave = new AutosaveHook(saveManager, () -> {
+            SaveData base = runTouched.get() ? state.toSaveData() : saved;
+            return base.withSettings(menuState.getLanguage(), menuState.getAudio());
+        });
         autosave.register();
 
         SpriteCache sprites = new SpriteCache();
@@ -99,16 +123,30 @@ public final class Main {
 
         input.setTypingFont(FontManager.wordFont(language, 22, Font.BOLD));
 
+        SandboxTray tray = new SandboxTray(state);
+        tray.setVisible(false);
+
+        panel.addMouseMotionListener(new java.awt.event.MouseMotionAdapter() {
+            @Override
+            public void mouseMoved(java.awt.event.MouseEvent e) {
+                // If we are in the Sandbox and the mouse is within 30 pixels of the right edge
+                if (state.isSandbox() && e.getX() >= panel.getWidth() - 30) {
+                    tray.setVisible(true);
+                }
+            }
+        });
+
         JPanel gameRoot = new JPanel(new BorderLayout());
         gameRoot.setBackground(Color.BLACK);
         gameRoot.add(panel, BorderLayout.CENTER);
+        gameRoot.add(tray, BorderLayout.EAST);
         gameRoot.add(input, BorderLayout.SOUTH);
         gameRoot.setBorder(BorderFactory.createEmptyBorder());
 
         // ---- front end -----------------------------------------------------
 
-        MenuState menuState = new MenuState(saved.hasResumableRun());
         menuState.setProgress(state.getProgress());
+        menuState.setPreferredHero(state.getHero());
         MenuPanel menuPanel = new MenuPanel(menuState, sprites);
 
         JPanel root = new JPanel(new CardLayout());
@@ -194,21 +232,58 @@ public final class Main {
             // here rather than only at startup means the player sees it unlock
             // on the way back to the menu, not on their next launch.
             menuState.setProgress(state.getProgress());
+            menuState.setPreferredHero(state.getHero());
             menuPanel.activateScreen();
         };
 
         // ---- menu actions --------------------------------------------------
 
         menuPanel.setOnStartRun(() -> menuGuard.run(() -> {
-            state.restartWith(menuState.getSelectedDifficulty());
+            runTouched.set(true);
+            tray.setVisible(false); // <-- Hide for normal play
+            state.setSandboxMode(false); // Make sure Sandbox is off
+            state.restartWith(menuState.getSelectedDifficulty(), menuState.getSelectedHero());
             autosave.saveQuietly();
             showGame.run();
         }));
 
+        menuPanel.setOnStartSandbox(() -> menuGuard.run(() -> {
+            runTouched.set(true);
+            tray.setVisible(true);      // <-- Show the tray
+            state.setSandboxMode(true); // Turn on God Mode & Disable Waves
+            state.setHero(menuState.getSelectedHero());
+            state.restart();            // Clean the board
+            state.skipIntro();          // Skip the 3-2-1 countdown for fast testing
+            showGame.run();             // Swap the screen to the game panel
+        }));
+
         menuPanel.setOnResumeRun(() -> menuGuard.run(() -> {
+            runTouched.set(true);
+            tray.setVisible(false); // <-- Hide for normal play
+            state.setSandboxMode(false); // Make sure Sandbox is off
             state.restoreFrom(saveManager.load());
             state.beginIntro();
             showGame.run();
+        }));
+        menuPanel.setOnSettingsChanged(() -> menuGuard.run(() -> {
+            // Language is the one setting the game itself reads. GameState
+            // swaps its word bank; the typing field is Swing, so its font is
+            // swapped here. The play field notices on its own next paint.
+            Language chosen = menuState.getLanguage();
+            if (chosen != state.getLanguage()) {
+                state.setLanguage(chosen);
+                input.setTypingFont(FontManager.wordFont(chosen, 22, Font.BOLD));
+            }
+            // Volumes are read by whatever plays sound; nothing to push here.
+        }));
+
+        // Settings are written once, on the way out of Options, rather than on
+        // every slider step — a drag would otherwise rewrite the save file
+        // dozens of times a second.
+        menuPanel.setOnScreenChanged(screen -> menuGuard.run(() -> {
+            if (screen == MenuState.Screen.MAIN) {
+                autosave.saveQuietly();
+            }
         }));
 
         menuPanel.setOnExit(() -> menuGuard.run(() -> {

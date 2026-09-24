@@ -2,11 +2,14 @@ package com.guardiansofangkor.renderer;
 
 import com.guardiansofangkor.engine.Difficulty;
 import com.guardiansofangkor.entities.EnemyType;
+import com.guardiansofangkor.entities.Hero;
 import com.guardiansofangkor.entities.PowerUpType;
 import com.guardiansofangkor.util.GameConfig;
 
 import javax.imageio.ImageIO;
 import java.awt.Graphics2D;
+import java.awt.GraphicsEnvironment;
+import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.awt.image.ConvolveOp;
@@ -14,6 +17,7 @@ import java.awt.image.Kernel;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.EnumMap;
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -58,6 +62,41 @@ import java.util.Map;
  */
 public class SpriteCache {
 
+    /**
+     * Device pixels per logical pixel on the main screen: 2 on a Retina Mac,
+     * 1.25-2 on a scaled Windows display, 1 on a plain monitor or headless.
+     *
+     * <p>Swing lays the window out in logical pixels and the OS multiplies them
+     * up. A sprite prepared at its logical draw size — 250px for the hero —
+     * therefore reaches a Retina screen stretched to 500 device pixels, and
+     * that stretch is exactly what made the art look soft. Working copies are
+     * built at {@code drawSize * DISPLAY_SCALE} instead, so they land 1:1 on
+     * the device. Every renderer draws them with an explicit destination size,
+     * so the extra resolution changes sharpness and nothing else.
+     *
+     * <p>Capped at 3 so an exotic display cannot balloon memory.
+     */
+    private static final double DISPLAY_SCALE = detectDisplayScale();
+
+    private static double detectDisplayScale() {
+        try {
+            if (GraphicsEnvironment.isHeadless()) {
+                return 1.0;
+            }
+            double scale = GraphicsEnvironment.getLocalGraphicsEnvironment()
+                    .getDefaultScreenDevice().getDefaultConfiguration()
+                    .getDefaultTransform().getScaleX();
+            return Math.max(1.0, Math.min(3.0, scale));
+        } catch (RuntimeException | Error e) {
+            return 1.0;
+        }
+    }
+
+    /** Pixel height for a working copy that is drawn {@code displayHeight} tall. */
+    private static int sharp(int displayHeight) {
+        return (int) Math.ceil(displayHeight * DISPLAY_SCALE);
+    }
+
     /** Alpha at or below this counts as empty when trimming. */
     private static final int ALPHA_THRESHOLD = 32;
 
@@ -66,33 +105,128 @@ public class SpriteCache {
 
     private static final String BACKGROUND_PATH = "/images/Background.png";
     private static final String MENU_BACKGROUND_PATH = "/images/Main-Menu-Background.png";
-    private static final String PLAYER_IDLE_PATH = "/images/Prea_Ream(idle).png";
-    private static final String PLAYER_ACTION_PATH = "/images/Preas_Ream(Action).png";
+
+    /**
+     * How tall a hero is drawn on the selection screen.
+     *
+     * <p>Heroes get a second working copy at this size rather than one big copy
+     * shared with play: the in-game sprite is blitted every frame, and drawing
+     * a 440px image down to 250 sixty times a second is exactly the per-frame
+     * rescale the working copies exist to avoid.
+     */
+    public static final int HERO_PORTRAIT_HEIGHT = 440;
+
+    /** The pieces of a hero's effect sheet the game draws. */
+    public enum ShotFx {
+        /** Every ordinary shot. */
+        BOLT,
+
+        /** The blow a finished verse lands on the boss. */
+        GREAT_BOLT,
+
+        /** Where a finished word lands. */
+        BLOOM,
+
+        /** Where a mid-word shot lands. */
+        BURST,
+
+        /** The emblem on the hero's picker card. Optional. */
+        CREST
+    }
+
+    /**
+     * One piece of an effect sheet.
+     *
+     * @param region    where it sits on the sheet, padded for its glow but
+     *                  clear of its neighbours — anything opaque inside the
+     *                  rect survives trimming and is drawn with it
+     * @param drawHeight the tallest it is ever drawn, in logical pixels
+     * @param headAt    for bolts: how far along its width the tip sits, 0 to 1,
+     *                  so the tip rather than the tail arrives on the target
+     */
+    public record Cut(Rectangle region, int drawHeight, double headAt) {
+    }
+
+    /**
+     * Where each hero's pieces sit on their sheet.
+     *
+     * <p>Both sheets hold more than the game uses. Left out on purpose: the
+     * long ribbon-trail bolts and loose petals on Apsara's, the crescent slashes
+     * and leaf wisps on Preah Ream's. A shot lives for nine ticks, so anything
+     * much longer than it is tall streaks across the plaza rather than flying.
+     * Preah Ream's lotus-tipped arrow is the one long piece kept, because it is
+     * an arrow and an archer's shot should look like one.
+     *
+     * <p>THESE RECTS DO NOT SURVIVE A SHEET CHANGE. Re-measure if either sheet
+     * is replaced.
+     */
+    private static final Map<Hero, Map<ShotFx, Cut>> SHOT_CUTS = new EnumMap<>(Hero.class);
+
+    static {
+        Map<ShotFx, Cut> apsara = new EnumMap<>(ShotFx.class);
+        apsara.put(ShotFx.BOLT, new Cut(new Rectangle(495, 85, 295, 185), 34, 0.85));
+        apsara.put(ShotFx.GREAT_BOLT, new Cut(new Rectangle(1175, 20, 585, 290), 64, 0.85));
+        apsara.put(ShotFx.BLOOM, new Cut(new Rectangle(20, 470, 555, 400), 96, 0.5));
+        apsara.put(ShotFx.BURST, new Cut(new Rectangle(590, 480, 440, 390), 56, 0.5));
+        apsara.put(ShotFx.CREST, new Cut(new Rectangle(1450, 560, 175, 155), 40, 0.5));
+        SHOT_CUTS.put(Hero.APSARA, apsara);
+
+        Map<ShotFx, Cut> ream = new EnumMap<>(ShotFx.class);
+        // The lotus-tipped arrow: long and thin, so drawn short and led by its tip.
+        ream.put(ShotFx.BOLT, new Cut(new Rectangle(15, 262, 1135, 191), 26, 0.97));
+        ream.put(ShotFx.GREAT_BOLT, new Cut(new Rectangle(1160, 5, 605, 277), 64, 0.93));
+        ream.put(ShotFx.BLOOM, new Cut(new Rectangle(20, 578, 485, 294), 96, 0.5));
+        ream.put(ShotFx.BURST, new Cut(new Rectangle(540, 590, 322, 282), 56, 0.5));
+        SHOT_CUTS.put(Hero.PREAH_REAM, ream);
+    }
+
+    /** Which picture of a hero to draw. */
+    public enum Pose {
+        IDLE,
+        ATTACK_LEFT,
+        ATTACK_RIGHT;
+
+        /** The pose for a hero that is (or is not) mid-shot, facing its target. */
+        public static Pose of(boolean firing, boolean aimingLeft) {
+            if (!firing) {
+                return IDLE;
+            }
+            return aimingLeft ? ATTACK_LEFT : ATTACK_RIGHT;
+        }
+    }
 
     private final Map<EnemyType, BufferedImage> sprites = new EnumMap<>(EnemyType.class);
     private final Map<EnemyType, BufferedImage> silhouettes = new EnumMap<>(EnemyType.class);
     private final Map<EnemyType, Boolean> loadAttempted = new EnumMap<>(EnemyType.class);
+
+    private BufferedImage getchargerSprintSprite;
+    private BufferedImage chargerSprintSilhouette;
+    private BufferedImage customProjectileSprite;
+
 
     private final Map<PowerUpType, BufferedImage> powerUpIcons =
             new EnumMap<>(PowerUpType.class);
     private final Map<PowerUpType, Boolean> powerUpAttempted =
             new EnumMap<>(PowerUpType.class);
 
+    private BufferedImage chargerSprintSprite;
     private BufferedImage background;
     private boolean backgroundAttempted;
 
     private BufferedImage menuBackground;
     private boolean menuBackgroundAttempted;
 
-    private BufferedImage playerIdle;
-    private BufferedImage playerAction;
-    private boolean playerAttempted;
+    /** In-game sprites per hero, indexed by {@link Pose#ordinal()}. */
+    private final Map<Hero, BufferedImage[]> heroSprites = new EnumMap<>(Hero.class);
 
-    private BufferedImage playerGlowIdle;
-    private BufferedImage playerGlowAction;
-    private boolean glowIdleAttempted;
-    private boolean glowActionAttempted;
+    /** Selection-screen copies per hero, indexed the same way. */
+    private final Map<Hero, BufferedImage[]> heroPortraits = new EnumMap<>(Hero.class);
+
+    /** Rim-light halos, keyed by hero and pose. A null value is a failed build. */
+    private final Map<String, BufferedImage> heroGlows = new HashMap<>();
     private int glowBuiltForHeight = -1;
+
+    private final Map<Hero, Map<ShotFx, BufferedImage>> shotFx = new EnumMap<>(Hero.class);
 
     /**
      * The trimmed sprite for {@code type}, or null when its art has not been
@@ -102,6 +236,14 @@ public class SpriteCache {
         if (type == null) {
             return null;
         }
+
+        if (type == EnemyType.CHARGER && chargerSprintSprite == null) {
+            BufferedImage rawSprint = read("/images/DemonbullCharge.png");
+            if (rawSprint != null) {
+                chargerSprintSprite = toWorkingCopy(safeTrim(rawSprint), sharp(workingHeightFor(type)));
+            }
+        }
+
         if (Boolean.TRUE.equals(loadAttempted.get(type))) {
             return sprites.get(type);
         }
@@ -125,9 +267,34 @@ public class SpriteCache {
             trimmed = raw;
         }
 
-        BufferedImage ready = toWorkingCopy(trimmed, workingHeightFor(type));
+        BufferedImage ready = toWorkingCopy(trimmed, sharp(workingHeightFor(type)));
         sprites.put(type, ready);
         return ready;
+    }
+
+    public BufferedImage chargerSprintSprite() {
+        return chargerSprintSprite;
+    }
+    /** Generates a white hit-flash silhouette specifically for the charging sprite. */
+    public BufferedImage chargerSprintSilhouette() {
+        BufferedImage source = chargerSprintSprite();
+        if (source == null) {
+            return null;
+        }
+        if (chargerSprintSilhouette != null) {
+            return chargerSprintSilhouette;
+        }
+
+        BufferedImage out = new BufferedImage(
+                source.getWidth(), source.getHeight(), BufferedImage.TYPE_INT_ARGB);
+        for (int y = 0; y < source.getHeight(); y++) {
+            for (int x = 0; x < source.getWidth(); x++) {
+                // Keep alpha, force RGB to white
+                out.setRGB(x, y, (source.getRGB(x, y) & 0xFF000000) | 0x00FFFFFF);
+            }
+        }
+        chargerSprintSilhouette = out;
+        return out;
     }
 
     /**
@@ -189,7 +356,7 @@ public class SpriteCache {
             return null;
         }
         BufferedImage ready =
-                toWorkingCopy(safeTrim(raw), GameConfig.POWERUP_ICON_SIZE);
+                toWorkingCopy(safeTrim(raw), sharp(GameConfig.POWERUP_ICON_SIZE));
         powerUpIcons.put(type, ready);
         return ready;
     }
@@ -234,40 +401,154 @@ public class SpriteCache {
     }
 
     /**
-     * Preah Ream's sprite for the requested pose.
+     * A hero's in-game sprite for the requested pose.
      *
-     * <p>Both poses are loaded together so the swap on the first shot does not
-     * cause a one-frame stall while the action image decodes.
+     * <p>Every pose is loaded together so the swap on the first shot does not
+     * cause a one-frame stall while the attack image decodes.
      *
-     * @param firing true for the drawn-bow pose, false for idle
+     * @return the sprite, or null when the hero has no art at all
      */
-    public BufferedImage player(boolean firing) {
-        if (!playerAttempted) {
-            playerAttempted = true;
-            BufferedImage idle = read(PLAYER_IDLE_PATH);
-            BufferedImage action = read(PLAYER_ACTION_PATH);
-            // Preah Ream is the biggest source in the game at 896x1200 and is
-            // redrawn every frame, twice over once the rim light is counted.
-            playerIdle = toWorkingCopy(safeTrim(idle), GameConfig.PLAYER_HEIGHT);
-            playerAction = toWorkingCopy(safeTrim(action), GameConfig.PLAYER_HEIGHT);
+    public BufferedImage hero(Hero hero, Pose pose) {
+        return pick(loadHero(hero)[0], pose);
+    }
 
-            if (playerIdle == null && playerAction == null) {
-                System.out.println("[SpriteCache] No Preah Ream art found — "
-                        + "drawing a placeholder guardian.");
-            }
-        }
-        // Fall back to whichever pose exists, so a single missing file does not
-        // make the hero vanish mid-shot.
-        BufferedImage wanted = firing ? playerAction : playerIdle;
+    /** The hero drawn large, for the selection screen. */
+    public BufferedImage heroPortrait(Hero hero, Pose pose) {
+        return pick(loadHero(hero)[1], pose);
+    }
+
+    /**
+     * The requested pose, or the nearest one that exists.
+     *
+     * <p>A missing attack pose falls back to the other side and then to idle,
+     * so a single missing file never makes the hero vanish mid-shot.
+     */
+    private static BufferedImage pick(BufferedImage[] poses, Pose pose) {
+        BufferedImage wanted = poses[pose.ordinal()];
         if (wanted != null) {
             return wanted;
         }
-        return firing ? playerIdle : playerAction;
+        Pose[] order = switch (pose) {
+            case IDLE -> new Pose[] {Pose.ATTACK_RIGHT, Pose.ATTACK_LEFT};
+            case ATTACK_LEFT -> new Pose[] {Pose.ATTACK_RIGHT, Pose.IDLE};
+            case ATTACK_RIGHT -> new Pose[] {Pose.ATTACK_LEFT, Pose.IDLE};
+        };
+        for (Pose fallback : order) {
+            if (poses[fallback.ordinal()] != null) {
+                return poses[fallback.ordinal()];
+            }
+        }
+        return null;
     }
 
-    /** Width for Preah Ream at a given height, preserving his aspect ratio. */
-    public int playerWidth(boolean firing, int height) {
-        BufferedImage image = player(firing);
+    /**
+     * Loads every pose of a hero at both working sizes, once.
+     *
+     * @return {in-game poses, portrait poses}
+     */
+    private BufferedImage[][] loadHero(Hero hero) {
+        Hero key = hero == null ? Hero.defaultChoice() : hero;
+        BufferedImage[] inGame = heroSprites.get(key);
+        if (inGame != null) {
+            return new BufferedImage[][] {inGame, heroPortraits.get(key)};
+        }
+
+        inGame = new BufferedImage[Pose.values().length];
+        BufferedImage[] portraits = new BufferedImage[Pose.values().length];
+        String[] paths = {key.getIdlePath(), key.getAttackLeftPath(), key.getAttackRightPath()};
+
+        // Preah Ream uses one file for both attack sides; decode it once.
+        Map<String, BufferedImage[]> byPath = new HashMap<>();
+        for (int i = 0; i < paths.length; i++) {
+            BufferedImage[] pair = byPath.get(paths[i]);
+            if (pair == null) {
+                // The hero sources run up to 1024x1536 and are redrawn every
+                // frame, twice over once the rim light is counted.
+                BufferedImage trimmed = safeTrim(read(paths[i]));
+                pair = new BufferedImage[] {
+                        toWorkingCopy(trimmed, sharp(GameConfig.PLAYER_HEIGHT)),
+                        toWorkingCopy(trimmed, sharp(HERO_PORTRAIT_HEIGHT))};
+                byPath.put(paths[i], pair);
+            }
+            inGame[i] = pair[0];
+            portraits[i] = pair[1];
+        }
+
+        if (inGame[0] == null && inGame[1] == null && inGame[2] == null) {
+            System.out.println("[SpriteCache] No art found for " + key.getDisplayName()
+                    + " — drawing a placeholder guardian.");
+        }
+        heroSprites.put(key, inGame);
+        heroPortraits.put(key, portraits);
+        return new BufferedImage[][] {inGame, portraits};
+    }
+
+    /**
+     * One piece of a hero's effect sheet, or null when the sheet is missing or
+     * the hero has no such piece — the renderer then falls back to vector art.
+     *
+     * <p>Each sheet is decoded once and every piece is cut, trimmed and scaled
+     * to its own working copy in the same pass. A piece is a real copy rather
+     * than a {@code getSubimage} view onto the sheet, for the same managed-image
+     * reason given in the class comment.
+     */
+    public BufferedImage shotFx(Hero hero, ShotFx piece) {
+        Hero key = hero == null ? Hero.defaultChoice() : hero;
+        Map<ShotFx, BufferedImage> pieces = shotFx.get(key);
+        if (pieces == null) {
+            pieces = new EnumMap<>(ShotFx.class);
+            shotFx.put(key, pieces);
+            Map<ShotFx, Cut> cuts = SHOT_CUTS.getOrDefault(key, Map.of());
+            BufferedImage sheet = cuts.isEmpty() ? null : read(key.getEffectSheetPath());
+            if (sheet == null) {
+                System.out.println("[SpriteCache] No effect sheet for " + key.getDisplayName()
+                        + " — drawing plain arrows.");
+            } else {
+                Rectangle bounds = new Rectangle(0, 0, sheet.getWidth(), sheet.getHeight());
+                for (Map.Entry<ShotFx, Cut> cut : cuts.entrySet()) {
+                    Rectangle r = cut.getValue().region().intersection(bounds);
+                    if (r.isEmpty()) {
+                        continue;
+                    }
+                    BufferedImage region = sheet.getSubimage(r.x, r.y, r.width, r.height);
+                    pieces.put(cut.getKey(), toWorkingCopy(safeTrim(region),
+                            sharp(cut.getValue().drawHeight())));
+                }
+            }
+        }
+        return pieces.get(piece);
+    }
+
+    public BufferedImage customProjectile() {
+        if (customProjectileSprite != null) {
+            return customProjectileSprite;
+        }
+        BufferedImage raw = read("/images/SplitterBall.png");
+        if (raw != null) {
+            // Scaled to a max height of 45 pixels so it fits the hitbox. Not
+            // sharp(): the renderer draws this one at its natural pixel size,
+            // so a larger copy would draw larger rather than crisper.
+            customProjectileSprite = toWorkingCopy(safeTrim(raw), 45);
+        }
+        return customProjectileSprite;
+    }
+
+    /** How a piece is laid out, or null when the hero has no such piece. */
+    public Cut shotCut(Hero hero, ShotFx piece) {
+        return SHOT_CUTS.getOrDefault(hero, Map.of()).get(piece);
+    }
+
+    /** Width for a hero at a given height, preserving the pose's aspect ratio. */
+    public int heroWidth(Hero hero, Pose pose, int height) {
+        return widthAt(hero(hero, pose), height);
+    }
+
+    /** Width for a hero's portrait at a given height. */
+    public int heroPortraitWidth(Hero hero, Pose pose, int height) {
+        return widthAt(heroPortrait(hero, pose), height);
+    }
+
+    private static int widthAt(BufferedImage image, int height) {
         if (image == null || image.getHeight() == 0) {
             return (int) Math.round(height * 0.6);
         }
@@ -276,62 +557,47 @@ public class SpriteCache {
     }
 
     /**
-     * A soft gold halo matching Preah Ream's silhouette, drawn behind him so he
-     * separates from the temple behind.
+     * A soft gold halo matching the hero's silhouette, drawn behind them so they
+     * separate from the temple behind.
      *
-     * <p>Built by scaling his silhouette to display size, padding it, and
+     * <p>Built by scaling the silhouette to display size, padding it, and
      * running a separable Gaussian blur. Done at <em>display</em> size rather
-     * than source size and cached per pose — blurring the full 896x1200 source
+     * than source size and cached per hero and pose — blurring the full source
      * every frame would cost hundreds of millions of operations and stall the
      * loop.
      *
-     * @param firing which pose to build the halo for
-     * @param height the on-screen height he is drawn at
+     * @param height the on-screen height the hero is drawn at
      * @return the halo, or null when there is no art to derive one from
      */
-    public BufferedImage playerGlow(boolean firing, int height) {
+    public BufferedImage heroGlow(Hero hero, Pose pose, int height) {
         if (glowBuiltForHeight != height) {
             // Display size changed, so the cached halos are the wrong scale.
-            playerGlowIdle = null;
-            playerGlowAction = null;
-            glowIdleAttempted = false;
-            glowActionAttempted = false;
+            heroGlows.clear();
             glowBuiltForHeight = height;
         }
 
-        // Tracked with a flag rather than a null check, so a failed build is not
-        // retried on every single frame.
-        if (firing ? glowActionAttempted : glowIdleAttempted) {
-            return firing ? playerGlowAction : playerGlowIdle;
-        }
-        if (firing) {
-            glowActionAttempted = true;
-        } else {
-            glowIdleAttempted = true;
+        // Tracked by key presence rather than a null check, so a failed build
+        // is not retried on every single frame.
+        Hero key = hero == null ? Hero.defaultChoice() : hero;
+        String cacheKey = key.name() + "/" + pose.name();
+        if (heroGlows.containsKey(cacheKey)) {
+            return heroGlows.get(cacheKey);
         }
 
-        BufferedImage source = player(firing);
-        if (source == null) {
-            return null;
+        BufferedImage source = hero(key, pose);
+        BufferedImage built = null;
+        if (source != null) {
+            try {
+                built = buildGlow(source, heroWidth(key, pose, height), height);
+            } catch (RuntimeException | OutOfMemoryError e) {
+                // Building the halo allocates a padded canvas and runs two
+                // convolve passes. If either fails, the hero simply draws
+                // without a rim light — a cosmetic loss, not a lost frame.
+                System.err.println("[SpriteCache] Could not build the hero glow ("
+                        + e + ") — drawing without a rim light.");
+            }
         }
-
-        BufferedImage built;
-        try {
-            built = buildGlow(source, playerWidth(firing, height), height);
-        } catch (RuntimeException | OutOfMemoryError e) {
-            // Building the halo allocates a padded canvas and runs two convolve
-            // passes. If either fails, the hero simply draws without a rim
-            // light — a cosmetic loss, not a reason to lose the frame.
-            System.err.println("[SpriteCache] Could not build the hero glow ("
-                    + e + ") — drawing without a rim light.");
-            built = null;
-        }
-
-        if (firing) {
-            playerGlowAction = built;
-        } else {
-            playerGlowIdle = built;
-        }
+        heroGlows.put(cacheKey, built);
         return built;
     }
 
@@ -491,27 +757,51 @@ public class SpriteCache {
         int height = Math.max(1, (int) Math.round(sourceHeight * scale));
 
         try {
-            BufferedImage copy = new BufferedImage(
-                    width, height, BufferedImage.TYPE_INT_ARGB_PRE);
-            Graphics2D g = copy.createGraphics();
-            try {
-                // Quality is affordable here in a way it is not per-frame: this
-                // runs once per sprite for the life of the process.
-                g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+            // Halve in steps, then make one final resize. A single bilinear
+            // pass from 1536px to 250 reads only four source pixels per output
+            // pixel and skips everything between them, which turns fine line
+            // work — jewellery, hair, the gold trim — into grain. Halving never
+            // skips a pixel, so the detail is averaged down instead of dropped.
+            BufferedImage current = source;
+            int currentW = source.getWidth();
+            int currentH = sourceHeight;
+            while (currentH / 2 >= height && currentW / 2 >= width) {
+                currentW /= 2;
+                currentH /= 2;
+                current = resized(current, currentW, currentH,
                         RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-                g.setRenderingHint(RenderingHints.KEY_RENDERING,
-                        RenderingHints.VALUE_RENDER_QUALITY);
-                g.drawImage(source, 0, 0, width, height, null);
-            } finally {
-                g.dispose();
             }
-            return copy;
+            if (currentW != width || currentH != height || current == source) {
+                current = resized(current, width, height,
+                        RenderingHints.VALUE_INTERPOLATION_BICUBIC);
+            }
+            return current;
         } catch (RuntimeException | OutOfMemoryError e) {
             // A failed conversion costs speed, never the sprite itself.
             System.err.println("[SpriteCache] Could not prepare an image ("
                     + e + ") — using it as decoded.");
             return source;
         }
+    }
+
+    /** One resize into a fresh premultiplied image, at quality settings. */
+    private static BufferedImage resized(BufferedImage source, int width, int height,
+                                         Object interpolation) {
+        BufferedImage copy = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB_PRE);
+        Graphics2D g = copy.createGraphics();
+        try {
+            // Quality is affordable here in a way it is not per-frame: this
+            // runs once per sprite for the life of the process.
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, interpolation);
+            g.setRenderingHint(RenderingHints.KEY_RENDERING,
+                    RenderingHints.VALUE_RENDER_QUALITY);
+            g.setRenderingHint(RenderingHints.KEY_ALPHA_INTERPOLATION,
+                    RenderingHints.VALUE_ALPHA_INTERPOLATION_QUALITY);
+            g.drawImage(source, 0, 0, width, height, null);
+        } finally {
+            g.dispose();
+        }
+        return copy;
     }
 
     /**

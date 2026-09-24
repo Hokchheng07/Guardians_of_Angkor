@@ -14,7 +14,7 @@ public class VisualEffect {
         /** Smoke cloud where an enemy materialises. */
         SPAWN_POOF,
 
-        /** Arrow travelling from Preah Ream to a target. */
+        /** Shot travelling from the hero to a target. */
         ARROW,
 
         /** Burst where an arrow connects. */
@@ -24,7 +24,9 @@ public class VisualEffect {
         WARD_BREAK,
 
         /** Flourish where a power-up is claimed. */
-        BOON_CLAIMED
+        BOON_CLAIMED,
+
+        ENRAGE_BURST,
     }
 
     private final Kind kind;
@@ -35,11 +37,25 @@ public class VisualEffect {
     private final int lifetimeTicks;
     private final double scale;
 
+    /**
+     * Marks the heavier version of an effect — a killing blow rather than a
+     * mid-word shot, a verse finished rather than a bolt deflected. The engine
+     * only says which moments matter; the renderer decides whether a given
+     * hero draws them any differently.
+     */
+    private final boolean major;
+
     private int ticks;
 
     /** Stationary effect, e.g. a spawn puff. */
     public VisualEffect(Kind kind, double x, double y, int lifetimeTicks, double scale) {
-        this(kind, x, y, x, y, lifetimeTicks, scale);
+        this(kind, x, y, x, y, lifetimeTicks, scale, false);
+    }
+
+    /** Stationary effect that may be flagged {@link #isMajor() major}. */
+    public VisualEffect(Kind kind, double x, double y, int lifetimeTicks, double scale,
+                        boolean major) {
+        this(kind, x, y, x, y, lifetimeTicks, scale, major);
     }
 
     /** Travelling effect, e.g. an arrow. */
@@ -47,7 +63,16 @@ public class VisualEffect {
                         double startX, double startY,
                         double endX, double endY,
                         int lifetimeTicks, double scale) {
+        this(kind, startX, startY, endX, endY, lifetimeTicks, scale, false);
+    }
+
+    /** Travelling effect that may be flagged {@link #isMajor() major}. */
+    public VisualEffect(Kind kind,
+                        double startX, double startY,
+                        double endX, double endY,
+                        int lifetimeTicks, double scale, boolean major) {
         this.kind = kind;
+        this.major = major;
         this.startX = startX;
         this.startY = startY;
         this.endX = endX;
@@ -88,6 +113,10 @@ public class VisualEffect {
 
     public double getScale() {
         return scale;
+    }
+
+    public boolean isMajor() {
+        return major;
     }
 
     public double getEndX() {

@@ -1,11 +1,6 @@
 package com.guardiansofangkor.engine;
 
-import com.guardiansofangkor.entities.Enemy;
-import com.guardiansofangkor.entities.Player;
-import com.guardiansofangkor.entities.PowerUp;
-import com.guardiansofangkor.entities.PowerUpType;
-import com.guardiansofangkor.entities.Projectile;
-import com.guardiansofangkor.entities.VisualEffect;
+import com.guardiansofangkor.entities.*;
 import com.guardiansofangkor.i18n.Language;
 import com.guardiansofangkor.i18n.WordBank;
 import com.guardiansofangkor.matching.ResolveResult;
@@ -37,8 +32,14 @@ public class GameState {
     private final List<VisualEffect> effects = new ArrayList<>();
     private final TargetResolver resolver = new TargetResolver();
     private final WaveManager waveManager;
-    private final WordBank wordBank;
-    private final Language language;
+
+    /**
+     * Not final: the Options screen can change the language between (or even
+     * during) runs. Changed only via {@link #setLanguage(Language)}, which is
+     * what keeps this field and the word bank it feeds in step.
+     */
+    private WordBank wordBank;
+    private Language language;
     private final Player player = new Player();
 
     /** Timed boons and banked shield charges. */
@@ -62,6 +63,15 @@ public class GameState {
      */
     private Difficulty difficulty;
 
+    /**
+     * Who is defending the temple. Cosmetic — nothing in the simulation reads
+     * it — but it lives here rather than in the renderer because it is part of
+     * the run: it is saved with it, restored with it, and like the tier it is
+     * only changed between runs.
+     */
+    private Hero hero = Hero.defaultChoice();
+
+    private boolean isSandbox;
     /**
      * The loading-and-countdown beat before play starts.
      *
@@ -216,7 +226,7 @@ public class GameState {
         updateProjectiles(timeScale);
         updateBoss(timeScale);
 
-        if (!gameOver && !victory) {
+        if (!gameOver && !victory && !isSandbox) {
             spawnFromWaveManager();
         }
 
@@ -313,11 +323,47 @@ public class GameState {
     }
 
     private void updateEnemies(double timeScale) {
+        List<Enemy> newSummons = new ArrayList<>();
+
         for (Enemy enemy : enemies) {
             enemy.update(timeScale);
             if (enemy.isProjectileDue()) {
                 throwProjectileFrom(enemy);
             }
+
+// Catch the Arak's summon trigger and spawn Ahps around it!
+            if (enemy.isSummonSpawnDue()) {
+
+                // Spawn a batch of exactly 3 Ahps
+                for (int i = 0; i < 3; i++) {
+                    Enemy ahp = waveManager.spawnSpecific(EnemyType.AHP, enemies);
+                    if (ahp != null) {
+
+                        // FIX: Spawn them in the background relative to the Arak's chest/head!
+                        double randomX = enemy.getX() + (Math.random() * 120 - 60);
+                        double randomY = enemy.getAnchorY()
+                                - (enemy.getType().getTargetHeight() * enemy.depthScale() * 0.6)
+                                + (Math.random() * 40 - 20);
+
+                        // Redeploy them and aim them directly at the temple
+                        ahp.redeployAt(randomX, randomY, GameConfig.TEMPLE_CENTER_X);
+                        newSummons.add(ahp);
+                    }
+                }
+                enemy.clearSummonSpawnDue();
+            }
+        }
+
+        // Safely add the spawned Ahps to the world with a spawn poof
+        for (Enemy minion : newSummons) {
+            enemies.add(minion);
+            effects.add(new VisualEffect(
+                    VisualEffect.Kind.SPAWN_POOF,
+                    minion.getX(),
+                    minion.getAnchorY() - minion.getType().getTargetHeight()
+                            * minion.depthScale() * 0.35,
+                    GameConfig.POOF_TICKS,
+                    minion.depthScale()));
         }
 
         List<Enemy> breached = new ArrayList<>();
@@ -329,9 +375,6 @@ public class GameState {
         for (Enemy enemy : breached) {
             enemies.remove(enemy);
             resolvedThisLevel++;
-            // Deliberately does NOT clear the buffer here. dropStaleBuffer owns
-            // that at the end of the tick — see the note there on why two
-            // authorities were worse than one.
             absorbOrLoseLife(enemy.getX(), enemy.getAnchorY(),
                     enemy.getType().breachDamage());
         }
@@ -707,7 +750,6 @@ public class GameState {
         handleCompleted(minion);
         return ResolveResult.completed(minion, typedSoFar);
     }
-
     private ResolveResult deflectVenom(Projectile bolt, String typedSoFar) {
         bossBuffer = "";
         boss.clearTyping();
@@ -717,9 +759,96 @@ public class GameState {
         score += scoreForProjectile(bolt);
 
         player.tryFire();
-        spawnArrowAt(bolt.getX(), bolt.getY());
+        spawnArrowAt(bolt.getX(), bolt.getY(), false, false);
         resolver.reset();
         return ResolveResult.completed(bolt, typedSoFar);
+    }
+
+    private void handleCompleted(WordTarget target) {
+        if (target instanceof Enemy enemy) {
+            charactersTyped += GraphemeCounter.count(enemy.getWord());
+            score += scoreForEnemy(enemy);
+
+            if (enemy.hasMoreWords()) {
+                // A mini-boss: this word only staggers it.
+                enemy.advanceChain();
+                enemy.flashHit(GameConfig.HIT_FLASH_TICKS * 2);
+            } else {
+                enemy.defeat();
+                enemiesDefeated++;
+                resolvedThisLevel++;
+                maybeDropPowerUp(enemy);
+
+                // SPLITTER MECHANIC: If we just killed a Splitter, detonate it!
+                if (enemy.getType() == EnemyType.SPLITTER) {
+                    triggerSplitterBurst(enemy);
+                }
+            }
+        } else if (target instanceof Projectile projectile) {
+            projectile.intercept();
+            projectilesIntercepted++;
+            charactersTyped += GraphemeCounter.count(projectile.getWord());
+            score += scoreForProjectile(projectile);
+        } else if (target instanceof PowerUp powerUp) {
+            charactersTyped += GraphemeCounter.count(powerUp.getWord());
+            claimPowerUp(powerUp);
+        }
+
+
+
+        // A kill always looses an arrow, regardless of the shot cooldown
+        player.tryFire();
+        spawnArrowAt(aimPointX(target), aimPointY(target), false, true);
+
+        resolver.reset();
+    }
+
+    /** Makes all Garudas on the screen lunge forward as punishment for a typo. */
+    private void triggerGarudaDash() {
+        for (Enemy enemy : enemies) {
+            if (enemy.getType() == EnemyType.GARUDA && enemy.isActive()) {
+                // Dash forward by 50 pixels!
+                enemy.dashForward(50.0);
+
+                // Add a visual impact flash so the player clearly sees the punishment
+                effects.add(new VisualEffect(
+                        VisualEffect.Kind.IMPACT,
+                        enemy.getX(),
+                        enemy.getAnchorY() - enemy.getType().getTargetHeight() * enemy.depthScale() * 0.5,
+                        GameConfig.POOF_TICKS,
+                        enemy.depthScale() * 1.5));
+            }
+        }
+    }
+
+    /** Shatters the Splitter into two fast-moving projectiles. */
+    private void triggerSplitterBurst(Enemy enemy) {
+        double spawnY = enemy.getAnchorY()
+                - (enemy.getType().getTargetHeight() * enemy.depthScale() * 0.5);
+
+        // Hardcode 150 ticks (2.5 seconds) so they don't instantly crash in Sandbox!
+        int flightTicks = 150;
+
+        // Spawn two projectiles
+        for (int i = 0; i < 2; i++) {
+            // Draw a fresh word for each so they don't share the same letters
+            String word = wordBank.projectileWord(collectWordsInPlay());
+
+            // Offset their X coordinates slightly so they don't perfectly overlap visually
+            double offsetX = (i == 0) ? -25 : 25;
+
+            projectiles.add(new Projectile(
+                    word,
+                    enemy.getX() + offsetX, spawnY,
+                    GameConfig.TEMPLE_CENTER_X, GameConfig.GROUND_LINE_Y - 40,
+                    flightTicks));
+        }
+
+        // Add a cool expanding ring effect to sell the "shatter"
+        effects.add(new VisualEffect(
+                VisualEffect.Kind.WARD_BREAK,
+                enemy.getX(), spawnY,
+                GameConfig.POWERUP_FLASH_TICKS, enemy.depthScale()));
     }
 
     /** A word of the verse landed. Only a whole verse hurts the boss. */
@@ -745,7 +874,7 @@ public class GameState {
             // their own terms — the player is not powerless without the sweep,
             // just obliged to spend keystrokes on it.
             player.tryFire();
-            spawnArrowAt(GameConfig.TEMPLE_CENTER_X, boss.getVenomOriginY());
+            spawnArrowAt(GameConfig.TEMPLE_CENTER_X, boss.getVenomOriginY(), true, true);
         }
         return ResolveResult.completed(boss, typedSoFar);
     }
@@ -865,13 +994,17 @@ public class GameState {
         // venom and the boss's summons against one buffer itself rather than
         // going through the ordinary resolver, because the verse is not a
         // WordTarget the resolver knows how to advance.
+// The finale takes the keyboard entirely...
         if (boss != null && boss.isFighting()) {
             ResolveResult bossResult = handleBossInput(typedSoFar);
             lastResult = bossResult;
-            // The finale bypasses the resolver, so it has to feed the combo
-            // itself — otherwise accuracy would stop mattering at exactly the
-            // point in the run where it matters most.
             applyToCombo(bossResult);
+
+            // GARUDA MECHANIC: Catch typos during the boss fight!
+            if (bossResult.status().name().equals("TYPO")) {
+                triggerGarudaDash();
+            }
+
             return bossResult;
         }
 
@@ -886,7 +1019,10 @@ public class GameState {
         switch (result.status()) {
             case COMPLETED -> handleCompleted(result.target());
             case LOCKED, AMBIGUOUS -> handleProgress(result.candidates());
-            case TYPO, EMPTY -> {
+
+            // GARUDA MECHANIC: Trigger the punishment dash!
+            case TYPO -> triggerGarudaDash();
+            case EMPTY -> {
                 // No state change beyond what the resolver already tracked.
             }
         }
@@ -915,45 +1051,25 @@ public class GameState {
         }
     }
 
-    private void handleCompleted(WordTarget target) {
-        if (target instanceof Enemy enemy) {
-            charactersTyped += GraphemeCounter.count(enemy.getWord());
-            score += scoreForEnemy(enemy);
-
-            if (enemy.hasMoreWords()) {
-                // A mini-boss: this word only staggers it. It stays on the
-                // field, and progress does not advance, because it has not
-                // actually been resolved yet.
-                enemy.advanceChain();
-                enemy.flashHit(GameConfig.HIT_FLASH_TICKS * 2);
-            } else {
-                enemy.defeat();
-                enemiesDefeated++;
-                resolvedThisLevel++;
-                maybeDropPowerUp(enemy);
-            }
-        } else if (target instanceof Projectile projectile) {
-            projectile.intercept();
-            projectilesIntercepted++;
-            charactersTyped += GraphemeCounter.count(projectile.getWord());
-            score += scoreForProjectile(projectile);
-        } else if (target instanceof PowerUp powerUp) {
-            charactersTyped += GraphemeCounter.count(powerUp.getWord());
-            claimPowerUp(powerUp);
-        }
-
-        // A kill always looses an arrow, regardless of the shot cooldown — the
-        // hero must visibly be the one who landed the blow.
-        player.tryFire();
-        spawnArrowAt(aimPointX(target), aimPointY(target));
-
-        resolver.reset();
-    }
 
     private void handleProgress(List<WordTarget> candidates) {
         for (WordTarget candidate : candidates) {
             if (candidate instanceof Enemy enemy) {
                 enemy.flashHit(GameConfig.HIT_FLASH_TICKS);
+
+                // WAKE THE BULL: Check if it's a Charger that hasn't sprinted yet
+                if (enemy.getType() == EnemyType.CHARGER && !enemy.isSprinting()) {
+                    enemy.triggerSprint();
+
+                    // Spawn a massive dust cloud at its feet!
+                    effects.add(new VisualEffect(
+                            VisualEffect.Kind.ENRAGE_BURST,
+                            enemy.getX(),
+                            enemy.getAnchorY() - 30, // Shifted up slightly to hit its chest
+                            GameConfig.POOF_TICKS + 10, // slightly longer duration
+                            1.0));
+                }
+
             } else if (candidate instanceof Projectile projectile) {
                 projectile.flashHit(GameConfig.HIT_FLASH_TICKS);
             }
@@ -965,7 +1081,7 @@ public class GameState {
         boolean fired = player.tryFire();
         if (fired && candidates.size() == 1) {
             WordTarget only = candidates.get(0);
-            spawnArrowAt(aimPointX(only), aimPointY(only));
+            spawnArrowAt(aimPointX(only), aimPointY(only), false, false);
         }
     }
 
@@ -1123,16 +1239,24 @@ public class GameState {
         resolver.reset();
     }
 
-    private void spawnArrowAt(double targetX, double targetY) {
+    /**
+     * Looses a shot at a point and schedules its impact.
+     *
+     * @param majorShot   a climactic shot, such as the blow a finished verse lands
+     * @param majorImpact a word finished rather than a letter typed
+     */
+    private void spawnArrowAt(double targetX, double targetY,
+                              boolean majorShot, boolean majorImpact) {
+        player.aimAt(targetX);
         effects.add(new VisualEffect(
                 VisualEffect.Kind.ARROW,
                 player.getX(), player.getBowY(),
                 targetX, targetY,
-                GameConfig.ARROW_FLIGHT_TICKS, 1.0));
+                GameConfig.ARROW_FLIGHT_TICKS, 1.0, majorShot));
         effects.add(new VisualEffect(
                 VisualEffect.Kind.IMPACT,
                 targetX, targetY,
-                GameConfig.ARROW_FLIGHT_TICKS + 10, 1.0));
+                GameConfig.ARROW_FLIGHT_TICKS + 10, 1.0, majorImpact));
     }
 
     private int scoreForEnemy(Enemy enemy) {
@@ -1148,6 +1272,23 @@ public class GameState {
         int base = GraphemeCounter.count(projectile.getWord()) * 25;
         return (int) Math.round(base
                 * DifficultyCurve.scoreMultiplier(getLevel()) * combo.getMultiplier());
+    }
+
+    /** Injects an enemy directly onto the field from the Sandbox tray. */
+    public void spawnInSandbox(EnemyType type) {
+        if (!isSandbox || waveManager == null) return;
+
+        Enemy enemy = waveManager.spawnSpecific(type, enemies);
+        if (enemy != null) {
+            enemies.add(enemy);
+            effects.add(new VisualEffect(
+                    VisualEffect.Kind.SPAWN_POOF,
+                    enemy.getX(),
+                    enemy.getAnchorY() - enemy.getType().getTargetHeight()
+                            * enemy.depthScale() * 0.35,
+                    GameConfig.POOF_TICKS,
+                    enemy.depthScale()));
+        }
     }
 
     /** Wipes the run and starts over from level 1, keeping personal bests. */
@@ -1319,6 +1460,9 @@ public class GameState {
      * half and forget to check whether that was the last one.
      */
     private void damage(int halves) {
+        if (isSandbox) {
+            return;
+        }
         halfLives -= Math.max(0, halves);
         if (halfLives <= 0) {
             halfLives = 0;
@@ -1417,6 +1561,14 @@ public class GameState {
         return running;
     }
 
+    public boolean isSandbox() {
+        return isSandbox;
+    }
+
+    public void setSandboxMode(boolean isSandbox) {
+        this.isSandbox = isSandbox;
+    }
+
     public void setRunning(boolean running) {
         this.running = running;
     }
@@ -1465,6 +1617,45 @@ public class GameState {
     }
 
     /**
+     * Switches the typing language in place, without restarting the run.
+     *
+     * <p>Unlike the tier, language decides nothing about pacing or which boss
+     * ends the game — only which script the word bank hands out — so there is
+     * no reason to force a restart. Words already on the field keep the
+     * language they spawned with; the next word drawn is in the new one. A
+     * no-op when nothing changed. The renderer notices the change and swaps
+     * its fonts itself; this class knows nothing about Swing.
+     */
+    public void setLanguage(Language language) {
+        Language resolved = language == null ? Language.ENGLISH : language;
+        if (resolved == this.language) {
+            return;
+        }
+        this.language = resolved;
+        this.wordBank = new WordBank(this.language, this.random);
+        waveManager.setWordBank(this.wordBank);
+    }
+
+    /** Starts a fresh run on a chosen tier with a chosen hero. */
+    public void restartWith(Difficulty difficulty, Hero hero) {
+        setHero(hero);
+        restartWith(difficulty);
+    }
+
+    public Hero getHero() {
+        return hero;
+    }
+
+    /**
+     * Picks the hero for the next run. Meant for between runs — callers follow
+     * it with a restart, as the Sandbox and {@link #restartWith(Difficulty, Hero)}
+     * both do.
+     */
+    public void setHero(Hero hero) {
+        this.hero = hero == null ? Hero.defaultChoice() : hero;
+    }
+
+    /**
      * Flips the pause state and reports the result.
      *
      * <p>Refuses to pause a finished run — there is nothing to come back to, and
@@ -1486,7 +1677,8 @@ public class GameState {
                 getLevel(), score, getLives(), language,
                 Math.max(bestScore, score),
                 Math.max(bestLevel, getLevel()),
-                clearedTiers);
+                clearedTiers,
+                hero.getKey());
     }
 
     /** Which tiers have been beaten, as a progress ladder the menu can read. */
@@ -1515,6 +1707,7 @@ public class GameState {
         this.bestScore = data.bestScore();
         this.bestLevel = data.bestWave();
         restoreProgress(data);
+        this.hero = Hero.fromKey(data.heroKey());
 
         if (data.hasResumableRun()) {
             this.score = data.score();

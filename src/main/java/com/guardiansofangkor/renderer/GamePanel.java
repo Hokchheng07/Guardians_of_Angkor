@@ -4,6 +4,7 @@ import com.guardiansofangkor.engine.GameState;
 import com.guardiansofangkor.entities.AttackPhase;
 import com.guardiansofangkor.entities.Enemy;
 import com.guardiansofangkor.entities.EnemyType;
+import com.guardiansofangkor.entities.Hero;
 import com.guardiansofangkor.entities.Player;
 import com.guardiansofangkor.entities.PowerUp;
 import com.guardiansofangkor.entities.PowerUpType;
@@ -96,7 +97,7 @@ public class GamePanel extends JPanel {
     /** How far a mini-boss rocks back when a word in its chain is cleared. */
     private static final double STAGGER_LEAN = Math.toRadians(13);
 
-    /** Strength of the halo behind Preah Ream. Subtle by design. */
+    /** Strength of the halo behind the hero. Subtle by design. */
     private static final float RIM_LIGHT_ALPHA = 0.18f;
 
     /** Bob amplitude for a power-up waiting on the plaza. */
@@ -125,10 +126,17 @@ public class GamePanel extends JPanel {
     private final HUDRenderer hud;
     private final BossRenderer bossRenderer;
 
-    private final Font wordFont;
-    private final Font boltFont;
-    private final Font lockFont;
-    private final Font boonFont;
+    private Font wordFont;
+    private Font boltFont;
+    private Font lockFont;
+    private Font boonFont;
+
+    /**
+     * The language the word fonts were built for. The Options screen can change
+     * the language after this panel exists, and a Khmer word drawn in a Latin
+     * face renders as empty boxes, so paint checks this and rebuilds.
+     */
+    private Language fontLanguage;
 
     /** Set by Main each tick so the HUD can show the restart prompt. */
     private boolean restartArmed;
@@ -157,15 +165,22 @@ public class GamePanel extends JPanel {
         Language language = state.getLanguage();
         this.hud = new HUDRenderer(language);
         this.bossRenderer = new BossRenderer(language);
-        this.wordFont = FontManager.wordFont(language, 20, Font.BOLD);
-        this.boltFont = FontManager.wordFont(language, 17, Font.BOLD);
-        this.lockFont = FontManager.wordFont(language, 26, Font.BOLD);
-        this.boonFont = FontManager.wordFont(language, 18, Font.BOLD);
+        applyLanguage(language);
 
         setPreferredSize(new Dimension(GameConfig.SCREEN_WIDTH, GameConfig.SCREEN_HEIGHT));
         setBackground(COLOR_SKY_TOP);
         setDoubleBuffered(true);
         setFocusable(false);
+    }
+
+    /** Builds the fonts that draw typeable words, for {@code language}. */
+    private void applyLanguage(Language language) {
+        this.fontLanguage = language;
+        this.wordFont = FontManager.wordFont(language, 20, Font.BOLD);
+        this.boltFont = FontManager.wordFont(language, 17, Font.BOLD);
+        this.lockFont = FontManager.wordFont(language, 26, Font.BOLD);
+        this.boonFont = FontManager.wordFont(language, 18, Font.BOLD);
+        bossRenderer.setLanguage(language);
     }
 
     public void setRestartArmed(boolean restartArmed) {
@@ -219,6 +234,9 @@ public class GamePanel extends JPanel {
     }
 
     private void paintScene(Graphics g) {
+        if (state.getLanguage() != fontLanguage) {
+            applyLanguage(state.getLanguage());
+        }
         Graphics2D g2 = (Graphics2D) g.create();
         try {
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
@@ -250,6 +268,8 @@ public class GamePanel extends JPanel {
             bossRenderer.drawWorld(g2, state.getBoss(), sprites);
 
             drawEffects(g2, VisualEffect.Kind.SPAWN_POOF);
+            drawEffects(g2, VisualEffect.Kind.ENRAGE_BURST); // <-- ADD THIS HERE!
+
 
             // Painter's algorithm: things further from the temple are higher on
             // screen, so sorting by Y makes near monsters overlap far ones.
@@ -259,7 +279,9 @@ public class GamePanel extends JPanel {
                 drawEnemy(g2, enemy, typed, highlighted.contains(enemy), locked == enemy);
             }
 
-            drawPlayer(g2, state.getPlayer());
+
+
+            drawPlayer(g2, state.getPlayer(), state.getHero());
 
             for (Projectile projectile : state.getProjectiles()) {
                 // The finale publishes its candidates back into the resolver
@@ -305,6 +327,55 @@ public class GamePanel extends JPanel {
         }
     }
 
+    /** Violent red and gold explosion of sparks and speed-lines. */
+    private void drawEnrageBurst(Graphics2D g2, VisualEffect effect) {
+        double t = effect.getProgress();
+        // Stays solid for the first half, then fades fast
+        float alpha = (float) Math.max(0, 1.0 - (t * t));
+
+        Graphics2D rg = (Graphics2D) g2.create();
+        try {
+            rg.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
+
+            double cx = effect.getX();
+            double cy = effect.getY();
+
+            // 1. Inner explosive flash (bright yellow core that shrinks rapidly)
+            if (t < 0.3) {
+                double flashRadius = 45 * (1.0 - (t / 0.3));
+                rg.setColor(new Color(255, 255, 200));
+                rg.fill(new Ellipse2D.Double(cx - flashRadius, cy - flashRadius, flashRadius * 2, flashRadius * 2));
+            }
+
+            // 2. Expanding aggressive red shockwave ring
+            double waveRadius = 10 + t * 110;
+            rg.setColor(new Color(220, 40, 20)); // Fiery Red
+            rg.setStroke(new BasicStroke((float) (9 * (1 - t) + 1)));
+            rg.draw(new Ellipse2D.Double(cx - waveRadius, cy - waveRadius, waveRadius * 2, waveRadius * 2));
+
+            // 3. Jagged speed lines / sparks exploding outward
+            rg.setStroke(new BasicStroke((float) (4 * (1 - t) + 1), BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+
+            for (int i = 0; i < 14; i++) {
+                // Alternate colors between bright orange and gold
+                rg.setColor(i % 2 == 0 ? new Color(255, 100, 20) : new Color(255, 200, 50));
+
+                double angle = (i * Math.PI * 2 / 14) + (t * 0.3); // Slight spinning effect
+                double innerDist = 15 + t * 70;
+                double outerDist = innerDist + 25 + (1 - t) * 45; // Lines stretch then contract
+
+                double x1 = cx + Math.cos(angle) * innerDist;
+                double y1 = cy + Math.sin(angle) * innerDist;
+                double x2 = cx + Math.cos(angle) * outerDist;
+                double y2 = cy + Math.sin(angle) * outerDist;
+
+                rg.drawLine((int)x1, (int)y1, (int)x2, (int)y2);
+            }
+        } finally {
+            rg.dispose();
+        }
+    }
+
     private void drawBackdrop(Graphics2D g2) {
         BufferedImage bg = sprites.background();
         if (bg != null) {
@@ -325,7 +396,14 @@ public class GamePanel extends JPanel {
                            boolean isCandidate, boolean isLocked) {
 
         EnemyType type = enemy.getType();
-        BufferedImage sprite = sprites.sprite(type);
+
+        // Ask SpriteCache for the image. If the Bull is sprinting, ask for the sprint frame!
+        BufferedImage sprite;
+        if (type == EnemyType.CHARGER && enemy.isSprinting()) {
+            sprite = sprites.chargerSprintSprite();
+        } else {
+            sprite = sprites.sprite(type);
+        }
 
         double depth = enemy.depthScale();
 
@@ -338,15 +416,38 @@ public class GamePanel extends JPanel {
             alpha = (float) Math.max(0.0, 1.0 - t);
         }
 
+        // ENRAGED SIZE BOOST
+        if (type == EnemyType.CHARGER && enemy.isSprinting()) {
+            scale *= 1.25;
+        }
+
         int drawH = Math.max(1, (int) Math.round(type.getTargetHeight() * scale));
-        int drawW = Math.max(1, (int) Math.round(sprites.widthFor(type) * scale));
+
+        // FIX 1: Calculate width dynamically based on the active sprite's proportions,
+        // not the baseline walking sprite. This stops the horizontal squishing!
+        int drawW;
+        if (sprite != null) {
+            double aspect = sprite.getWidth() / (double) sprite.getHeight();
+            drawW = Math.max(1, (int) Math.round(drawH * aspect));
+        } else {
+            drawW = Math.max(1, (int) Math.round(sprites.widthFor(type) * scale));
+        }
+
 
         double bob = 0;
         int topY;
         int feetY;
         if (type.isGrounded()) {
             feetY = (int) Math.round(enemy.getAnchorY());
-            topY = feetY - drawH;
+
+            // FIX 2: The blue aura extends below the hooves. We sink the sprite
+            // down by 15% so the actual hooves touch the ground shadow.
+            int auraOffset = 0;
+            if (type == EnemyType.CHARGER && enemy.isSprinting()) {
+                auraOffset = (int)(drawH * 0.15);
+            }
+            topY = (feetY + auraOffset) - drawH;
+
         } else {
             double phase = enemy.getTicksAlive() * BOB_FREQUENCY * type.getSpeedMultiplier();
             bob = Math.sin(phase) * BOB_AMPLITUDE;
@@ -358,6 +459,8 @@ public class GamePanel extends JPanel {
         int cx = (int) Math.round(enemy.getX());
 
         Graphics2D eg = (Graphics2D) g2.create();
+
+        // ... [The rest of the method (try/finally block) remains exactly the same!]
         try {
             eg.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
 
@@ -372,6 +475,13 @@ public class GamePanel extends JPanel {
             boolean throwing = enemy.getAttackPhase() != AttackPhase.NONE;
             AffineTransform saved = eg.getTransform();
 
+            // ART ASSET FIX: The charging sprite faces left in the file instead of right.
+            // We invert its display facing here so it runs forward!
+            int displayFacing = enemy.getDirection();
+            if (type == EnemyType.CHARGER && enemy.isSprinting()) {
+                displayFacing = -displayFacing;
+            }
+
             if (throwing && sprite != null) {
                 // Real art gets the articulated throw: legs planted, torso pivots.
                 drawThrowingSprite(eg, sprite, enemy, cx, topY, drawW, drawH);
@@ -383,19 +493,37 @@ public class GamePanel extends JPanel {
                 applyStaggerRecoil(eg, enemy, cx, feetY);
 
                 if (sprite != null) {
-                    drawSprite(eg, sprite, enemy.getDirection(), cx, topY, drawW, drawH);
+                    drawSprite(eg, sprite, displayFacing, cx, topY, drawW, drawH);
                 } else {
                     drawPlaceholder(eg, cx, topY, drawW, drawH, isCandidate, isLocked);
                 }
             }
 
             if (enemy.getHitFlashTicks() > 0) {
-                drawHitFlash(eg, enemy, cx, topY, drawW, drawH, alpha);
+                drawHitFlash(eg, enemy, displayFacing, cx, topY, drawW, drawH, alpha);
             }
 
             eg.setTransform(saved);
 
-            drawWord(eg, enemy.getWord(), typed, isCandidate, cx, topY - 14, wordFont);
+            // SMING MECHANIC: Mask the middle letters if the spirit is obscured!
+            String displayWord = enemy.getWord();
+            if (type == EnemyType.SMING && enemy.isObscured()) {
+                int len = displayWord.length();
+                if (len > 2) {
+                    StringBuilder sb = new StringBuilder(len);
+                    for (int i = 0; i < len; i++) {
+                        // Reveal the first letter, the last letter, and anything already typed!
+                        if (i == 0 || i == len - 1 || i < typed.length()) {
+                            sb.append(displayWord.charAt(i));
+                        } else {
+                            sb.append('*');
+                        }
+                    }
+                    displayWord = sb.toString();
+                }
+            }
+
+            drawWord(eg, displayWord, typed, isCandidate, cx, topY - 14, wordFont);
 
             if (enemy.isChained()) {
                 drawChainPips(eg, enemy, cx, topY - 44);
@@ -670,16 +798,23 @@ public class GamePanel extends JPanel {
         }
     }
 
-    private void drawHitFlash(Graphics2D g2, Enemy enemy,
+    private void drawHitFlash(Graphics2D g2, Enemy enemy, int facing,
                               int cx, int topY, int drawW, int drawH, float alpha) {
         Graphics2D flash = (Graphics2D) g2.create();
         try {
             flash.setComposite(AlphaComposite.getInstance(
                     AlphaComposite.SRC_OVER, 0.4f * alpha));
 
-            BufferedImage white = sprites.silhouette(enemy.getType());
+            // Use the correct silhouette based on whether it is charging
+            BufferedImage white;
+            if (enemy.getType() == EnemyType.CHARGER && enemy.isSprinting()) {
+                white = sprites.chargerSprintSilhouette();
+            } else {
+                white = sprites.silhouette(enemy.getType());
+            }
+
             if (white != null) {
-                drawSprite(flash, white, enemy.getDirection(), cx, topY, drawW, drawH);
+                drawSprite(flash, white, facing, cx, topY, drawW, drawH);
             } else {
                 flash.setColor(Color.WHITE);
                 flash.fill(new RoundRectangle2D.Double(
@@ -692,12 +827,14 @@ public class GamePanel extends JPanel {
 
     // ---- player ------------------------------------------------------------
 
-    private void drawPlayer(Graphics2D g2, Player player) {
-        boolean firing = player.isFiring();
-        BufferedImage sprite = sprites.player(firing);
+    private void drawPlayer(Graphics2D g2, Player player, Hero hero) {
+        // Only a hero with two attack poses turns toward the target; for Preah
+        // Ream both sides are the same picture, so the facing changes nothing.
+        SpriteCache.Pose pose = SpriteCache.Pose.of(player.isFiring(), player.isAimingLeft());
+        BufferedImage sprite = sprites.hero(hero, pose);
 
         int height = GameConfig.PLAYER_HEIGHT;
-        int width = sprites.playerWidth(firing, height);
+        int width = sprites.heroWidth(hero, pose, height);
         int cx = (int) Math.round(player.getX());
         int feetY = (int) Math.round(player.getFeetY() + player.getRecoil() * 0.4);
         int topY = feetY - height;
@@ -706,7 +843,7 @@ public class GamePanel extends JPanel {
         g2.fill(new Ellipse2D.Double(
                 cx - width * 0.3, feetY - 9, width * 0.6, width * 0.16));
 
-        drawPlayerRimLight(g2, firing, cx, topY, width, height);
+        drawPlayerRimLight(g2, hero, pose, cx, topY, width, height);
 
         if (sprite != null) {
             g2.drawImage(sprite, cx - width / 2, topY, width, height, null);
@@ -727,11 +864,11 @@ public class GamePanel extends JPanel {
      * <p>Purely for separation — Preah Ream's dark red robe sits against a dark
      * temple silhouette and without this he merges into it. Kept low-alpha on
      * purpose: this is a rim light, not a spotlight, and pushing it further
-     * makes him look like he is on fire rather than lit from behind.
+     * makes the hero look on fire rather than lit from behind.
      */
-    private void drawPlayerRimLight(Graphics2D g2, boolean firing,
+    private void drawPlayerRimLight(Graphics2D g2, Hero hero, SpriteCache.Pose pose,
                                     int cx, int topY, int width, int height) {
-        BufferedImage glow = sprites.playerGlow(firing, height);
+        BufferedImage glow = sprites.heroGlow(hero, pose, height);
         if (glow == null) {
             return;
         }
@@ -852,8 +989,6 @@ public class GamePanel extends JPanel {
         double x = projectile.getX();
         double y = projectile.getY();
 
-        // Venom is purple and wordless, so it reads as "you cannot type this"
-        // before the player has time to look for a word that is not there.
         boolean venom = projectile.getKind() == Projectile.Kind.VENOM;
         Color edge = venom ? Palette.VENOM_EDGE : COLOR_BOLT_EDGE;
         Color core = venom ? Palette.VENOM_CORE : COLOR_BOLT_CORE;
@@ -870,42 +1005,54 @@ public class GamePanel extends JPanel {
         Graphics2D pg = (Graphics2D) g2.create();
         try {
             pg.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
-
             double radius = 15 * scale;
 
-            // Trailing wisp so the bolt reads as moving, not hanging.
-            pg.setComposite(AlphaComposite.getInstance(
-                    AlphaComposite.SRC_OVER, alpha * 0.28f));
-            pg.setColor(edge);
-            double heading = projectile.getHeading();
-            for (int i = 1; i <= 3; i++) {
-                double trail = radius * (1.0 - i * 0.22);
-                double tx = x - Math.cos(heading) * i * 13;
-                double ty = y - Math.sin(heading) * i * 13;
-                pg.fill(new Ellipse2D.Double(tx - trail, ty - trail, trail * 2, trail * 2));
-            }
+            // Ask for the sprite (Venom stays as a glowing orb)
+            BufferedImage sprite = venom ? null : sprites.customProjectile();
 
-            pg.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
-            if (isLocked) {
-                pg.setColor(COLOR_LOCKED_GLOW);
-                pg.fill(new Ellipse2D.Double(
-                        x - radius - 8, y - radius - 8,
-                        (radius + 8) * 2, (radius + 8) * 2));
+            if (sprite != null) {
+                int drawW = (int) Math.round(sprite.getWidth() * scale);
+                int drawH = (int) Math.round(sprite.getHeight() * scale);
+
+                if (isLocked) {
+                    pg.setColor(COLOR_LOCKED_GLOW);
+                    pg.fill(new Ellipse2D.Double(x - radius - 8, y - radius - 8, (radius + 8) * 2, (radius + 8) * 2));
+                }
+
+                AffineTransform saved = pg.getTransform();
+                pg.translate(x, y);
+                pg.rotate(projectile.getHeading()); // Rotates the image into the flight path
+                pg.drawImage(sprite, -drawW / 2, -drawH / 2, drawW, drawH, null);
+                pg.setTransform(saved);
+
+            } else {
+                // Trailing wisp so the bolt reads as moving, not hanging.
+                pg.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha * 0.28f));
+                pg.setColor(edge);
+                double heading = projectile.getHeading();
+                for (int i = 1; i <= 3; i++) {
+                    double trail = radius * (1.0 - i * 0.22);
+                    double tx = x - Math.cos(heading) * i * 13;
+                    double ty = y - Math.sin(heading) * i * 13;
+                    pg.fill(new Ellipse2D.Double(tx - trail, ty - trail, trail * 2, trail * 2));
+                }
+
+                pg.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
+                if (isLocked) {
+                    pg.setColor(COLOR_LOCKED_GLOW);
+                    pg.fill(new Ellipse2D.Double(x - radius - 8, y - radius - 8, (radius + 8) * 2, (radius + 8) * 2));
+                }
+                pg.setColor(edge);
+                pg.fill(new Ellipse2D.Double(x - radius, y - radius, radius * 2, radius * 2));
+                pg.setColor(core);
+                pg.fill(new Ellipse2D.Double(x - radius * 0.5, y - radius * 0.5, radius, radius));
             }
-            pg.setColor(edge);
-            pg.fill(new Ellipse2D.Double(x - radius, y - radius, radius * 2, radius * 2));
-            pg.setColor(core);
-            pg.fill(new Ellipse2D.Double(
-                    x - radius * 0.5, y - radius * 0.5, radius, radius));
 
             if (projectile.getHitFlashTicks() > 0) {
                 pg.setColor(Color.WHITE);
-                pg.fill(new Ellipse2D.Double(
-                        x - radius * 0.7, y - radius * 0.7, radius * 1.4, radius * 1.4));
+                pg.fill(new Ellipse2D.Double(x - radius * 0.7, y - radius * 0.7, radius * 1.4, radius * 1.4));
             }
 
-            // Venom carries a word too, and it is the only way to deflect one,
-            // so it needs a plate exactly as much as a thrown bolt does.
             if (projectile.isActive()) {
                 drawWord(pg, projectile.getWord(), typed, isCandidate,
                         (int) Math.round(x), (int) Math.round(y - radius - 12), boltFont);
@@ -1102,6 +1249,7 @@ public class GamePanel extends JPanel {
                 case IMPACT -> drawImpact(g2, effect);
                 case WARD_BREAK -> drawWardBreak(g2, effect);
                 case BOON_CLAIMED -> drawBoonClaimed(g2, effect);
+                case ENRAGE_BURST -> drawEnrageBurst(g2, effect); // <-- ADD THIS HERE!
             }
         }
     }
@@ -1178,6 +1326,9 @@ public class GamePanel extends JPanel {
     }
 
     private void drawArrow(Graphics2D g2, VisualEffect effect) {
+        if (drawHeroBolt(g2, effect, state.getHero())) {
+            return;
+        }
         Graphics2D ag = (Graphics2D) g2.create();
         try {
             double x = effect.getX();
@@ -1204,7 +1355,51 @@ public class GamePanel extends JPanel {
         }
     }
 
+    /**
+     * The hero's shot, from their effect sheet, turned to its heading.
+     *
+     * <p>The art points right, so rotating by the heading alone aims it. A bolt
+     * travelling leftward would then be drawn upside down — the ruby on the
+     * wrong side of the petals — so leftward shots are mirrored vertically
+     * first, which keeps the flower the right way up whichever way it flies.
+     *
+     * @return false when the art is missing, so the caller draws an arrow
+     */
+    private boolean drawHeroBolt(Graphics2D g2, VisualEffect effect, Hero hero) {
+        SpriteCache.ShotFx piece = effect.isMajor()
+                ? SpriteCache.ShotFx.GREAT_BOLT
+                : SpriteCache.ShotFx.BOLT;
+        BufferedImage bolt = sprites.shotFx(hero, piece);
+        SpriteCache.Cut cut = sprites.shotCut(hero, piece);
+        if (bolt == null || cut == null) {
+            return false;
+        }
+        double height = cut.drawHeight();
+        double width = height * bolt.getWidth() / (double) bolt.getHeight();
+        double heading = effect.getHeading();
+
+        Graphics2D bg = (Graphics2D) g2.create();
+        try {
+            bg.translate(effect.getX(), effect.getY());
+            bg.rotate(heading);
+            if (Math.cos(heading) < 0) {
+                bg.scale(1, -1);
+            }
+            // Anchor on the tip, so the bolt lands head-first on the target
+            // rather than with its tail.
+            bg.drawImage(bolt,
+                    (int) Math.round(-width * cut.headAt()), (int) Math.round(-height / 2),
+                    (int) Math.round(width), (int) Math.round(height), null);
+        } finally {
+            bg.dispose();
+        }
+        return true;
+    }
+
     private void drawImpact(Graphics2D g2, VisualEffect effect) {
+        if (drawHeroImpact(g2, effect, state.getHero())) {
+            return;
+        }
         double t = effect.getProgress();
         // Only bloom for the back half of the lifetime — the front half is the
         // arrow still travelling toward this point.
@@ -1225,6 +1420,55 @@ public class GamePanel extends JPanel {
         } finally {
             ig.dispose();
         }
+    }
+
+    /**
+     * The hero's impact: a lotus opening where a finished word lands, a
+     * smaller petal burst for a mid-word shot.
+     *
+     * <p>Same timing as the ring it replaces — nothing for the front half of the
+     * lifetime, while the bolt is still in the air — so the two heroes' shots
+     * land on the same tick.
+     *
+     * @return false when the art is missing, so the caller draws the ring
+     */
+    private boolean drawHeroImpact(Graphics2D g2, VisualEffect effect, Hero hero) {
+        SpriteCache.ShotFx piece = effect.isMajor()
+                ? SpriteCache.ShotFx.BLOOM
+                : SpriteCache.ShotFx.BURST;
+        BufferedImage art = sprites.shotFx(hero, piece);
+        SpriteCache.Cut cut = sprites.shotCut(hero, piece);
+        if (art == null || cut == null) {
+            return false;
+        }
+        double t = effect.getProgress();
+        if (t < 0.5) {
+            return true;
+        }
+        double local = (t - 0.5) / 0.5;
+        // Opens quickly, then holds while it fades.
+        double grow = 1.0 - Math.pow(1.0 - Math.min(1.0, local * 1.6), 3);
+        double fullHeight = cut.drawHeight();
+        double height = fullHeight * (0.55 + 0.45 * grow);
+        double width = height * art.getWidth() / (double) art.getHeight();
+        float alpha = (float) Math.max(0, Math.min(1, 1.25 * (1.0 - local)));
+
+        Graphics2D ig = (Graphics2D) g2.create();
+        try {
+            ig.setComposite(AlphaComposite.getInstance(AlphaComposite.SRC_OVER, alpha));
+            // The bloom sits on its ripple, so its base goes a little below the
+            // aim point; the burst is centred.
+            double baseY = effect.isMajor()
+                    ? effect.getY() + height * 0.35
+                    : effect.getY() + height * 0.5;
+            ig.drawImage(art,
+                    (int) Math.round(effect.getX() - width / 2),
+                    (int) Math.round(baseY - height),
+                    (int) Math.round(width), (int) Math.round(height), null);
+        } finally {
+            ig.dispose();
+        }
+        return true;
     }
 
     // ---- words -------------------------------------------------------------

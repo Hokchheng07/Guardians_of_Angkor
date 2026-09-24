@@ -1,5 +1,6 @@
 package com.guardiansofangkor.save;
 
+import com.guardiansofangkor.audio.AudioSettings;
 import com.guardiansofangkor.i18n.Language;
 
 import java.util.LinkedHashSet;
@@ -17,6 +18,14 @@ import java.util.Set;
  * no benefit — the same reason the word bank is keyed by string. It is a set
  * rather than a "highest tier reached" number so a save that somehow records an
  * out-of-order clear cannot re-lock something the player has already beaten.
+ *
+ * <p>{@code heroKey} is the hero of the saved run, which is also the one the
+ * picker should open on next time. A string for the same package-cycle reason;
+ * blank means "never chosen" and the engine resolves it to the default hero.
+ *
+ * <p>{@code language} and {@code audio} are the Options screen's settings. They
+ * are preferences rather than run state, but they live in the same file so
+ * there is one save to lose rather than two to keep in step.
  */
 public record SaveData(
         int wave,
@@ -25,7 +34,9 @@ public record SaveData(
         Language language,
         int bestScore,
         int bestWave,
-        Set<String> clearedTiers) {
+        Set<String> clearedTiers,
+        String heroKey,
+        AudioSettings audio) {
 
     public SaveData {
         wave = Math.max(0, wave);
@@ -35,6 +46,22 @@ public record SaveData(
         bestScore = Math.max(0, bestScore);
         bestWave = Math.max(0, bestWave);
         clearedTiers = normalise(clearedTiers);
+        heroKey = heroKey == null ? "" : heroKey.trim().toLowerCase(Locale.ROOT);
+        audio = audio == null ? AudioSettings.defaults() : audio;
+    }
+
+    /** Constructor for callers with no audio settings, e.g. saves from older builds. */
+    public SaveData(int wave, int score, int lives, Language language,
+                    int bestScore, int bestWave, Set<String> clearedTiers,
+                    String heroKey) {
+        this(wave, score, lives, language, bestScore, bestWave, clearedTiers, heroKey,
+                AudioSettings.defaults());
+    }
+
+    /** Constructor for callers with no hero choice, e.g. saves from older builds. */
+    public SaveData(int wave, int score, int lives, Language language,
+                    int bestScore, int bestWave, Set<String> clearedTiers) {
+        this(wave, score, lives, language, bestScore, bestWave, clearedTiers, "");
     }
 
     /** Backwards-compatible constructor for callers with no unlock state. */
@@ -68,7 +95,8 @@ public record SaveData(
 
     /** A fresh-start save with no progress and nothing unlocked. */
     public static SaveData empty() {
-        return new SaveData(0, 0, 0, Language.ENGLISH, 0, 0, Set.of());
+        return new SaveData(0, 0, 0, Language.ENGLISH, 0, 0, Set.of(), "",
+                AudioSettings.defaults());
     }
 
     /** True when there is a run worth offering to continue. */
@@ -88,7 +116,7 @@ public record SaveData(
                 wave, score, lives, language,
                 Math.max(bestScore, runScore),
                 Math.max(bestWave, runWave),
-                clearedTiers);
+                clearedTiers, heroKey, audio);
     }
 
     /** Returns a copy that also records {@code tierKey} as beaten. */
@@ -98,6 +126,19 @@ public record SaveData(
         }
         Set<String> merged = new LinkedHashSet<>(clearedTiers);
         merged.add(tierKey.trim().toLowerCase(Locale.ROOT));
-        return new SaveData(wave, score, lives, language, bestScore, bestWave, merged);
+        return new SaveData(wave, score, lives, language, bestScore, bestWave, merged,
+                heroKey, audio);
+    }
+
+    /**
+     * Returns a copy carrying the Options screen's settings.
+     *
+     * <p>The game state does not own the volume sliders, so the autosave
+     * layers them onto its snapshot with this — otherwise every autosave would
+     * quietly reset the player's volume to default.
+     */
+    public SaveData withSettings(Language chosenLanguage, AudioSettings chosenAudio) {
+        return new SaveData(wave, score, lives, chosenLanguage, bestScore, bestWave,
+                clearedTiers, heroKey, chosenAudio);
     }
 }

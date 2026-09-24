@@ -3,6 +3,8 @@ package com.guardiansofangkor.renderer;
 import com.guardiansofangkor.engine.Difficulty;
 import com.guardiansofangkor.engine.MenuItem;
 import com.guardiansofangkor.engine.MenuState;
+import com.guardiansofangkor.entities.Hero;
+import com.guardiansofangkor.i18n.Language;
 import com.guardiansofangkor.util.CrashGuard;
 import com.guardiansofangkor.util.GameConfig;
 
@@ -43,9 +45,14 @@ public class MenuPanel extends JPanel {
     private final Timer animator;
     private double glowPhase;
 
+    private Runnable onStartSandbox = () -> { };
     private Runnable onStartRun = () -> { };
     private Runnable onResumeRun = () -> { };
     private Runnable onExit = () -> { };
+    private Runnable onSettingsChanged = () -> { };
+
+    /** The volume row being dragged, or null when no slider is held. */
+    private MenuState.OptionRow draggingSlider;
     private Consumer<MenuState.Screen> onScreenChanged = screen -> { };
 
     public MenuPanel(MenuState state, SpriteCache sprites) {
@@ -72,9 +79,36 @@ public class MenuPanel extends JPanel {
 
             @Override
             public void mouseClicked(MouseEvent e) {
+                // Options rows act on press (below), not on click — a slider
+                // has to respond the moment it is grabbed.
+                if (MenuPanel.this.state.getScreen() == MenuState.Screen.OPTIONS) {
+                    return;
+                }
                 if (hoverAt(e.getX(), e.getY())) {
                     activate();
                 }
+            }
+
+            @Override
+            public void mousePressed(MouseEvent e) {
+                if (MenuPanel.this.state.getScreen() == MenuState.Screen.OPTIONS) {
+                    pressOptions(e.getX(), e.getY());
+                }
+            }
+
+            @Override
+            public void mouseDragged(MouseEvent e) {
+                if (draggingSlider != null
+                        && MenuPanel.this.state.setSlider(draggingSlider,
+                                MenuRenderer.sliderValueAt(e.getX()))) {
+                    onSettingsChanged.run();
+                    repaint();
+                }
+            }
+
+            @Override
+            public void mouseReleased(MouseEvent e) {
+                draggingSlider = null;
             }
         };
         addMouseListener(mouse);
@@ -119,6 +153,10 @@ public class MenuPanel extends JPanel {
                 state.moveDown();
                 repaint();
             }
+            // The heroes stand side by side, so left and right move between
+            // them too. Elsewhere the lists are vertical and these do nothing.
+            case KeyEvent.VK_LEFT, KeyEvent.VK_A -> sideways(-1);
+            case KeyEvent.VK_RIGHT, KeyEvent.VK_D -> sideways(1);
             case KeyEvent.VK_ENTER, KeyEvent.VK_SPACE -> activate();
             case KeyEvent.VK_ESCAPE, KeyEvent.VK_BACK_SPACE -> {
                 // Exit is immediate; backing out gets the same press delay as
@@ -133,11 +171,72 @@ public class MenuPanel extends JPanel {
     }
 
     /**
+     * Left and Right: move between the side-by-side heroes, or change the
+     * highlighted setting. Elsewhere the lists are vertical and these do
+     * nothing.
+     */
+    private void sideways(int direction) {
+        switch (state.getScreen()) {
+            case HERO -> {
+                if (direction < 0) {
+                    state.moveUp();
+                } else {
+                    state.moveDown();
+                }
+            }
+            case OPTIONS -> {
+                if (state.adjust(direction)) {
+                    onSettingsChanged.run();
+                }
+            }
+            default -> {
+                // Vertical lists only.
+            }
+        }
+        repaint();
+    }
+
+    /** A mouse press on the Options card: grab a slider, pick a language, or go back. */
+    private void pressOptions(int x, int y) {
+        MenuState.OptionRow[] rows = MenuState.OptionRow.values();
+        for (MenuState.OptionRow row : rows) {
+            if (!MenuRenderer.optionRowBounds(row.ordinal()).contains(x, y)) {
+                continue;
+            }
+            state.select(row);
+            if (row.isSlider() && MenuRenderer.sliderTrackBounds(row).contains(x, y)) {
+                draggingSlider = row;
+                if (state.setSlider(row, MenuRenderer.sliderValueAt(x))) {
+                    onSettingsChanged.run();
+                }
+            } else if (row == MenuState.OptionRow.LANGUAGE) {
+                Language[] languages = Language.values();
+                for (int i = 0; i < languages.length; i++) {
+                    if (MenuRenderer.languageSegmentBounds(i).contains(x, y)
+                            && state.chooseLanguage(languages[i])) {
+                        onSettingsChanged.run();
+                    }
+                }
+            } else if (row == MenuState.OptionRow.BACK
+                    && MenuRenderer.optionBackBounds().contains(x, y)) {
+                dispatch(state.back());
+            }
+            repaint();
+            return;
+        }
+    }
+
+    /**
      * Registers a press. The action itself fires later, from
      * {@link MenuState#pollReady()} on the animation timer.
      */
     private void activate() {
-        state.activate();
+        // Most presses resolve later through pollReady; a settings toggle
+        // resolves at once, so its outcome has to be acted on here.
+        MenuState.Outcome outcome = state.activate();
+        if (outcome == MenuState.Outcome.SETTINGS_CHANGED) {
+            dispatch(outcome);
+        }
         repaint();
     }
 
@@ -146,8 +245,11 @@ public class MenuPanel extends JPanel {
         switch (outcome) {
             case START_RUN -> onStartRun.run();
             case RESUME_RUN -> onResumeRun.run();
+            case START_SANDBOX -> onStartSandbox.run();
             case EXIT -> onExit.run();
-            case OPEN_DIFFICULTY, BACK -> onScreenChanged.accept(state.getScreen());
+            case SETTINGS_CHANGED -> onSettingsChanged.run();
+            case OPEN_HERO, OPEN_DIFFICULTY, OPEN_OPTIONS, BACK ->
+                    onScreenChanged.accept(state.getScreen());
             case PENDING, NONE -> {
                 // Still depressing, or a locked entry that has already explained
                 // itself. Nothing to do either way.
@@ -161,18 +263,47 @@ public class MenuPanel extends JPanel {
      * @return true when the cursor is over an entry
      */
     private boolean hoverAt(int mouseX, int mouseY) {
-        int count = state.getScreen() == MenuState.Screen.MAIN
-                ? MenuItem.values().length
-                : Difficulty.values().length;
+        MenuState.Screen screen = state.getScreen();
+        if (screen == MenuState.Screen.OPTIONS) {
+            return hoverOptions(mouseX, mouseY);
+        }
+        int count = switch (screen) {
+            case MAIN -> MenuItem.values().length;
+            case HERO -> Hero.values().length;
+            case DIFFICULTY -> Difficulty.values().length;
+            case OPTIONS -> 0;
+        };
 
         for (int i = 0; i < count; i++) {
-            Rectangle bounds = MenuRenderer.entryBounds(i, state.getScreen());
-            if (bounds.contains(mouseX, mouseY)) {
-                if (state.getScreen() == MenuState.Screen.MAIN) {
-                    state.select(MenuItem.values()[i]);
-                } else {
-                    state.select(Difficulty.values()[i]);
+            // On the hero screen the portrait cards are targets as well as the
+            // list entries — they are the bigger, more obvious thing to click.
+            boolean over = MenuRenderer.entryBounds(i, screen).contains(mouseX, mouseY)
+                    || (screen == MenuState.Screen.HERO
+                        && MenuRenderer.heroCardBounds(i).contains(mouseX, mouseY));
+            if (over) {
+                switch (screen) {
+                    case MAIN -> state.select(MenuItem.values()[i]);
+                    case HERO -> state.select(Hero.values()[i]);
+                    case DIFFICULTY -> state.select(Difficulty.values()[i]);
+                    case OPTIONS -> { }
                 }
+                setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                repaint();
+                return true;
+            }
+        }
+        setCursor(Cursor.getDefaultCursor());
+        return false;
+    }
+
+    /** Highlights the Options row under the cursor, unless a slider is held. */
+    private boolean hoverOptions(int mouseX, int mouseY) {
+        if (draggingSlider != null) {
+            return true;
+        }
+        for (MenuState.OptionRow row : MenuState.OptionRow.values()) {
+            if (MenuRenderer.optionRowBounds(row.ordinal()).contains(mouseX, mouseY)) {
+                state.select(row);
                 setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
                 repaint();
                 return true;
@@ -210,7 +341,7 @@ public class MenuPanel extends JPanel {
             g2.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL,
                     RenderingHints.VALUE_STROKE_PURE);
 
-            renderer.draw(g2, state, sprites.menuBackground(), glowPhase);
+            renderer.draw(g2, state, sprites, glowPhase);
         } finally {
             g2.dispose();
         }
@@ -224,6 +355,15 @@ public class MenuPanel extends JPanel {
 
     public void setOnResumeRun(Runnable onResumeRun) {
         this.onResumeRun = onResumeRun == null ? () -> { } : onResumeRun;
+    }
+
+    public void setOnStartSandbox(Runnable onStartSandbox) {
+        this.onStartSandbox = onStartSandbox == null ? () -> { } : onStartSandbox;
+    }
+
+    /** Called whenever a setting changes; read the new values off the state. */
+    public void setOnSettingsChanged(Runnable onSettingsChanged) {
+        this.onSettingsChanged = onSettingsChanged == null ? () -> { } : onSettingsChanged;
     }
 
     public void setOnExit(Runnable onExit) {
