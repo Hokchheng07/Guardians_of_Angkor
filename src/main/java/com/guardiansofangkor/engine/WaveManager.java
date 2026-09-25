@@ -11,34 +11,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
-/**
- * Owns level composition, spawn pacing and escalation.
- *
- * <p>Enemies materialise back along a 45-degree line from the temple — up-left
- * or up-right — and walk down and inward toward it. Spawning happens on-screen
- * rather than beyond the edges, which is why every spawn is accompanied by a
- * puff of smoke: without it monsters would visibly pop into existence.
- *
- * <p>All difficulty scaling is delegated to {@link DifficultyCurve} so balance
- * lives in one readable place.
- */
 public class WaveManager {
 
-    /** Every 5th level is a Naga mini-boss level. */
-    private static final int MINI_BOSS_INTERVAL = 5;
-
-    /** Pause between a level being cleared and the next starting. */
     private static final int INTERMISSION_TICKS = GameConfig.TARGET_FPS * 2;
 
     private final WordBank wordBank;
     private final Random random;
 
-    /**
-     * Not final: the tier is chosen in the menu, after this manager exists, and
-     * a new run can pick a different one. It is only ever changed between runs.
-     */
     private Difficulty difficulty;
-
     private int level;
     private int remainingToSpawn;
     private int spawnCooldown;
@@ -54,32 +34,16 @@ public class WaveManager {
         this(wordBank, difficulty, new Random());
     }
 
-    /** Seeded constructor so level composition is reproducible in tests. */
     public WaveManager(WordBank wordBank, Random random) {
         this(wordBank, Difficulty.defaultChoice(), random);
     }
 
-    /** Seeded constructor so level composition is reproducible in tests. */
     public WaveManager(WordBank wordBank, Difficulty difficulty, Random random) {
         this.wordBank = wordBank == null ? new WordBank(null) : wordBank;
         this.difficulty = difficulty == null ? Difficulty.defaultChoice() : difficulty;
         this.random = random == null ? new Random() : random;
     }
 
-    /**
-     * Advances spawn timing by one tick.
-     *
-     * @param activeEnemies enemies currently on the field, used to detect a
-     *                      cleared level and to avoid duplicate words
-     * @return enemies spawned this tick; usually empty
-     */
-    /**
-     * True when the plaza already holds as many enemies as the tier allows.
-     *
-     * <p>Counts ACTIVE enemies only. A defeated one lingers through its death
-     * fade, and counting it would make every kill fail to free a slot for about
-     * a second — the player would clear something and watch nothing arrive.
-     */
     private boolean isPlazaFull(List<Enemy> activeEnemies) {
         int alive = 0;
         for (Enemy enemy : activeEnemies) {
@@ -94,9 +58,6 @@ public class WaveManager {
         List<Enemy> spawned = new ArrayList<>();
 
         if (!levelInProgress) {
-            // The tier's last wave has been cleared. Stop here rather than
-            // rolling into level 16 — the finale takes over from this point, and
-            // a finite tier that kept spawning would have no ending at all.
             if (isRunComplete()) {
                 return spawned;
             }
@@ -104,16 +65,15 @@ public class WaveManager {
                 intermissionCooldown--;
                 return spawned;
             }
+            // GAUNTLET UPGRADE: Hit the brakes! If it's a multiple of 10, stop spawning and let GameState trigger the boss.
+            if (level > 0 && level % 10 == 0) {
+                return spawned;
+            }
             beginLevel(level + 1);
         }
 
         if (remainingToSpawn > 0) {
             if (isPlazaFull(activeEnemies)) {
-                // Hold the queue rather than the clock. The cooldown does not
-                // tick while the plaza is full, so clearing one enemy does not
-                // immediately owe the player a backlog of everything that would
-                // have spawned while they were busy — which is precisely the
-                // spiral this cap exists to stop.
                 return spawned;
             }
             if (spawnCooldown > 0) {
@@ -131,7 +91,6 @@ public class WaveManager {
         return spawned;
     }
 
-    /** True the tick a level finishes, so GameState knows to autosave. */
     public boolean isLevelCleared() {
         return !levelInProgress && intermissionCooldown == INTERMISSION_TICKS;
     }
@@ -147,69 +106,44 @@ public class WaveManager {
         return spawnOne(activeEnemies, chooseType(), List.of());
     }
 
-    /**
-     * One extra enemy outside the wave schedule, for the boss's summoning
-     * phase.
-     *
-     * <p>Lives here rather than in {@link GameState} so there is exactly one
-     * piece of code that knows how a monster is placed on the field. A second
-     * copy in the finale would drift — the routes, the depth cap and the
-     * per-tier speed are all decisions this class already makes, and a summoned
-     * monster that ignored any of them would be visibly a different kind of
-     * thing from the ones the player spent the run learning.
-     *
-     * <p>Never a boss type: {@link WaveWeights} only ever returns rank and file,
-     * and the mini-boss slot is a property of a wave, which this is not part of.
-     *
-     * @param reservedWords words the finale's paragraph still wants, which a
-     *                      summon must not duplicate — one set of keystrokes
-     *                      meaning two things is the exact failure the whole
-     *                      word-at-a-time arrangement exists to prevent
-     */
     public Enemy spawnBossMinion(List<Enemy> activeEnemies, List<String> reservedWords) {
         EnemyType type = WaveWeights.pick(Math.max(1, level), difficulty, random);
         return spawnOne(activeEnemies == null ? List.of() : activeEnemies,
                 type, reservedWords == null ? List.of() : reservedWords);
     }
-    /** Spawns a specific enemy type on demand for Sandbox mode. */
+
+    public Enemy spawnBossMinion(EnemyType type, List<Enemy> activeEnemies, List<String> reservedWords) {
+        return spawnOne(activeEnemies == null ? List.of() : activeEnemies,
+                type, reservedWords == null ? List.of() : reservedWords);
+    }
+
     public Enemy spawnSpecific(EnemyType type, List<Enemy> activeEnemies) {
         return spawnOne(activeEnemies == null ? List.of() : activeEnemies, type, List.of());
     }
 
     private Enemy spawnOne(List<Enemy> activeEnemies, EnemyType type,
                            List<String> reservedWords) {
-        // Collect every word already promised to the field, including words
-        // later in a mini-boss chain that have not been revealed yet — otherwise
-        // a Naga's second word could duplicate a live enemy's.
         List<String> inPlay = new ArrayList<>(reservedWords);
         for (Enemy enemy : activeEnemies) {
             inPlay.addAll(enemy.getAllWords());
         }
 
-        // What this tier is allowed to say at this point in the run. Resolved
-        // per spawn rather than cached, because a level can tick over mid-wave.
         WordPolicy policy = currentPolicy();
-
         List<String> words = new ArrayList<>();
         int chainLength = chainLengthFor(type);
+
         for (int i = 0; i < chainLength; i++) {
             String word = wordFor(type, inPlay, policy);
             words.add(word);
             inPlay.add(word);
         }
 
-        // Alternate sides, with a random chance to repeat so it is not metronomic.
         int direction = random.nextInt(4) == 0 ? lastDirection : -lastDirection;
         lastDirection = direction;
 
-        // Ground types walk in from a flank or drift down the plaza; flyers do
-        // the same two shapes but at hover altitude and a true 45 degrees.
         ApproachPath[] routes = ApproachPath.forBehaviour(type.getGroundBehavior());
         ApproachPath path = routes[random.nextInt(routes.length)];
 
-        // Varying the run means monsters do not all appear at the same few pixels.
-        // The ceiling is per-type: a high-hovering flyer has less headroom before
-        // its word plate would collide with the HUD bar.
         int maxRun = path.maxRunFor(type.anchorTargetY(), type.spawnHeadroom());
         int run = path.runMin() + random.nextInt(Math.max(1, maxRun - path.runMin() + 1));
 
@@ -218,26 +152,10 @@ public class WaveManager {
         return new Enemy(type, path, words, run, direction, speed);
     }
 
-    /**
-     * The vocabulary this tier may draw on at the current level.
-     *
-     * <p>Resolved from the word bank's own JSON, so which levels get which words
-     * is a data question. Nothing here decides it.
-     */
     public WordPolicy currentPolicy() {
         return wordBank.policyFor(difficulty.getWordBankKey(), Math.max(1, level));
     }
 
-    /**
-     * Picks one word for a spawn.
-     *
-     * <p>Mini-bosses come from their own ranked pools rather than from the
-     * regular vocabulary with a length bonus bolted on. Two reasons: a boss word
-     * can then never have already turned up on an ordinary enemy earlier in the
-     * run, and the rank climbs with both the tier and the level band, so an Easy
-     * Naga and a Hard Naga are genuinely different fights rather than the same
-     * fight with two more letters.
-     */
     private String wordFor(EnemyType type, List<String> inPlay, WordPolicy policy) {
         if (type.isChainedType()) {
             return wordBank.bossWord(inPlay, policy);
@@ -246,14 +164,6 @@ public class WaveManager {
                 difficulty.getWordMinShift(), difficulty.getWordMaxShift());
     }
 
-    /**
-     * How many words this spawn must take to kill.
-     *
-     * <p>Mini-bosses get a randomised chain within their configured range, so
-     * two Naga encounters do not feel identical. The <em>final</em> boss is not
-     * here at all — see {@link BossFight}; it is a paragraph, not a chain, and
-     * it arrives after the last wave rather than inside it.
-     */
     private int chainLengthFor(EnemyType type) {
         int max = type.getMaxChainLength();
         if (max <= 1) {
@@ -264,45 +174,39 @@ public class WaveManager {
     }
 
     private EnemyType chooseType() {
-        if (level % MINI_BOSS_INTERVAL == 0 && remainingToSpawn == 1) {
-            return EnemyType.NAGA;
-        }
+        // Removed hardcoded Naga logic. We rely on the Gauntlet now!
         return WaveWeights.pick(level, difficulty, random);
     }
 
-    /**
-     * True once the tier's last wave has been cleared.
-     *
-     * <p>Not the same as winning any more: this is the cue for the final boss to
-     * arrive, and the run is only won once that fight is over. A tier with no
-     * final boss (Endless) never returns true here, which is the whole of what
-     * "endless" means mechanically.
-     */
+    // NEW GAUNTLET METHODS
+    public boolean isBossMilestoneDue() {
+        // Tells GameState that the intermission is over and a boss wave has been reached
+        return !levelInProgress && intermissionCooldown == 0 && level > 0 && level % 10 == 0;
+    }
+
+    public void resumeAfterBoss() {
+        // Restarts the engine for the next wave
+        beginLevel(level + 1);
+    }
+
     public boolean isRunComplete() {
         return difficulty.isWinnable()
                 && !levelInProgress
                 && level >= difficulty.getFinalLevel();
     }
 
-    /** The last level of a run on this tier, or {@code Integer.MAX_VALUE}. */
     public int getFinalLevel() {
         return difficulty.getFinalLevel();
     }
 
-    /** The tier this manager is running, for the HUD and the boss banner. */
     public Difficulty getDifficulty() {
         return difficulty;
     }
 
-    /**
-     * Switches tier. Only valid between runs — call {@link #reset()} after, or
-     * the current level would finish under different rules than it started.
-     */
     public void setDifficulty(Difficulty difficulty) {
         this.difficulty = difficulty == null ? Difficulty.defaultChoice() : difficulty;
     }
 
-    /** True when the level just begun is this tier's final boss level. */
     public boolean isFinalBossLevel() {
         return difficulty.hasFinalBoss() && level == difficulty.getFinalBossLevel();
     }
@@ -319,12 +223,10 @@ public class WaveManager {
         return remainingToSpawn;
     }
 
-    /** True while the game is between levels. Used by the HUD for the banner. */
     public boolean isIntermission() {
         return !levelInProgress && intermissionCooldown > 0;
     }
 
-    /** Restores spawn state after loading a save. */
     public void resumeAtLevel(int savedLevel) {
         this.level = Math.max(0, savedLevel);
         this.levelInProgress = false;
@@ -332,7 +234,6 @@ public class WaveManager {
         this.intermissionCooldown = INTERMISSION_TICKS;
     }
 
-    /** Full reset for a new run. */
     public void reset() {
         this.level = 0;
         this.levelInProgress = false;

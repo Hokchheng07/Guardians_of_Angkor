@@ -1,5 +1,7 @@
 package com.guardiansofangkor.engine;
 
+import com.guardiansofangkor.audio.SoundManager;
+
 /**
  * Navigation state for the front end: which screen is showing, what is
  * highlighted, and what activating it should do.
@@ -98,11 +100,13 @@ public class MenuState {
     // ---- navigation --------------------------------------------------------
 
     public void moveUp() {
+        SoundManager.playSFX("hover.wav");
         int count = itemCount();
         setIndex((currentIndex() - 1 + count) % count);
     }
 
     public void moveDown() {
+        SoundManager.playSFX("hover.wav");
         setIndex((currentIndex() + 1) % itemCount());
     }
 
@@ -131,6 +135,7 @@ public class MenuState {
             return Outcome.NONE;
         }
 
+        SoundManager.playSFX("click.wav");
         clearLockedFlash();
         pendingOutcome = resolved;
         pressTicks = PRESS_TICKS;
@@ -221,6 +226,7 @@ public class MenuState {
             return Outcome.NONE;
         }
         if (screen == Screen.DIFFICULTY) {
+            SoundManager.playSFX("click.wav");
             pendingOutcome = Outcome.BACK;
             pressTicks = PRESS_TICKS;
             return Outcome.PENDING;
@@ -231,13 +237,19 @@ public class MenuState {
     /** Jumps the highlight straight to an entry, e.g. from a mouse hover. */
     public void select(MenuItem item) {
         if (screen == Screen.MAIN && item != null) {
-            mainIndex = item.ordinal();
+            if (mainIndex != item.ordinal()) {
+                SoundManager.playSFX("hover.wav");
+                mainIndex = item.ordinal();
+            }
         }
     }
 
     public void select(Difficulty difficulty) {
         if (screen == Screen.DIFFICULTY && difficulty != null) {
-            difficultyIndex = difficulty.ordinal();
+            if (difficultyIndex != difficulty.ordinal()) {
+                SoundManager.playSFX("hover.wav");
+                difficultyIndex = difficulty.ordinal();
+            }
         }
     }
 
@@ -270,15 +282,6 @@ public class MenuState {
      * and earned. This is what greys the button out.
      */
     public boolean isEnabled(Difficulty difficulty) {
-        // Built is the only requirement. Tiers used to also have to be EARNED —
-        // clear Easy to open Medium, and so on — and that gate is gone: a
-        // player who wants Hard on their first run can have it, and anyone
-        // marking or demonstrating this does not have to play through two
-        // tiers to see the third.
-        //
-        // {@link DifficultyProgress} is deliberately still tracked. It is no
-        // longer a lock, but it is still the record of what has actually been
-        // beaten, which the end-of-run card and the save file both want.
         return difficulty != null && difficulty.isImplemented();
     }
 

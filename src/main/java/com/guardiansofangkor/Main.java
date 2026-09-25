@@ -11,6 +11,7 @@ import com.guardiansofangkor.matching.ResolveResult;
 import com.guardiansofangkor.renderer.GamePanel;
 import com.guardiansofangkor.renderer.MenuPanel;
 import com.guardiansofangkor.renderer.SandboxTray;
+import com.guardiansofangkor.audio.SoundManager;
 import com.guardiansofangkor.renderer.SpriteCache;
 import com.guardiansofangkor.save.AutosaveHook;
 import com.guardiansofangkor.save.SaveData;
@@ -76,6 +77,8 @@ public final class Main {
     }
 
     private static void launch() {
+        SoundManager.startPlaylist(-5.0f);
+
         Language language = Language.ENGLISH;
 
         SaveManager saveManager = new SaveManager();
