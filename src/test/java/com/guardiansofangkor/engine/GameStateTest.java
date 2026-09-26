@@ -132,18 +132,21 @@ class GameStateTest {
     }
 
     @Test
-    @DisplayName("the hero is chosen with the tier and saved with the run")
-    void heroIsSavedAndRestored() {
+    @DisplayName("the hero and temple are saved with the run")
+    void heroAndTempleAreSavedAndRestored() {
         GameState state = new GameState(Language.ENGLISH);
         assertEquals(Hero.defaultChoice(), state.getHero());
 
         state.restartWith(Difficulty.EASY, Hero.APSARA);
+        state.setTempleMap(TempleMap.BAYON);
         assertEquals(Hero.APSARA, state.getHero());
         assertEquals("apsara", state.toSaveData().heroKey());
+        assertEquals("bayon", state.toSaveData().templeMapKey());
 
         GameState resumed = new GameState(Language.ENGLISH);
         resumed.restoreFrom(state.toSaveData());
         assertEquals(Hero.APSARA, resumed.getHero());
+        assertEquals(TempleMap.BAYON, resumed.getTempleMap());
     }
 
     @Test
@@ -538,6 +541,32 @@ class GameStateTest {
         for (int tick = 0; tick <= BossFight.DEATH_TICKS + 2; tick++) {
             state.update();
         }
+    }
+
+    /** Plays a tier from just before {@code bossLevel} until its boss arrives. */
+    private static BossFight bossAt(Difficulty tier, int bossLevel) {
+        GameState state = new GameState(Language.ENGLISH);
+        state.restartWith(tier);
+        state.skipIntro();
+        state.getWaveManager().resumeAtLevel(bossLevel - 1);
+        for (int tick = 0; tick < 60_000 && !state.isBossActive(); tick++) {
+            state.update();
+            clearTheField(state);
+        }
+        assertTrue(state.isBossActive(), tier + " level " + bossLevel + " boss never came");
+        return state.getBoss();
+    }
+
+    @Test
+    @DisplayName("an early boss is a short fight; the finale is full length")
+    void earlyBossesAreShort() {
+        BossFight early = bossAt(Difficulty.MEDIUM, 10);
+        BossFight late = bossAt(Difficulty.MEDIUM, Difficulty.MEDIUM.getFinalLevel());
+
+        assertEquals(Difficulty.EASY.getBossSentenceCount(), early.getStageCount(),
+                "Medium's level-10 boss should be Easy-sized");
+        assertEquals(Difficulty.MEDIUM.getBossSentenceCount(), late.getStageCount(),
+                "the finale is the tier's full length");
     }
 
     @Test

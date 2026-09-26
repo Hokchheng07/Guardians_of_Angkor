@@ -11,6 +11,8 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
+import java.util.EnumSet;
 import java.util.Random;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -220,12 +222,10 @@ class DifficultyTest {
     @Test
     @DisplayName("each tier runs a longer game than the one below it")
     void tiersRunProgressivelyLonger() {
-        // Climbing the ladder means signing up for a longer run and more bosses:
-        // a boss closes every tenth level, so Easy meets two, Medium four and
-        // Hard all five.
-        assertEquals(20, Difficulty.EASY.getWaveCount());
-        assertEquals(40, Difficulty.MEDIUM.getWaveCount());
-        assertEquals(50, Difficulty.HARD.getWaveCount());
+        // Climbing the ladder means signing up for a longer run.
+        assertEquals(10, Difficulty.EASY.getWaveCount());
+        assertEquals(15, Difficulty.MEDIUM.getWaveCount());
+        assertEquals(20, Difficulty.HARD.getWaveCount());
 
         for (Difficulty tier : List.of(Difficulty.EASY, Difficulty.MEDIUM, Difficulty.HARD)) {
             assertTrue(tier.isWinnable(), tier + " must be finishable");
@@ -336,21 +336,69 @@ class DifficultyTest {
     }
 
     @Test
-    @DisplayName("a boss closes every tenth level, in the tier's own order")
+    @DisplayName("boss fights are short before level 30 and full length from 30 or at the finale")
+    void longBossFightsWaitForLevelThirty() {
+        int shortSentences = Difficulty.EASY.getBossParagraphCount()
+                * Difficulty.EASY.getBossSentencesPerParagraph();
+        for (Difficulty tier : Difficulty.values()) {
+            for (int level : new int[] {10, 20}) {
+                if (level == tier.getFinalBossLevel()) {
+                    continue;
+                }
+                int sentences = tier.bossParagraphCountAt(level)
+                        * tier.bossSentencesPerParagraphAt(level);
+                assertTrue(sentences <= shortSentences,
+                        tier + " level " + level + " asks for " + sentences
+                                + " sentences; early bosses must stay short");
+            }
+            assertEquals(tier.getBossSentenceCount(),
+                    tier.bossParagraphCountAt(30) * tier.bossSentencesPerParagraphAt(30),
+                    tier + " should reach its full-length boss at level 30");
+            if (tier.hasFinalBoss()) {
+                int finale = tier.getFinalBossLevel();
+                assertEquals(tier.getBossSentenceCount(),
+                        tier.bossParagraphCountAt(finale) * tier.bossSentencesPerParagraphAt(finale),
+                        tier + " finale should be full length");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("the tougher bosses never come before level 30, except as a finale")
+    void toughBossesComeLate() {
+        Set<EnemyType> tough = EnumSet.of(EnemyType.CORRUPTED_APSARA,
+                EnemyType.REAM_EYSO, EnemyType.KRONG_REAP);
+        for (Difficulty tier : Difficulty.values()) {
+            int last = tier == Difficulty.ENDLESS ? 200 : tier.getFinalLevel();
+            for (int level = 10; level <= last; level += 10) {
+                EnemyType boss = tier.getMilestoneBoss(level);
+                if (boss != null && tough.contains(boss) && level != tier.getFinalBossLevel()) {
+                    assertTrue(level >= Difficulty.FULL_LENGTH_BOSS_LEVEL,
+                            tier + " sends " + boss + " on level " + level);
+                }
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("a boss closes every tenth level and the final level, in the tier's own order")
     void gauntletEveryTenthLevel() {
         for (Difficulty tier : List.of(Difficulty.EASY, Difficulty.MEDIUM, Difficulty.HARD)) {
-            int bosses = tier.getFinalLevel() / 10;
-            // Only the tenth levels are asked — GameState summons on those alone.
-            for (int level = 10; level <= tier.getFinalLevel(); level += 10) {
-                assertNotNull(tier.getMilestoneBoss(level),
-                        tier + " level " + level + " needs a boss");
+            for (int level = 1; level <= tier.getFinalLevel(); level++) {
+                boolean expected = level % 10 == 0 || level == tier.getFinalLevel();
+                assertEquals(expected, tier.isBossLevel(level), tier + " level " + level);
+                if (expected) {
+                    assertNotNull(tier.getMilestoneBoss(level),
+                            tier + " level " + level + " needs a boss");
+                }
             }
             assertEquals(tier.getFinalBossType(), tier.getMilestoneBoss(tier.getFinalLevel()),
                     tier + " must end on its final boss");
-            assertTrue(bosses >= 2, tier + " should meet at least two bosses");
         }
-        assertEquals(EnemyType.YAKSHA_COMMANDER, Difficulty.EASY.getMilestoneBoss(10),
-                "every tier opens its gauntlet with the Yaksha Commander");
+        assertEquals(EnemyType.YAKSHA_COMMANDER, Difficulty.MEDIUM.getMilestoneBoss(10),
+                "Medium opens its gauntlet with the Yaksha Commander");
+        assertEquals(EnemyType.YAKSHA_COMMANDER, Difficulty.HARD.getMilestoneBoss(10),
+                "Hard opens its gauntlet with the Yaksha Commander");
     }
 
     @Test

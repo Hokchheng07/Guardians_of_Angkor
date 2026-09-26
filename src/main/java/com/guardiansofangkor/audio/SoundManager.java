@@ -1,5 +1,7 @@
 package com.guardiansofangkor.audio;
 
+import com.guardiansofangkor.engine.TempleMap;
+
 import javax.sound.sampled.*;
 import java.io.ByteArrayOutputStream;
 import java.net.URL;
@@ -49,6 +51,8 @@ public class SoundManager {
             "Background5.wav"
     };
 
+    private static final String[] MENU_PLAYLIST = {"Background1.wav"};
+
     private SoundManager() {}
 
     /** Takes the Options sliders. Applies to the music already playing, too. */
@@ -97,14 +101,31 @@ public class SoundManager {
     }
 
     public static void startPlaylist(float volume) {
+        startPlaylist(volume, PLAYLIST);
+    }
+
+    /** Starts the quiet title score from its first beat. */
+    public static void startMenuMusic() {
+        startPlaylist(toDecibels(musicGain), MENU_PLAYLIST);
+    }
+
+    /** Starts a playlist belonging to the selected temple. */
+    public static void startGameplayMusic(TempleMap temple) {
+        TempleMap resolved = temple == null ? TempleMap.defaultChoice() : temple;
+        startPlaylist(toDecibels(musicGain), resolved.getMusicTracks());
+    }
+
+    private static void startPlaylist(float volume, String[] requestedTracks) {
         stopBGM();
+        String[] tracks = requestedTracks == null || requestedTracks.length == 0
+                ? PLAYLIST.clone() : requestedTracks.clone();
         playlistRunning = true;
 
         playlistThread = new Thread(() -> {
             int currentIndex = 0;
             System.out.println("[SoundManager] Playlist thread started.");
             while (playlistRunning) {
-                String track = PLAYLIST[currentIndex];
+                String track = tracks[currentIndex];
                 try {
                     System.out.println("[SoundManager] Loading track: " + track);
                     bgmClip = loadClip(track);
@@ -133,7 +154,7 @@ public class SoundManager {
                     bgmClip.close();
 
                     // Move to the next track, looping back to 0 at the end
-                    currentIndex = (currentIndex + 1) % PLAYLIST.length;
+                    currentIndex = (currentIndex + 1) % tracks.length;
 
                 } catch (InterruptedException e) {
                     // Playlist was stopped/interrupted cleanly

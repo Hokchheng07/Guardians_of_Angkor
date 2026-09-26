@@ -27,7 +27,7 @@ class LevelPreviewTest {
     @Test
     @DisplayName("every boss level names its boss, including Endless past any table")
     void bossLevelsAreTelegraphed() {
-        for (int level = 10; level <= 40; level += 10) {
+        for (int level : new int[] {10, Difficulty.MEDIUM.getFinalLevel()}) {
             LevelPreview preview = LevelPreview.forLevel(level, Difficulty.MEDIUM);
             String boss = Difficulty.MEDIUM.getMilestoneBoss(level).getDisplayName();
             assertNotNull(preview, "Medium level " + level + " is a boss level");

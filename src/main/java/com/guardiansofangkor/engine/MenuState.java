@@ -26,6 +26,9 @@ public class MenuState {
         /** Hero picker, reached from New Game and from Sandbox. */
         HERO,
 
+        /** Temple picker, reached after choosing a guardian. */
+        TEMPLE,
+
         /** Difficulty picker, reached from the hero picker on the way to a run. */
         DIFFICULTY,
 
@@ -81,6 +84,9 @@ public class MenuState {
         /** Move to the difficulty picker. */
         OPEN_DIFFICULTY,
 
+        /** Move to the temple picker. */
+        OPEN_TEMPLE,
+
         /** Move to the Options screen. */
         OPEN_OPTIONS,
 
@@ -121,12 +127,16 @@ public class MenuState {
     private int mainIndex;
     private int difficultyIndex = Difficulty.defaultChoice().ordinal();
     private int heroIndex = Hero.defaultChoice().ordinal();
+    private int templeIndex = TempleMap.defaultChoice().ordinal();
 
     /**
      * The hero the picker opens on — the one last played, restored from the
      * save. Browsing without confirming does not change it.
      */
     private Hero preferredHero = Hero.defaultChoice();
+
+    /** The temple the picker opens on, restored from the save or last run. */
+    private TempleMap preferredTemple = TempleMap.defaultChoice();
 
     /**
      * Whether the hero picker was opened from Sandbox rather than New Game.
@@ -213,6 +223,7 @@ public class MenuState {
         Outcome resolved = switch (screen) {
             case MAIN -> resolveMainItem();
             case HERO -> resolveHero();
+            case TEMPLE -> resolveTemple();
             case DIFFICULTY -> resolveDifficulty();
             case OPTIONS -> Outcome.NONE;
         };
@@ -252,14 +263,25 @@ public class MenuState {
                 screen = Screen.DIFFICULTY;
                 difficultyIndex = Difficulty.defaultChoice().ordinal();
             }
+            case OPEN_TEMPLE -> {
+                screen = Screen.TEMPLE;
+                templeIndex = preferredTemple.ordinal();
+            }
             case OPEN_OPTIONS -> {
                 screen = Screen.OPTIONS;
                 optionIndex = 0;
             }
             // One step back at a time: the tier list returns to the hero it
             // was reached from, still highlighted, rather than all the way out.
-            case BACK -> screen = screen == Screen.DIFFICULTY ? Screen.HERO : Screen.MAIN;
-            case START_RUN, START_SANDBOX -> preferredHero = getSelectedHero();
+            case BACK -> screen = switch (screen) {
+                case DIFFICULTY -> Screen.TEMPLE;
+                case TEMPLE -> Screen.HERO;
+                default -> Screen.MAIN;
+            };
+            case START_RUN, START_SANDBOX -> {
+                preferredHero = getSelectedHero();
+                preferredTemple = getSelectedTemple();
+            }
             default -> {
                 // START_RUN, RESUME_RUN and EXIT are the caller's business.
             }
@@ -298,8 +320,13 @@ public class MenuState {
         return Outcome.OPEN_HERO;
     }
 
-    /** Confirming a hero moves on to the tier, or straight into the Sandbox. */
+    /** Confirming a hero always moves on to the temple picker. */
     private Outcome resolveHero() {
+        return Outcome.OPEN_TEMPLE;
+    }
+
+    /** A Sandbox skips difficulty; a normal run chooses its tier next. */
+    private Outcome resolveTemple() {
         return heroForSandbox ? Outcome.START_SANDBOX : Outcome.OPEN_DIFFICULTY;
     }
 
@@ -453,12 +480,19 @@ public class MenuState {
         }
     }
 
+    public void select(TempleMap temple) {
+        if (screen == Screen.TEMPLE && temple != null) {
+            templeIndex = temple.ordinal();
+        }
+    }
+
     /** Resets to a freshly opened main menu. */
     public void reset() {
         screen = Screen.MAIN;
         mainIndex = 0;
         difficultyIndex = Difficulty.defaultChoice().ordinal();
         heroIndex = preferredHero.ordinal();
+        templeIndex = preferredTemple.ordinal();
         heroForSandbox = false;
         optionIndex = 0;
         pendingOutcome = Outcome.NONE;
@@ -578,6 +612,18 @@ public class MenuState {
         return Difficulty.values()[difficultyIndex];
     }
 
+    public TempleMap getSelectedTemple() {
+        return TempleMap.values()[templeIndex];
+    }
+
+    public TempleMap getPreferredTemple() {
+        return preferredTemple;
+    }
+
+    public void setPreferredTemple(TempleMap temple) {
+        preferredTemple = temple == null ? TempleMap.defaultChoice() : temple;
+    }
+
     public int getSelectedIndex() {
         return currentIndex();
     }
@@ -594,6 +640,7 @@ public class MenuState {
         return switch (screen) {
             case MAIN -> MenuItem.values().length;
             case HERO -> Hero.values().length;
+            case TEMPLE -> TempleMap.values().length;
             case DIFFICULTY -> Difficulty.values().length;
             case OPTIONS -> OptionRow.values().length;
         };
@@ -603,6 +650,7 @@ public class MenuState {
         return switch (screen) {
             case MAIN -> mainIndex;
             case HERO -> heroIndex;
+            case TEMPLE -> templeIndex;
             case DIFFICULTY -> difficultyIndex;
             case OPTIONS -> optionIndex;
         };
@@ -612,6 +660,7 @@ public class MenuState {
         switch (screen) {
             case MAIN -> mainIndex = index;
             case HERO -> heroIndex = index;
+            case TEMPLE -> templeIndex = index;
             case DIFFICULTY -> difficultyIndex = index;
             case OPTIONS -> optionIndex = index;
         }

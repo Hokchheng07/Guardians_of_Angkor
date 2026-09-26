@@ -279,8 +279,8 @@ public class BossRenderer {
      * The rules of the finale, held on screen for {@link BossFight#BRIEFING_TICKS}.
      *
      * <p>Exists because the finale quietly changes three rules at once — words
-     * confirm on space, orbs are answered by typing them, a slip costs the
-     * verse — and none of them are guessable. The arrival card announces the
+     * confirm on space, orbs are answered by typing them, a slip restarts the
+     * current word — and none of them are guessable. The arrival card announces the
      * boss's name, which is the one thing the player can already see. Without
      * this, the first mistake is the tutorial.
      */
@@ -334,7 +334,7 @@ public class BossRenderer {
             for (String line : List.of(
                     "TYPE A VERSE WORD, THEN SPACE TO CONFIRM IT",
                     "TYPE AN ORB'S WORD TO DESTROY IT BEFORE IT LANDS",
-                    "A WRONG LETTER OR SPACE RESETS THE CURRENT VERSE")) {
+                    "A WRONG LETTER OR SPACE RESTARTS THE CURRENT WORD")) {
                 bg.setColor(Palette.HUD_TEXT_WHITE);
                 bg.drawString(line, x + 200, lineY);
                 lineY += fm.getHeight() + 5;

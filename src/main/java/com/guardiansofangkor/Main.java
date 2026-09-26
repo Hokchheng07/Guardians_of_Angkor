@@ -3,6 +3,7 @@ package com.guardiansofangkor;
 import com.guardiansofangkor.engine.GameLoop;
 import com.guardiansofangkor.engine.GameState;
 import com.guardiansofangkor.engine.MenuState;
+import com.guardiansofangkor.engine.TempleMap;
 import com.guardiansofangkor.entities.Hero;
 import com.guardiansofangkor.i18n.FontManager;
 import com.guardiansofangkor.i18n.Language;
@@ -94,6 +95,7 @@ public final class Main {
         // The hero too: the autosave writes whatever the state holds, so a
         // launch-and-quit must not quietly reset the player's pick to default.
         state.setHero(Hero.fromKey(saved.heroKey()));
+        state.setTempleMap(TempleMap.fromKey(saved.templeMapKey()));
 
         // The volume sliders belong to the menu, not the run, so they are
         // layered onto the run's snapshot here. Without it every autosave would
@@ -116,7 +118,7 @@ public final class Main {
 
         // Music starts at the saved volume, before the menu is on screen.
         SoundManager.apply(saved.audio());
-        SoundManager.startPlaylist();
+        SoundManager.startMenuMusic();
 
         SpriteCache sprites = new SpriteCache();
 
@@ -152,6 +154,7 @@ public final class Main {
 
         menuState.setProgress(state.getProgress());
         menuState.setPreferredHero(state.getHero());
+        menuState.setPreferredTemple(state.getTempleMap());
         MenuPanel menuPanel = new MenuPanel(menuState, sprites);
 
         JPanel root = new JPanel(new CardLayout());
@@ -197,7 +200,7 @@ public final class Main {
             input.tick();
             if (state.getShotsLoosed() != shotsHeard[0]) {
                 shotsHeard[0] = state.getShotsLoosed();
-                SoundManager.playSFX("Shooting.wav");
+                SoundManager.playSFX(state.getHero().getShotSound());
             }
             keys.tick();
             panel.tick();
@@ -234,6 +237,7 @@ public final class Main {
             input.requestFocusInWindow();
             loop.clearFailures();
             loop.start();
+            SoundManager.startGameplayMusic(state.getTempleMap());
             panel.repaint();
         };
 
@@ -246,6 +250,8 @@ public final class Main {
             // on the way back to the menu, not on their next launch.
             menuState.setProgress(state.getProgress());
             menuState.setPreferredHero(state.getHero());
+            menuState.setPreferredTemple(state.getTempleMap());
+            SoundManager.startMenuMusic();
             menuPanel.activateScreen();
         };
 
@@ -255,6 +261,7 @@ public final class Main {
             runTouched.set(true);
             tray.setVisible(false); // <-- Hide for normal play
             state.setSandboxMode(false); // Make sure Sandbox is off
+            state.setTempleMap(menuState.getSelectedTemple());
             state.restartWith(menuState.getSelectedDifficulty(), menuState.getSelectedHero());
             autosave.saveQuietly();
             showGame.run();
@@ -265,6 +272,7 @@ public final class Main {
             tray.setVisible(true);      // <-- Show the tray
             state.setSandboxMode(true); // Turn on God Mode & Disable Waves
             state.setHero(menuState.getSelectedHero());
+            state.setTempleMap(menuState.getSelectedTemple());
             state.restart();            // Clean the board
             state.skipIntro();          // Skip the 3-2-1 countdown for fast testing
             showGame.run();             // Swap the screen to the game panel

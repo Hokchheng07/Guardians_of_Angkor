@@ -76,7 +76,7 @@ public record LevelPreview(String hint) {
         // every fifth level, a mini-boss the gauntlet replaced.
         // getMilestoneBoss answers for the whole block of ten (11-19 all return
         // the level-10 boss), so the banner asks only on the tenth level itself.
-        EnemyType boss = level % 10 == 0 ? tier.getMilestoneBoss(level) : null;
+        EnemyType boss = tier.isBossLevel(level) ? tier.getMilestoneBoss(level) : null;
         EnemyType arriving = firstAnnounceable(WaveWeights.newlyUnlockedAt(level, tier));
 
         // A boss level can also be an arrival level, and which ones coincide

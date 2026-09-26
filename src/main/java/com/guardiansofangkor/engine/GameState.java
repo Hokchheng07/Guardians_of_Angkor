@@ -37,6 +37,12 @@ public class GameState {
     private int apsaraShotIndex = 0;
     private int apsaraCounterIndex = 0;
 
+    /** Ticks since the boss last loosed a projectile; see BOSS_VENOM_MIN_GAP_TICKS. */
+    private double ticksSinceBossVenom = Double.MAX_VALUE;
+
+    /** Boss shots that fell due while the previous one was still too recent. */
+    private int pendingBossVenom;
+
     /**
      * Shots loosed this session. The UI plays the bow sound when this rises;
      * the engine itself never touches audio, the same way it never touches
@@ -58,6 +64,9 @@ public class GameState {
      * only changed between runs.
      */
     private Hero hero = Hero.defaultChoice();
+
+    /** The environment and score chosen for this run. */
+    private TempleMap templeMap = TempleMap.defaultChoice();
 
     private boolean isSandbox;
     private IntroSequence intro = new IntroSequence();
@@ -122,7 +131,7 @@ public class GameState {
             elapsedTicks++;
         }
 
-        double timeScale = powerUpState.getTimeScale();
+        double timeScale = powerUpState.getTimeScale() * languageSpeedScale();
 
         powerUpState.update();
         player.update();
@@ -237,7 +246,7 @@ public class GameState {
 
     private void updateProjectiles(double timeScale) {
         for (Projectile projectile : projectiles) {
-            projectile.update(timeScale);
+            projectile.update(timeScale * GameConfig.PROJECTILE_SPEED_SCALE);
             if (projectile.hasJustLanded()) {
                 absorbOrLoseLife(projectile.getX(), projectile.getY(), GameConfig.DAMAGE_PROJECTILE);
             }
@@ -257,11 +266,19 @@ public class GameState {
             return;
         }
 
-        boss.reportField(countLiveBossAttacks());
+        // Queued shots count as live, so an attack phase cannot end while one
+        // is still waiting to be fired.
+        boss.reportField(countLiveBossAttacks() + pendingBossVenom);
         boss.update(timeScale);
 
+        ticksSinceBossVenom += timeScale;
         if (boss.isVenomDue()) {
+            pendingBossVenom++;
+        }
+        if (pendingBossVenom > 0 && bossVenomReady()) {
+            pendingBossVenom--;
             spitVenom();
+            ticksSinceBossVenom = 0;
         }
         if (boss.isMinionDue()) {
             summonMinion();
@@ -324,7 +341,12 @@ public class GameState {
         return live;
     }
 
+    private boolean bossVenomReady() {
+        return ticksSinceBossVenom >= GameConfig.BOSS_VENOM_MIN_GAP_TICKS;
+    }
+
     private void clearBossField() {
+        pendingBossVenom = 0;
         for (Enemy enemy : enemies) {
             if (enemy.isActive()) enemy.defeat();
         }
@@ -381,13 +403,16 @@ public class GameState {
             return;
         }
 
+        // Short fights before level 30, the tier's full length from there on —
+        // see Difficulty.FULL_LENGTH_BOSS_LEVEL.
+        int level = waveManager.getLevel();
+        int sentencesPerParagraph = difficulty.bossSentencesPerParagraphAt(level);
         List<String> script = wordBank.bossScript(
                 difficulty.getWordBankKey(),
-                difficulty.getBossParagraphCount(),
-                difficulty.getBossSentencesPerParagraph(),
+                difficulty.bossParagraphCountAt(level),
+                sentencesPerParagraph,
                 random);
-        boss = new BossFight(bossType, script,
-                difficulty.getBossSentencesPerParagraph(), difficulty, random);
+        boss = new BossFight(bossType, script, sentencesPerParagraph, difficulty, random);
 
         powerUps.clear();
         resolver.reset();
@@ -546,7 +571,7 @@ public class GameState {
         if (alive.isEmpty()) {
             resolver.noteExternalInput(false);
             resolver.noteExternalCandidates(List.of());
-            boss.resetVerse();
+            boss.restartWord();
             bossBuffer = "";
             return ResolveResult.typo("");
         }
@@ -653,7 +678,9 @@ public class GameState {
     }
 
     private void triggerApsaraCounterAttack() {
-        if (boss == null) return;
+        // A burst of typos would otherwise throw a bolt per keystroke.
+        if (boss == null || !bossVenomReady()) return;
+        ticksSinceBossVenom = 0;
 
         double spawnX = GameConfig.TEMPLE_CENTER_X;
         double spawnY = 250;
@@ -1064,6 +1091,8 @@ public class GameState {
         combo.reset();
         boss = null;
         bossBuffer = "";
+        pendingBossVenom = 0;
+        ticksSinceBossVenom = Double.MAX_VALUE;
         bufferInvalidated = false;
         wordBank.resetUsage();
 
@@ -1109,6 +1138,11 @@ public class GameState {
     public WaveManager getWaveManager() { return waveManager; }
     public WordBank getWordBank() { return wordBank; }
     public Language getLanguage() { return language; }
+
+    /** Khmer slows the whole battlefield; see GameConfig.KHMER_SPEED_SCALE. */
+    private double languageSpeedScale() {
+        return language == Language.KHMER ? GameConfig.KHMER_SPEED_SCALE : 1.0;
+    }
     public ResolveResult getLastResult() { return lastResult; }
 
     public String getTypedBuffer() {
@@ -1221,6 +1255,15 @@ public class GameState {
         this.hero = hero == null ? Hero.defaultChoice() : hero;
     }
 
+    public TempleMap getTempleMap() {
+        return templeMap;
+    }
+
+    /** Picks the temple for the next run; safe to call before a restart. */
+    public void setTempleMap(TempleMap templeMap) {
+        this.templeMap = templeMap == null ? TempleMap.defaultChoice() : templeMap;
+    }
+
     /**
      * Flips the pause state and reports the result.
      *
@@ -1240,7 +1283,8 @@ public class GameState {
                 Math.max(bestScore, score),
                 Math.max(bestLevel, getLevel()),
                 clearedTiers,
-                hero.getKey());
+                hero.getKey(),
+                templeMap.getKey());
     }
 
     public DifficultyProgress getProgress() {
@@ -1260,6 +1304,7 @@ public class GameState {
         this.bestLevel = data.bestWave();
         restoreProgress(data);
         this.hero = Hero.fromKey(data.heroKey());
+        this.templeMap = TempleMap.fromKey(data.templeMapKey());
 
         if (data.hasResumableRun()) {
             this.score = data.score();

@@ -100,3 +100,9 @@ tasks.register("fetchFonts") {
         "src/main/resources/fonts/README.md (skips any file already present)."
     dependsOn(fetchFontTasks)
 }
+
+// Store jar entries without compression. The bundled WAV and PNG files barely
+// shrink under deflate, so compressing them only made every build slower.
+tasks.withType<Jar>().configureEach {
+    entryCompression = ZipEntryCompression.STORED
+}

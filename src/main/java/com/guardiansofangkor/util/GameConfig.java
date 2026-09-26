@@ -272,6 +272,19 @@ public final class GameConfig {
      */
     public static final int MAX_SHIELD_CHARGES = 3;
 
+    /**
+     * Pace of every projectile in flight — Yeak bolts and boss venom alike.
+     * Below 1 stretches each flight, giving the player more time to read and
+     * type the word it carries.
+     */
+    public static final double PROJECTILE_SPEED_SCALE = 0.65;
+
+    /**
+     * Pace of the whole battlefield when playing in Khmer. Khmer words take
+     * longer to compose on the keyboard, so everything moves 1.5x slower.
+     */
+    public static final double KHMER_SPEED_SCALE = 1.0 / 1.5;
+
     /** Speed multiplier applied to everything while Slow Tide is running. */
     public static final double SLOW_TIDE_FACTOR = 0.45;
 
@@ -320,6 +333,13 @@ public final class GameConfig {
      * a verse is already in progress.
      */
     public static final int VENOM_FLIGHT_TICKS = TARGET_FPS * 5 + TARGET_FPS / 2;
+
+    /**
+     * Shortest gap between any two boss projectiles leaving the boss. Shots
+     * that fall due sooner wait their turn, so a barrage arrives one bolt at a
+     * time instead of as a single wall of words.
+     */
+    public static final int BOSS_VENOM_MIN_GAP_TICKS = TARGET_FPS;
 
     /** Shortest gap between boss attacks. */
     public static final int VENOM_INTERVAL_MIN_TICKS = TARGET_FPS * 2;

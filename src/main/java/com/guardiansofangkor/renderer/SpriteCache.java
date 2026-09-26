@@ -1,6 +1,7 @@
 package com.guardiansofangkor.renderer;
 
 import com.guardiansofangkor.engine.Difficulty;
+import com.guardiansofangkor.engine.TempleMap;
 import com.guardiansofangkor.entities.EnemyType;
 import com.guardiansofangkor.entities.Hero;
 import com.guardiansofangkor.entities.PowerUpType;
@@ -103,7 +104,6 @@ public class SpriteCache {
     /** How far the hero's halo bleeds past his silhouette. */
     public static final int GLOW_RADIUS = 14;
 
-    private static final String BACKGROUND_PATH = "/images/Background.png";
     private static final String MENU_BACKGROUND_PATH = "/images/Main-Menu-Background.png";
 
     /**
@@ -210,8 +210,8 @@ public class SpriteCache {
             new EnumMap<>(PowerUpType.class);
 
     private BufferedImage chargerSprintSprite;
-    private BufferedImage background;
-    private boolean backgroundAttempted;
+    private final Map<TempleMap, BufferedImage> backgrounds = new EnumMap<>(TempleMap.class);
+    private final Map<TempleMap, Boolean> backgroundAttempted = new EnumMap<>(TempleMap.class);
 
     private BufferedImage menuBackground;
     private boolean menuBackgroundAttempted;
@@ -368,14 +368,22 @@ public class SpriteCache {
 
     /** The temple backdrop, or null when it is missing. */
     public BufferedImage background() {
-        if (backgroundAttempted) {
-            return background;
+        return background(TempleMap.defaultChoice());
+    }
+
+    /** Loads the chosen temple once, also supplying the menu's preview card. */
+    public BufferedImage background(TempleMap temple) {
+        TempleMap resolved = temple == null ? TempleMap.defaultChoice() : temple;
+        if (Boolean.TRUE.equals(backgroundAttempted.get(resolved))) {
+            return backgrounds.get(resolved);
         }
-        backgroundAttempted = true;
-        background = toBackdrop(read(BACKGROUND_PATH));
+        backgroundAttempted.put(resolved, Boolean.TRUE);
+        BufferedImage background = toBackdrop(read(resolved.getBackgroundPath()));
         if (background == null) {
-            System.out.println("[SpriteCache] No background at " + BACKGROUND_PATH
+            System.out.println("[SpriteCache] No background at " + resolved.getBackgroundPath()
                     + " — falling back to a painted gradient.");
+        } else {
+            backgrounds.put(resolved, background);
         }
         return background;
     }

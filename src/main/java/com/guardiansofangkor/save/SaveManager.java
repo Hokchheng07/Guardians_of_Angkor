@@ -53,6 +53,9 @@ public class SaveManager {
      */
     private static final String KEY_HERO = "hero";
 
+    /** The temple being defended. Missing in older saves, which use Angkor Wat. */
+    private static final String KEY_TEMPLE_MAP = "templeMap";
+
     /**
      * Volume sliders, 0-100. Absent keys read as the default for that slider,
      * not as 0 — an older save must not open the game muted.
@@ -112,6 +115,7 @@ public class SaveManager {
                 readInt(props, KEY_BEST_WAVE),
                 readTiers(props),
                 props.getProperty(KEY_HERO, ""),
+                props.getProperty(KEY_TEMPLE_MAP, ""),
                 readAudio(props));
     }
 
@@ -157,6 +161,7 @@ public class SaveManager {
         props.setProperty(KEY_BEST_WAVE, Integer.toString(data.bestWave()));
         props.setProperty(KEY_CLEARED, String.join(",", data.clearedTiers()));
         props.setProperty(KEY_HERO, data.heroKey());
+        props.setProperty(KEY_TEMPLE_MAP, data.templeMapKey());
         props.setProperty(KEY_MASTER_VOLUME, Integer.toString(data.audio().master()));
         props.setProperty(KEY_SFX_VOLUME, Integer.toString(data.audio().sfx()));
         props.setProperty(KEY_MUSIC_VOLUME, Integer.toString(data.audio().music()));

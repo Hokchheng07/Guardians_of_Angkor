@@ -4,6 +4,7 @@ import com.guardiansofangkor.engine.Difficulty;
 import com.guardiansofangkor.engine.MenuItem;
 import com.guardiansofangkor.audio.AudioSettings;
 import com.guardiansofangkor.engine.MenuState;
+import com.guardiansofangkor.engine.TempleMap;
 import com.guardiansofangkor.entities.Hero;
 import com.guardiansofangkor.i18n.FontManager;
 import com.guardiansofangkor.i18n.Language;
@@ -139,6 +140,17 @@ public class MenuRenderer {
     private static final int CARD_EPITHET_OFFSET = 566;
     private static final int CARD_ARC = 12;
 
+    // ---- temple cards -----------------------------------------------------
+
+    private static final int TEMPLE_CARD_W = 390;
+    private static final int TEMPLE_CARD_H = 312;
+    private static final int TEMPLE_CARD_GAP = 32;
+    private static final int TEMPLE_CARD_Y = 190;
+    private static final int TEMPLE_CARDS_X = SCENE_X
+            + (GameConfig.SCREEN_WIDTH - SCENE_X
+            - (TEMPLE_CARD_W * 2 + TEMPLE_CARD_GAP)) / 2;
+    private static final int TEMPLE_IMAGE_H = 222;
+
     // ---- options card ------------------------------------------------------
     //
     // Same arrangement as the hero picker: the panel keeps the title and the
@@ -221,6 +233,8 @@ public class MenuRenderer {
         drawBackdrop(g2, sprites.menuBackground());
         if (state.getScreen() == MenuState.Screen.HERO) {
             drawHeroCards(g2, state, sprites, glowPhase);
+        } else if (state.getScreen() == MenuState.Screen.TEMPLE) {
+            drawTempleCards(g2, state, sprites, glowPhase);
         } else if (state.getScreen() == MenuState.Screen.OPTIONS) {
             drawOptionsCard(g2, state, glowPhase);
         }
@@ -230,6 +244,7 @@ public class MenuRenderer {
         switch (state.getScreen()) {
             case MAIN -> drawMainEntries(g2, state, glowPhase);
             case HERO -> drawHeroEntries(g2, state, glowPhase);
+            case TEMPLE -> drawTempleEntries(g2, state, glowPhase);
             case DIFFICULTY -> drawDifficultyEntries(g2, state, glowPhase);
             case OPTIONS -> drawOptionsHints(g2, state);
         }
@@ -289,6 +304,12 @@ public class MenuRenderer {
     /** Where hero card {@code index} is drawn, for mouse hit-testing. */
     public static Rectangle heroCardBounds(int index) {
         return new Rectangle(CARDS_X + index * (CARD_W + CARD_GAP), CARD_Y, CARD_W, CARD_H);
+    }
+
+    /** Where temple preview card {@code index} is drawn, for mouse hit-testing. */
+    public static Rectangle templeCardBounds(int index) {
+        return new Rectangle(TEMPLE_CARDS_X + index * (TEMPLE_CARD_W + TEMPLE_CARD_GAP),
+                TEMPLE_CARD_Y, TEMPLE_CARD_W, TEMPLE_CARD_H);
     }
 
     // ---- backdrop and panel ------------------------------------------------
@@ -676,9 +697,7 @@ public class MenuRenderer {
 
         g2.setFont(hintFont);
         g2.setColor(Palette.alpha(Palette.GOLD_FAINT, 0.9));
-        // Say where Enter goes: the same screen leads to a tier or into the
-        // Sandbox, and the player should not have to press to find out which.
-        String next = state.isHeroForSandbox() ? "ENTER  ·  sandbox" : "ENTER  ·  choose trial";
+        String next = "ENTER  ·  choose temple";
         g2.drawString(next, CENTRE_X - g2.getFontMetrics().stringWidth(next) / 2, y + 40);
         String back = "ESC  ·  back";
         g2.drawString(back, CENTRE_X - g2.getFontMetrics().stringWidth(back) / 2, y + 60);
@@ -691,6 +710,103 @@ public class MenuRenderer {
             drawHeroCard(g2, sprites, heroes[i], heroCardBounds(i),
                     state.getSelectedHero() == heroes[i], glowPhase);
         }
+    }
+
+    private void drawTempleEntries(Graphics2D g2, MenuState state, double glowPhase) {
+        g2.setColor(Palette.alpha(Palette.GOLD_FAINT, 0.95));
+        g2.setFont(hintFont);
+        drawTracked(g2, "CHOOSE YOUR TEMPLE", CENTRE_X, DIFFICULTY_HEADING_Y, 2.6);
+
+        TempleMap[] temples = TempleMap.values();
+        for (int i = 0; i < temples.length; i++) {
+            boolean selected = state.getSelectedTemple() == temples[i];
+            drawButton(g2,
+                    temples[i].getDisplayName().toUpperCase(java.util.Locale.ROOT),
+                    entryBounds(i, MenuState.Screen.TEMPLE).y,
+                    selected, true, false, glowPhase, pressFor(state, selected));
+        }
+
+        int y = DIFFICULTY_ENTRIES_Y + temples.length * ENTRY_PITCH;
+        g2.setFont(taglineFont);
+        g2.setColor(Palette.GOLD_WARM);
+        String tagline = state.getSelectedTemple().getTagline();
+        FontMetrics fm = g2.getFontMetrics();
+        g2.drawString(tagline, CENTRE_X - fm.stringWidth(tagline) / 2, y + 14);
+
+        g2.setFont(hintFont);
+        g2.setColor(Palette.alpha(Palette.GOLD_FAINT, 0.9));
+        String next = state.isHeroForSandbox() ? "ENTER  ·  defend temple" : "ENTER  ·  choose trial";
+        g2.drawString(next, CENTRE_X - g2.getFontMetrics().stringWidth(next) / 2, y + 40);
+        String back = "ESC  ·  back";
+        g2.drawString(back, CENTRE_X - g2.getFontMetrics().stringWidth(back) / 2, y + 60);
+    }
+
+    private void drawTempleCards(Graphics2D g2, MenuState state, SpriteCache sprites,
+                                 double glowPhase) {
+        TempleMap[] temples = TempleMap.values();
+        for (int i = 0; i < temples.length; i++) {
+            drawTempleCard(g2, sprites, temples[i], templeCardBounds(i),
+                    state.getSelectedTemple() == temples[i], glowPhase);
+        }
+    }
+
+    /** A wide, cinematic preview that also acts as a large mouse target. */
+    private void drawTempleCard(Graphics2D g2, SpriteCache sprites, TempleMap temple,
+                                Rectangle card, boolean selected, double glowPhase) {
+        double pulse = 0.5 + 0.5 * Math.sin(glowPhase);
+        RoundRectangle2D plate = new RoundRectangle2D.Double(
+                card.x, card.y, card.width, card.height, CARD_ARC, CARD_ARC);
+
+        if (selected) {
+            g2.setColor(Palette.alpha(Palette.GOLD, 0.18 + pulse * 0.12));
+            g2.setStroke(new BasicStroke(9f));
+            g2.draw(plate);
+        }
+
+        g2.setColor(Palette.STONE_DARK);
+        g2.fill(plate);
+
+        BufferedImage image = sprites.background(temple);
+        if (image != null) {
+            Graphics2D preview = (Graphics2D) g2.create();
+            try {
+                preview.clip(new RoundRectangle2D.Double(card.x, card.y,
+                        card.width, TEMPLE_IMAGE_H, CARD_ARC, CARD_ARC));
+                preview.drawImage(image, card.x, card.y, card.width, TEMPLE_IMAGE_H, null);
+            } finally {
+                preview.dispose();
+            }
+        }
+
+        // A dark foot gives both bright and dark previews the same readable label.
+        g2.setPaint(new GradientPaint(card.x, card.y + TEMPLE_IMAGE_H - 25,
+                Palette.alpha(Palette.STONE_DARK, 0), card.x, card.y + card.height,
+                Palette.STONE_DARK));
+        g2.fill(new RoundRectangle2D.Double(card.x, card.y + TEMPLE_IMAGE_H - 25,
+                card.width, card.height - TEMPLE_IMAGE_H + 25, CARD_ARC, CARD_ARC));
+
+        if (!selected) {
+            g2.setColor(Palette.alpha(Palette.STONE_DARK, 0.42));
+            g2.fill(plate);
+        }
+
+        g2.setColor(Palette.alpha(Palette.GOLD, selected ? 0.9 : 0.36));
+        g2.setStroke(new BasicStroke(selected ? 2f : 1.2f));
+        g2.draw(plate);
+
+        int cx = card.x + card.width / 2;
+        DisplayText.drawCentred(g2,
+                temple.getDisplayName().toUpperCase(java.util.Locale.ROOT),
+                heroNameFont, cx, card.y + 263,
+                selected ? Palette.GOLD_LIGHT : Palette.GOLD_DIM,
+                selected ? Palette.GOLD_LIGHT : Palette.GOLD_DIM,
+                selected ? Palette.GOLD : null, 0.4f, 1f);
+
+        g2.setFont(heroEpithetFont);
+        g2.setColor(selected ? Palette.GOLD_WARM : Palette.GOLD_GHOST);
+        FontMetrics fm = g2.getFontMetrics();
+        String tagline = temple.getTagline();
+        g2.drawString(tagline, cx - fm.stringWidth(tagline) / 2, card.y + 291);
     }
 
     /**

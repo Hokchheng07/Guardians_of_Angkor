@@ -24,14 +24,16 @@ public enum Hero {
             "/images/PreasReamCharacter/PreasReamIdle.png",
             "/images/PreasReamCharacter/PreasReamShootLeft.png",
             "/images/PreasReamCharacter/PreasReamShootRight.png",
-            "/images/PreasReamCharacter/PreasReamProjectile.png"),
+            "/images/PreasReamCharacter/PreasReamProjectile.png",
+            "PreahReamShot.wav"),
 
     APSARA("apsara", "Apsara", "Celestial Dancer",
             "Lotus light, loosed in a turn.",
             "/images/ApsaraCharacter/ApsaraIdle.png",
             "/images/ApsaraCharacter/ApsaraAttackLeft.png",
             "/images/ApsaraCharacter/ApsaraAttackRight.png",
-            "/images/ApsaraCharacter/ProjectilesOfApsara.png");
+            "/images/ApsaraCharacter/ProjectilesOfApsara.png",
+            "ApsaraShot.wav");
 
     private final String key;
     private final String displayName;
@@ -41,10 +43,11 @@ public enum Hero {
     private final String attackLeftPath;
     private final String attackRightPath;
     private final String effectSheetPath;
+    private final String shotSound;
 
     Hero(String key, String displayName, String epithet, String tagline,
          String idlePath, String attackLeftPath, String attackRightPath,
-         String effectSheetPath) {
+         String effectSheetPath, String shotSound) {
         this.key = key;
         this.displayName = displayName;
         this.epithet = epithet;
@@ -53,6 +56,7 @@ public enum Hero {
         this.attackLeftPath = attackLeftPath;
         this.attackRightPath = attackRightPath;
         this.effectSheetPath = effectSheetPath;
+        this.shotSound = shotSound;
     }
 
     /** The hero a brand-new player starts on. */
@@ -113,6 +117,11 @@ public enum Hero {
      */
     public String getEffectSheetPath() {
         return effectSheetPath;
+    }
+
+    /** The distinct sound identity played when this guardian attacks. */
+    public String getShotSound() {
+        return shotSound;
     }
 
     /**

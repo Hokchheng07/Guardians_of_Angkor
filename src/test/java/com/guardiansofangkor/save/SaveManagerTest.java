@@ -73,6 +73,20 @@ class SaveManagerTest {
     }
 
     @Test
+    @DisplayName("the chosen temple round-trips with the run")
+    void templeRoundTrips(@TempDir Path dir) {
+        SaveManager manager = new SaveManager(dir.resolve("progress.properties"));
+        SaveData original = new SaveData(3, 90, 2, Language.ENGLISH, 90, 3,
+                java.util.Set.of("easy"), "apsara", "bayon");
+
+        assertTrue(manager.save(original));
+        SaveData loaded = manager.load();
+
+        assertEquals("bayon", loaded.templeMapKey());
+        assertEquals(original, loaded);
+    }
+
+    @Test
     @DisplayName("a save written before heroes existed loads with no hero")
     void oldSavesHaveNoHero(@TempDir Path dir) throws IOException {
         Path file = dir.resolve("progress.properties");
@@ -82,6 +96,8 @@ class SaveManagerTest {
 
         assertEquals(4, loaded.wave());
         assertEquals("", loaded.heroKey(), "blank, which the engine reads as the default hero");
+        assertEquals("", loaded.templeMapKey(),
+                "blank, which the engine reads as the default temple");
     }
 
     @Test

@@ -49,6 +49,7 @@ class MenuStateTest {
 
     private static MenuState atDifficulty() {
         MenuState state = atHero();
+        press(state); // guardian -> temple
         press(state);
         return state;
     }
@@ -217,17 +218,17 @@ class MenuStateTest {
     // ---- hero screen -------------------------------------------------------
 
     @Test
-    @DisplayName("confirming a hero from New Game opens the difficulty picker")
-    void heroLeadsToDifficulty() {
+    @DisplayName("confirming a hero from New Game opens the temple picker")
+    void heroLeadsToTemple() {
         MenuState state = atHero();
 
-        assertEquals(MenuState.Outcome.OPEN_DIFFICULTY, press(state));
-        assertEquals(MenuState.Screen.DIFFICULTY, state.getScreen());
+        assertEquals(MenuState.Outcome.OPEN_TEMPLE, press(state));
+        assertEquals(MenuState.Screen.TEMPLE, state.getScreen());
     }
 
     @Test
-    @DisplayName("Sandbox opens the hero picker, and confirming starts the Sandbox")
-    void sandboxPicksHeroThenStarts() {
+    @DisplayName("Sandbox chooses a hero and temple before starting")
+    void sandboxPicksHeroAndTempleThenStarts() {
         MenuState state = new MenuState();
         state.select(MenuItem.SANDBOX);
 
@@ -235,9 +236,12 @@ class MenuStateTest {
         assertTrue(state.isHeroForSandbox());
         state.select(Hero.APSARA);
 
+        assertEquals(MenuState.Outcome.OPEN_TEMPLE, press(state));
+        state.select(TempleMap.BAYON);
         assertEquals(MenuState.Outcome.START_SANDBOX, press(state),
-                "the Sandbox has no tier to choose");
+                "the Sandbox chooses a temple but has no tier");
         assertEquals(Hero.APSARA, state.getSelectedHero());
+        assertEquals(TempleMap.BAYON, state.getSelectedTemple());
     }
 
     @Test
@@ -276,10 +280,13 @@ class MenuStateTest {
     void startingRunRemembersHero() {
         MenuState state = atHero();
         state.select(Hero.APSARA);
-        press(state);
+        press(state); // temple
+        state.select(TempleMap.BAYON);
+        press(state); // difficulty
 
         assertEquals(MenuState.Outcome.START_RUN, press(state));
         assertEquals(Hero.APSARA, state.getPreferredHero());
+        assertEquals(TempleMap.BAYON, state.getPreferredTemple());
 
         state.reset();
         state.select(MenuItem.NEW_GAME);
@@ -303,8 +310,8 @@ class MenuStateTest {
     }
 
     @Test
-    @DisplayName("back from the difficulty picker returns to the hero, still chosen")
-    void backFromDifficultyReturnsToHero() {
+    @DisplayName("back from the temple picker returns to the hero, still chosen")
+    void backFromTempleReturnsToHero() {
         MenuState state = atHero();
         state.select(Hero.APSARA);
         press(state);
@@ -325,6 +332,18 @@ class MenuStateTest {
         assertEquals(Hero.defaultChoice(), Hero.fromKey(null));
         assertEquals(Hero.defaultChoice(), Hero.fromKey(""));
         assertEquals(Hero.defaultChoice(), Hero.fromKey("garuda"));
+    }
+
+    @Test
+    @DisplayName("temple save keys round-trip, and unknown keys fall back")
+    void templeKeysRoundTrip() {
+        for (TempleMap temple : TempleMap.values()) {
+            assertEquals(temple, TempleMap.fromKey(temple.getKey()));
+            assertEquals(temple,
+                    TempleMap.fromKey("  " + temple.getKey().toUpperCase() + " "));
+        }
+        assertEquals(TempleMap.defaultChoice(), TempleMap.fromKey(null));
+        assertEquals(TempleMap.defaultChoice(), TempleMap.fromKey("unknown"));
     }
 
     @Test
@@ -509,6 +528,10 @@ class MenuStateTest {
     @DisplayName("back steps out one screen at a time without exiting")
     void backReturnsToMain() {
         MenuState state = atDifficulty();
+
+        assertEquals(MenuState.Outcome.PENDING, state.back());
+        assertEquals(MenuState.Outcome.BACK, settle(state));
+        assertEquals(MenuState.Screen.TEMPLE, state.getScreen());
 
         assertEquals(MenuState.Outcome.PENDING, state.back());
         assertEquals(MenuState.Outcome.BACK, settle(state));

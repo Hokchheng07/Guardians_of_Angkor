@@ -4,6 +4,7 @@ import com.guardiansofangkor.audio.SoundManager;
 import com.guardiansofangkor.engine.Difficulty;
 import com.guardiansofangkor.engine.MenuItem;
 import com.guardiansofangkor.engine.MenuState;
+import com.guardiansofangkor.engine.TempleMap;
 import com.guardiansofangkor.entities.Hero;
 import com.guardiansofangkor.i18n.Language;
 import com.guardiansofangkor.util.CrashGuard;
@@ -211,7 +212,7 @@ public class MenuPanel extends JPanel {
      */
     private void sideways(int direction) {
         switch (state.getScreen()) {
-            case HERO -> {
+            case HERO, TEMPLE -> {
                 if (direction < 0) {
                     state.moveUp();
                 } else {
@@ -286,7 +287,7 @@ public class MenuPanel extends JPanel {
             case START_SANDBOX -> onStartSandbox.run();
             case EXIT -> onExit.run();
             case SETTINGS_CHANGED -> onSettingsChanged.run();
-            case OPEN_HERO, OPEN_DIFFICULTY, OPEN_OPTIONS, BACK -> {
+            case OPEN_HERO, OPEN_TEMPLE, OPEN_DIFFICULTY, OPEN_OPTIONS, BACK -> {
                 // A new screen starts on its default entry; that is not the
                 // player moving the highlight, so it makes no hover sound.
                 syncHighlight();
@@ -312,6 +313,7 @@ public class MenuPanel extends JPanel {
         int count = switch (screen) {
             case MAIN -> MenuItem.values().length;
             case HERO -> Hero.values().length;
+            case TEMPLE -> TempleMap.values().length;
             case DIFFICULTY -> Difficulty.values().length;
             case OPTIONS -> 0;
         };
@@ -321,11 +323,14 @@ public class MenuPanel extends JPanel {
             // list entries — they are the bigger, more obvious thing to click.
             boolean over = MenuRenderer.entryBounds(i, screen).contains(mouseX, mouseY)
                     || (screen == MenuState.Screen.HERO
-                        && MenuRenderer.heroCardBounds(i).contains(mouseX, mouseY));
+                        && MenuRenderer.heroCardBounds(i).contains(mouseX, mouseY))
+                    || (screen == MenuState.Screen.TEMPLE
+                        && MenuRenderer.templeCardBounds(i).contains(mouseX, mouseY));
             if (over) {
                 switch (screen) {
                     case MAIN -> state.select(MenuItem.values()[i]);
                     case HERO -> state.select(Hero.values()[i]);
+                    case TEMPLE -> state.select(TempleMap.values()[i]);
                     case DIFFICULTY -> state.select(Difficulty.values()[i]);
                     case OPTIONS -> { }
                 }

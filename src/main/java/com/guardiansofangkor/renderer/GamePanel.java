@@ -377,7 +377,7 @@ public class GamePanel extends JPanel {
     }
 
     private void drawBackdrop(Graphics2D g2) {
-        BufferedImage bg = sprites.background();
+        BufferedImage bg = sprites.background(state.getTempleMap());
         if (bg != null) {
             g2.drawImage(bg, 0, 0, GameConfig.SCREEN_WIDTH, GameConfig.SCREEN_HEIGHT, null);
             return;

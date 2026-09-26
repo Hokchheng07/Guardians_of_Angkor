@@ -70,8 +70,8 @@ public class WaveManager {
             if (isRunComplete()) {
                 return spawned;
             }
-            // GAUNTLET UPGRADE: Hit the brakes! If it's a multiple of 10, stop spawning and let GameState trigger the boss.
-            if (level > 0 && level % 10 == 0) {
+            // GAUNTLET UPGRADE: Hit the brakes on a boss level and let GameState trigger the boss.
+            if (difficulty.isBossLevel(level)) {
                 return spawned;
             }
             beginLevel(level + 1);
@@ -186,7 +186,7 @@ public class WaveManager {
     // NEW GAUNTLET METHODS
     public boolean isBossMilestoneDue() {
         // Tells GameState that the intermission is over and a boss wave has been reached
-        return !levelInProgress && intermissionCooldown == 0 && level > 0 && level % 10 == 0;
+        return !levelInProgress && intermissionCooldown == 0 && difficulty.isBossLevel(level);
     }
 
     public void resumeAfterBoss() {

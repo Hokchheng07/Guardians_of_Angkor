@@ -287,14 +287,27 @@ class BossFightTest {
     }
 
     @Test
-    @DisplayName("a mistype resets the verse in progress")
-    void typoResetsTheVerse() {
+    @DisplayName("a mistype restarts the current word, not the verse")
+    void typoRestartsTheWord() {
+        BossFight boss = fighting();
+        typeWord(boss, "one");
+        boss.submit("t");
+        boss.submit("tw");
+
+        assertEquals(BossFight.Result.TYPO, boss.submit("twx"));
+        assertEquals("", boss.getTyped(), "the word's letters are cleared");
+        assertEquals(1, boss.getWordIndex(), "but the confirmed first word stays done");
+        assertEquals("two", boss.getRemaining());
+    }
+
+    @Test
+    @DisplayName("a mistype on the first word simply restarts that word")
+    void typoOnFirstWord() {
         BossFight boss = fighting();
         boss.submit("o");
         boss.submit("on");
 
         assertEquals(BossFight.Result.TYPO, boss.submit("onx"));
-        assertEquals("", boss.getTyped(), "the verse should be back to the start");
         assertEquals(0, boss.getWordIndex());
         assertEquals("one", boss.getRemaining());
     }
@@ -309,22 +322,23 @@ class BossFightTest {
         typeVerse(boss);
         assertEquals(2, boss.getStage());
 
-        boss.submit("f");
-        boss.submit("fx");
+        typeWord(boss, "five");
+        boss.submit("s");
+        boss.submit("sx");
 
         assertEquals(2, boss.getStage(), "cleared verses must stay cleared");
         assertEquals("five six", boss.currentSentence());
-        assertEquals(0, boss.getWordIndex(), "but the verse itself starts over");
+        assertEquals(1, boss.getWordIndex(), "and so do the words of this verse");
     }
 
     @Test
-    @DisplayName("a reset verse can be typed again from scratch")
-    void resetVersesAreStillWinnable() {
+    @DisplayName("a restarted word can be typed again and the verse finished")
+    void restartedWordsAreStillWinnable() {
         BossFight boss = fighting();
         typeWord(boss, "one");
         boss.submit("tx");
 
-        assertEquals(BossFight.Result.STAGE_CLEARED, typeVerse(boss));
+        assertEquals(BossFight.Result.STAGE_CLEARED, typeWord(boss, "two"));
     }
 
     @Test

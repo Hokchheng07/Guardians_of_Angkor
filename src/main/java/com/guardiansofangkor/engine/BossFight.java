@@ -337,9 +337,9 @@ public class BossFight implements WordTarget {
     }
 
     public int venomIntervalTicks() {
-        // REAM EYSO MECHANIC: True machine-gun fire!
+        // REAM EYSO MECHANIC: Rapid fire, but each bolt still leaves on its own.
         if (type.name().equals("REAM_EYSO")) {
-            return GameConfig.TARGET_FPS / 5; // Fires every 0.2 seconds! Very fast!
+            return GameConfig.BOSS_VENOM_MIN_GAP_TICKS;
         }
 
         int span = GameConfig.VENOM_INTERVAL_MAX_TICKS - GameConfig.VENOM_INTERVAL_MIN_TICKS;
@@ -381,7 +381,7 @@ public class BossFight implements WordTarget {
         }
 
         if (!want.startsWith(input)) {
-            resetVerse();
+            restartWord();
             return Result.TYPO;
         }
 
@@ -414,9 +414,16 @@ public class BossFight implements WordTarget {
         return Result.STAGE_CLEARED;
     }
 
-    public void resetVerse() {
+    /**
+     * A slip restarts the word being typed — nothing more.
+     *
+     * <p>It used to send the whole verse back to its first word, so one wrong
+     * letter on the last word of a long sentence cost every word before it.
+     * Words already confirmed with a space now stay confirmed; only the
+     * letters of the current word are lost.
+     */
+    public void restartWord() {
         typed = "";
-        wordIndex = 0;
         typoFlashTicks = GameConfig.TYPO_FLASH_TICKS;
     }
 

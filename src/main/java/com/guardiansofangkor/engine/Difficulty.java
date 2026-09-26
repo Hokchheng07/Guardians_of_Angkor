@@ -11,19 +11,19 @@ public enum Difficulty {
 
     EASY("Easy", "A steady tide. Shorter names, more time.", true,
             0.60, 1.50, -2, -3, // SPEED LOCKED: 0.60. WORDS: Massively shorter.
-            new EnemyType[]{ EnemyType.YAKSHA_COMMANDER, EnemyType.NAGA }, 20,
+            new EnemyType[]{ EnemyType.NAGA }, 10,
             0.22, 1.25, 0.65, 4,
             2, 2, 2),
 
     MEDIUM("Medium", "The tide turns. Longer names, less room.", true,
             0.60, 1.25, 0, 0, // SPEED LOCKED: 0.60. WORDS: Standard baseline length.
-            new EnemyType[]{ EnemyType.YAKSHA_COMMANDER, EnemyType.NAGA, EnemyType.CORRUPTED_APSARA, EnemyType.REAM_EYSO }, 40,
+            new EnemyType[]{ EnemyType.YAKSHA_COMMANDER, EnemyType.REAM_EYSO }, 15,
             0.21, 1.12, 0.82, 6,
             3, 3, 3),
 
     HARD("Hard", "No tide at all. The temple gets no rest.", true,
             0.60, 1.0, 1, 2, // SPEED LOCKED: 0.60. WORDS: +1 to +2 characters longer!
-            new EnemyType[]{ EnemyType.YAKSHA_COMMANDER, EnemyType.NAGA, EnemyType.CORRUPTED_APSARA, EnemyType.REAM_EYSO, EnemyType.KRONG_REAP }, 50,
+            new EnemyType[]{ EnemyType.YAKSHA_COMMANDER, EnemyType.KRONG_REAP }, 20,
             0.20, 1.0, 1.0, 8,
             3, 3, 3),
 
@@ -140,11 +140,23 @@ public enum Difficulty {
 
         // Standard Campaign logic
         if (gauntletBosses == null || gauntletBosses.length == 0) return null;
+        // The last level always closes on the tier's final boss, even when it
+        // is not a multiple of ten (Medium ends on 15).
+        if (level == finalBossLevel) return getFinalBossType();
         int index = (level / 10) - 1;
         if (index >= 0 && index < gauntletBosses.length) {
             return gauntletBosses[index];
         }
         return null;
+    }
+
+    /**
+     * True when {@code level} ends in a boss fight: every tenth level, plus the
+     * tier's final level wherever it falls.
+     */
+    public boolean isBossLevel(int level) {
+        if (level <= 0) return false;
+        return level % 10 == 0 || (hasFinalBoss() && level == finalBossLevel);
     }
 
     public int getFinalBossLevel() {
@@ -173,6 +185,35 @@ public enum Difficulty {
 
     public int getBossParagraphCount() {
         return bossParagraphsPerCycle * bossCycles;
+    }
+
+    /**
+     * The level from which a boss fight is the tier's full length.
+     *
+     * <p>Medium, Hard and Endless ask for nine paragraphs of three sentences —
+     * about 230 words — which was the right size for a finale and far too much
+     * for the level-10 Yaksha that opens every gauntlet. Bosses before this
+     * level fight at {@link #EASY}'s size instead (about 60 words), so the long
+     * fights only arrive once the player has come far enough to expect one.
+     */
+    public static final int FULL_LENGTH_BOSS_LEVEL = 30;
+
+    /** How many paragraphs the boss on {@code level} makes the player type. */
+    public int bossParagraphCountAt(int level) {
+        int full = getBossParagraphCount();
+        return isFullLengthBoss(level) ? full : Math.min(full, EASY.getBossParagraphCount());
+    }
+
+    /** How many sentences per paragraph the boss on {@code level} uses. */
+    public int bossSentencesPerParagraphAt(int level) {
+        int full = bossSentencesPerParagraph;
+        return isFullLengthBoss(level)
+                ? full : Math.min(full, EASY.getBossSentencesPerParagraph());
+    }
+
+    /** Late gauntlet bosses and every tier's finale fight at full length. */
+    private boolean isFullLengthBoss(int level) {
+        return level >= FULL_LENGTH_BOSS_LEVEL || (hasFinalBoss() && level == finalBossLevel);
     }
 
     public int getBossSentenceCount() {

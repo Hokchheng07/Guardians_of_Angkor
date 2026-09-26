@@ -22,6 +22,7 @@ import java.util.Set;
  * <p>{@code heroKey} is the hero of the saved run, which is also the one the
  * picker should open on next time. A string for the same package-cycle reason;
  * blank means "never chosen" and the engine resolves it to the default hero.
+ * {@code templeMapKey} follows the same rule for the selected temple.
  *
  * <p>{@code language} and {@code audio} are the Options screen's settings. They
  * are preferences rather than run state, but they live in the same file so
@@ -36,6 +37,7 @@ public record SaveData(
         int bestWave,
         Set<String> clearedTiers,
         String heroKey,
+        String templeMapKey,
         AudioSettings audio) {
 
     public SaveData {
@@ -47,15 +49,32 @@ public record SaveData(
         bestWave = Math.max(0, bestWave);
         clearedTiers = normalise(clearedTiers);
         heroKey = heroKey == null ? "" : heroKey.trim().toLowerCase(Locale.ROOT);
+        templeMapKey = templeMapKey == null ? "" : templeMapKey.trim().toLowerCase(Locale.ROOT);
         audio = audio == null ? AudioSettings.defaults() : audio;
+    }
+
+    /** Constructor retained for saves/callers created before map selection existed. */
+    public SaveData(int wave, int score, int lives, Language language,
+                    int bestScore, int bestWave, Set<String> clearedTiers,
+                    String heroKey, AudioSettings audio) {
+        this(wave, score, lives, language, bestScore, bestWave, clearedTiers,
+                heroKey, "", audio);
+    }
+
+    /** Constructor for run snapshots whose audio settings are layered on later. */
+    public SaveData(int wave, int score, int lives, Language language,
+                    int bestScore, int bestWave, Set<String> clearedTiers,
+                    String heroKey, String templeMapKey) {
+        this(wave, score, lives, language, bestScore, bestWave, clearedTiers,
+                heroKey, templeMapKey, AudioSettings.defaults());
     }
 
     /** Constructor for callers with no audio settings, e.g. saves from older builds. */
     public SaveData(int wave, int score, int lives, Language language,
                     int bestScore, int bestWave, Set<String> clearedTiers,
                     String heroKey) {
-        this(wave, score, lives, language, bestScore, bestWave, clearedTiers, heroKey,
-                AudioSettings.defaults());
+        this(wave, score, lives, language, bestScore, bestWave, clearedTiers,
+                heroKey, "", AudioSettings.defaults());
     }
 
     /** Constructor for callers with no hero choice, e.g. saves from older builds. */
@@ -95,7 +114,7 @@ public record SaveData(
 
     /** A fresh-start save with no progress and nothing unlocked. */
     public static SaveData empty() {
-        return new SaveData(0, 0, 0, Language.ENGLISH, 0, 0, Set.of(), "",
+        return new SaveData(0, 0, 0, Language.ENGLISH, 0, 0, Set.of(), "", "",
                 AudioSettings.defaults());
     }
 
@@ -116,7 +135,7 @@ public record SaveData(
                 wave, score, lives, language,
                 Math.max(bestScore, runScore),
                 Math.max(bestWave, runWave),
-                clearedTiers, heroKey, audio);
+                clearedTiers, heroKey, templeMapKey, audio);
     }
 
     /** Returns a copy that also records {@code tierKey} as beaten. */
@@ -127,7 +146,7 @@ public record SaveData(
         Set<String> merged = new LinkedHashSet<>(clearedTiers);
         merged.add(tierKey.trim().toLowerCase(Locale.ROOT));
         return new SaveData(wave, score, lives, language, bestScore, bestWave, merged,
-                heroKey, audio);
+                heroKey, templeMapKey, audio);
     }
 
     /**
@@ -139,6 +158,6 @@ public record SaveData(
      */
     public SaveData withSettings(Language chosenLanguage, AudioSettings chosenAudio) {
         return new SaveData(wave, score, lives, chosenLanguage, bestScore, bestWave,
-                clearedTiers, heroKey, chosenAudio);
+                clearedTiers, heroKey, templeMapKey, chosenAudio);
     }
 }
