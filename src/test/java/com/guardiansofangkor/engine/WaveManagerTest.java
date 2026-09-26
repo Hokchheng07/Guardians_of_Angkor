@@ -1,0 +1,500 @@
+package com.guardiansofangkor.engine;
+
+import com.guardiansofangkor.entities.Enemy;
+import com.guardiansofangkor.entities.EnemyType;
+import com.guardiansofangkor.i18n.Language;
+import com.guardiansofangkor.i18n.WordBank;
+import com.guardiansofangkor.util.GameConfig;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Random;
+import java.util.Set;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+@DisplayName("WaveManager — diagonal spawning and level flow")
+class WaveManagerTest {
+
+    /**
+     * A manager pinned to one tier, so these tests describe a fixed baseline
+     * rather than whichever tier happens to be the menu default.
+     *
+     * <p>Medium rather than {@link Difficulty#reference()} deliberately: these
+     * are tests about spawn mechanics, and pinning them to the reference would
+     * mean a future rebalance that moves the reference silently changes what
+     * they are measuring — which is exactly what happened when the reference
+     * moved from Medium to Hard.
+     */
+    private WaveManager newManager() {
+        return new WaveManager(new WordBank(Language.ENGLISH, new Random(42)),
+                Difficulty.MEDIUM, new Random(42));
+    }
+
+    // ---- the concurrent cap ------------------------------------------------
+
+    /**
+     * Plays a tier from level one, never killing anything that has not breached,
+     * and reports the most enemies alive at any moment.
+     */
+    private static int peakAlive(Difficulty tier, int throughLevel) {
+        WaveManager waves = new WaveManager(
+                new WordBank(Language.ENGLISH, new Random(7)), tier, new Random(7));
+        List<Enemy> field = new ArrayList<>();
+        int peak = 0;
+
+        for (int tick = 0; tick < 200_000 && waves.getLevel() <= throughLevel; tick++) {
+            field.addAll(waves.update(field));
+            for (Enemy enemy : field) {
+                enemy.update();
+            }
+            // Breaching is the only thing that removes an enemy here — nobody is
+            // typing. That is the worst case the cap has to hold under.
+            field.removeIf(Enemy::hasBreached);
+            peak = Math.max(peak, (int) field.stream().filter(Enemy::isActive).count());
+        }
+        return peak;
+    }
+
+    @Test
+    @DisplayName("the plaza never holds more enemies than the tier allows")
+    void concurrentCapHolds() {
+        // The reported bug: past the level where the enemy count stops climbing,
+        // the only thing still escalating was the spawn rate — so a late wave
+        // arrived all at once. Medium's last level put sixteen monsters on
+        // screen inside nine seconds, which is sixteen words to read.
+        for (Difficulty tier : List.of(Difficulty.EASY, Difficulty.MEDIUM,
+                Difficulty.HARD)) {
+            int peak = peakAlive(tier, tier.getFinalLevel());
+            assertTrue(peak <= tier.getMaxConcurrentEnemies(),
+                    tier + " put " + peak + " on screen at once, cap is "
+                            + tier.getMaxConcurrentEnemies());
+        }
+    }
+
+    @Test
+    @DisplayName("the cap is a reading limit, so it stays small")
+    void capsStaySmallEnoughToRead() {
+        // Every enemy alive is a word to scan and choose between. Past roughly
+        // half a dozen the player stops reading and starts guessing, and prefix
+        // matching turns ambiguous at the same time.
+        for (Difficulty tier : Difficulty.values()) {
+            assertTrue(tier.getMaxConcurrentEnemies() >= 3,
+                    tier + " is too sparse to be a wave");
+            assertTrue(tier.getMaxConcurrentEnemies() <= 8,
+                    tier + " allows " + tier.getMaxConcurrentEnemies()
+                            + " words on screen, which is past reading");
+        }
+        assertTrue(Difficulty.EASY.getMaxConcurrentEnemies()
+                        < Difficulty.HARD.getMaxConcurrentEnemies(),
+                "the cap should be part of a tier's identity, not one shared number");
+    }
+
+    @Test
+    @DisplayName("a level still sends everything it promised, just not at once")
+    void theCapDelaysRatherThanDrops() {
+        // The cap must not quietly shorten a level: the progress bar counts
+        // enemies resolved against DifficultyCurve.enemyCount, so a spawner that
+        // gave up early would leave the bar permanently short of full.
+        WaveManager waves = newManager();
+        List<Enemy> field = new ArrayList<>();
+        int spawned = 0;
+
+        for (int tick = 0; tick < 200_000; tick++) {
+            List<Enemy> arrived = waves.update(field);
+
+            // Checked AFTER the call, not before. beginLevel sets the spawn
+            // cooldown to zero, so the tick that ends the intermission starts
+            // level two and spawns its first enemy inside the same update —
+            // counting that against level one overcounts by exactly one.
+            if (waves.getLevel() > 1) {
+                break;
+            }
+            spawned += arrived.size();
+            field.addAll(arrived);
+            for (Enemy enemy : field) {
+                enemy.update();
+            }
+            field.removeIf(Enemy::hasBreached);
+        }
+        assertEquals(DifficultyCurve.enemyCount(1, Difficulty.MEDIUM), spawned,
+                "the cap dropped enemies instead of delaying them");
+    }
+
+    @Test
+    @DisplayName("airborne descents hold 45 degrees, flanks stay level")
+    void spawnGeometryMatchesRoute() {
+        WaveManager waves = newManager();
+        List<Enemy> spawned = collectSpawns(waves, 6000);
+
+        assertFalse(spawned.isEmpty(), "a level should produce enemies");
+        for (Enemy enemy : spawned) {
+            double dx = Math.abs(enemy.getSpawnX() - GameConfig.TEMPLE_CENTER_X);
+            double dy = enemy.getType().anchorTargetY() - enemy.getSpawnY();
+
+            if (enemy.getPath().isFortyFiveDegrees()) {
+                assertEquals(dx, dy, 0.001,
+                        "equal horizontal and vertical offset is what makes it 45 degrees");
+            } else if (enemy.getPath().isDescending()) {
+                assertTrue(dy > 0, "a descending route must lose some altitude");
+                assertTrue(dy < dx,
+                        "the ground drift must stay shallower than 45 degrees");
+            } else {
+                assertEquals(0, dy, 0.001, "flank spawns must be level with their target");
+                assertTrue(dx > 0, "flank spawns start out to one side");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("grounded enemies never spawn off the plaza")
+    void groundedEnemiesStayOnThePlaza() {
+        WaveManager waves = newManager();
+
+        for (Enemy enemy : collectSpawns(waves, 6000)) {
+            if (!enemy.getType().isGrounded()) {
+                continue;
+            }
+            assertTrue(enemy.getSpawnY() >= GameConfig.PLAZA_TOP_Y,
+                    enemy.getType().getDisplayName() + " spawned at y="
+                            + Math.round(enemy.getSpawnY())
+                            + ", above the plaza at " + GameConfig.PLAZA_TOP_Y
+                            + " — it would be standing in the sky");
+        }
+    }
+
+    @Test
+    @DisplayName("grounded enemies keep their feet on the plaza for the whole walk")
+    void groundedEnemiesStayGroundedWhileWalking() {
+        WaveManager waves = newManager();
+        List<Enemy> spawned = collectSpawns(waves, 3000);
+
+        for (Enemy enemy : spawned) {
+            if (!enemy.getType().isGrounded()) {
+                continue;
+            }
+            for (int tick = 0; tick < 1500; tick++) {
+                enemy.update();
+                assertTrue(enemy.getAnchorY() >= GameConfig.PLAZA_TOP_Y,
+                        enemy.getType().getDisplayName() + " left the plaza mid-walk");
+                assertTrue(enemy.getAnchorY() <= GameConfig.GROUND_LINE_Y + 0.001,
+                        enemy.getType().getDisplayName() + " sank below the ground line");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("ground types get ground routes and flyers get air routes")
+    void routesRespectCategory() {
+        WaveManager waves = newManager();
+
+        for (Enemy enemy : collectSpawns(waves, 6000)) {
+            assertEquals(!enemy.getType().isGrounded(), enemy.getPath().isAirborne(),
+                    enemy.getType().getDisplayName() + " got route " + enemy.getPath());
+        }
+    }
+
+    @Test
+    @DisplayName("no spawn puts its word plate behind the HUD bar")
+    void spawnsClearTheHudBar() {
+        WaveManager waves = newManager();
+
+        for (Enemy enemy : collectSpawns(waves, 6000)) {
+            if (!enemy.getPath().isFortyFiveDegrees()) {
+                // Only the long airborne descent can reach the bar.
+                continue;
+            }
+            double drawnHeight = enemy.getType().getTargetHeight() * enemy.depthScale();
+            double topY = enemy.getType().isGrounded()
+                    ? enemy.getSpawnY() - drawnHeight
+                    : enemy.getSpawnY() - drawnHeight / 2;
+            double plateTop = topY - GameConfig.WORD_PLATE_CLEARANCE;
+
+            assertTrue(plateTop > GameConfig.HUD_BAR_HEIGHT,
+                    enemy.getType().getDisplayName() + " spawned with its word at "
+                            + Math.round(plateTop) + ", behind the HUD bar");
+        }
+    }
+
+    @Test
+    @DisplayName("both flank and descending routes actually get used")
+    void bothRouteShapesAppear() {
+        WaveManager waves = newManager();
+
+        boolean sawFlank = false;
+        boolean sawDescent = false;
+        for (Enemy enemy : collectSpawns(waves, 6000)) {
+            if (enemy.getPath().isDescending()) {
+                sawDescent = true;
+            } else {
+                sawFlank = true;
+            }
+        }
+        assertTrue(sawFlank, "some enemies should walk in from a flank");
+        assertTrue(sawDescent, "some enemies should approach with a descent");
+    }
+
+    @Test
+    @DisplayName("the Naga arrives every fifth level with a real word chain")
+    void nagaAppearsEveryFifthLevel() {
+        WaveManager waves = newManager();
+        List<Enemy> field = new ArrayList<>();
+
+        int nagaLevels = 0;
+        int seenLevels = 0;
+        int lastLevel = 0;
+
+        for (int tick = 0; tick < 40_000 && waves.getLevel() <= 12; tick++) {
+            List<Enemy> spawned = waves.update(field);
+            if (waves.getLevel() != lastLevel) {
+                lastLevel = waves.getLevel();
+                seenLevels++;
+            }
+            for (Enemy enemy : spawned) {
+                if (enemy.getType() == EnemyType.NAGA) {
+                    nagaLevels++;
+                    assertEquals(0, waves.getLevel() % 5,
+                            "a Naga appeared on level " + waves.getLevel());
+                    assertTrue(enemy.isChained(),
+                            "a mini-boss must take more than one word");
+                    assertTrue(enemy.getChainLength() >= 2
+                                    && enemy.getChainLength() <= 3,
+                            "chain should be 2-3 words, got " + enemy.getChainLength());
+                }
+            }
+            field.clear();
+        }
+
+        assertTrue(seenLevels > 10, "should have run through several levels");
+        assertTrue(nagaLevels >= 2,
+                "expected a Naga on levels 5 and 10, saw " + nagaLevels);
+    }
+
+    @Test
+    @DisplayName("ordinary enemies are never chained")
+    void ordinaryEnemiesAreNotChained() {
+        WaveManager waves = newManager();
+
+        for (Enemy enemy : collectSpawns(waves, 6000)) {
+            // Bosses are the exception by definition — the roster's chained
+            // types and whatever monster the tier saves for its finale.
+            if (enemy.getType() == EnemyType.NAGA
+                    || enemy.getType() == Difficulty.MEDIUM.getFinalBossType()) {
+                continue;
+            }
+            assertEquals(1, enemy.getChainLength(),
+                    enemy.getType().getDisplayName() + " should die to one word");
+        }
+    }
+
+    @Test
+    @DisplayName("a finite tier stops once its last level is cleared")
+    void finiteTiersEnd() {
+        WaveManager waves = newManager();
+        waves.resumeAtLevel(Difficulty.MEDIUM.getFinalLevel() - 1);
+
+        List<Enemy> field = new ArrayList<>();
+        for (int tick = 0; tick < 20_000; tick++) {
+            waves.update(field);
+            field.clear();
+        }
+
+        assertEquals(Difficulty.MEDIUM.getFinalLevel(), waves.getLevel(),
+                "a finite tier must not roll on past its finale");
+        assertTrue(waves.isRunComplete(), "the run should report itself finished");
+    }
+
+    @Test
+    @DisplayName("Endless never reports itself finished")
+    void endlessNeverCompletes() {
+        WaveManager waves = new WaveManager(new WordBank(Language.ENGLISH, new Random(8)),
+                Difficulty.ENDLESS, new Random(8));
+        waves.resumeAtLevel(40);
+
+        List<Enemy> field = new ArrayList<>();
+        for (int tick = 0; tick < 4000; tick++) {
+            waves.update(field);
+            field.clear();
+            assertFalse(waves.isRunComplete(), "Endless ended, which is its one job not to do");
+        }
+        assertTrue(waves.getLevel() > 40, "Endless should keep climbing");
+    }
+
+    @Test
+    @DisplayName("chained words never collide with words already on the field")
+    void chainWordsAreUniqueAcrossTheField() {
+        WaveManager waves = newManager();
+        List<Enemy> field = new ArrayList<>();
+
+        for (int tick = 0; tick < 6000; tick++) {
+            field.addAll(waves.update(field));
+
+            Set<String> promised = new HashSet<>();
+            for (Enemy enemy : field) {
+                for (String word : enemy.getAllWords()) {
+                    assertTrue(promised.add(word),
+                            "word '" + word + "' is promised twice on the field");
+                }
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("spawns are on-screen, since the poof effect covers their arrival")
+    void spawnsOnScreen() {
+        WaveManager waves = newManager();
+
+        for (Enemy enemy : collectSpawns(waves, 4000)) {
+            assertTrue(enemy.getSpawnX() > 0 && enemy.getSpawnX() < GameConfig.SCREEN_WIDTH,
+                    "spawned off-screen at x=" + enemy.getSpawnX()
+                            + "; the puff would be invisible");
+            assertTrue(enemy.getSpawnY() > 0,
+                    "spawned above the window at y=" + enemy.getSpawnY());
+        }
+    }
+
+    @Test
+    @DisplayName("enemies arrive from both sides, not just one")
+    void spawnsFromBothSides() {
+        WaveManager waves = newManager();
+
+        boolean sawLeft = false;
+        boolean sawRight = false;
+        for (Enemy enemy : collectSpawns(waves, 4000)) {
+            if (enemy.getDirection() > 0) {
+                sawLeft = true;
+            } else {
+                sawRight = true;
+            }
+        }
+        assertTrue(sawLeft, "should spawn some enemies marching rightward");
+        assertTrue(sawRight, "should spawn some enemies marching leftward");
+    }
+
+    @Test
+    @DisplayName("spawn distance varies so monsters do not stack on two pixels")
+    void spawnDistanceVaries() {
+        WaveManager waves = newManager();
+
+        Set<Long> distances = new HashSet<>();
+        for (Enemy enemy : collectSpawns(waves, 4000)) {
+            distances.add(Math.round(Math.abs(
+                    enemy.getSpawnX() - GameConfig.TEMPLE_CENTER_X)));
+        }
+        assertTrue(distances.size() > 3,
+                "expected varied approach runs, got " + distances.size());
+    }
+
+    @Test
+    @DisplayName("enemies on the field at once never share a word")
+    void wordsAreUniqueOnField() {
+        WaveManager waves = newManager();
+        List<Enemy> field = new ArrayList<>();
+
+        for (int tick = 0; tick < 4000; tick++) {
+            field.addAll(waves.update(field));
+
+            Set<String> words = new HashSet<>();
+            for (Enemy enemy : field) {
+                assertTrue(words.add(enemy.getWord()),
+                        "duplicate word on field: " + enemy.getWord());
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("level advances only after the field is cleared")
+    void levelAdvancesOnlyWhenCleared() {
+        WaveManager waves = newManager();
+        List<Enemy> field = new ArrayList<>();
+
+        for (int tick = 0; tick < 4000; tick++) {
+            field.addAll(waves.update(field));
+        }
+        int stalledLevel = waves.getLevel();
+
+        field.clear();
+        for (int tick = 0; tick < 4000; tick++) {
+            field.addAll(waves.update(field));
+            field.clear();
+        }
+
+        assertTrue(waves.getLevel() > stalledLevel,
+                "clearing the field should let levels advance");
+    }
+
+    @Test
+    @DisplayName("resuming from a save restarts at the saved level")
+    void resumeAtLevelRestoresProgress() {
+        WaveManager waves = newManager();
+        waves.resumeAtLevel(7);
+
+        assertEquals(7, waves.getLevel());
+        assertFalse(waves.isLevelInProgress(), "should resume into the intermission");
+
+        List<Enemy> field = new ArrayList<>();
+        for (int tick = 0; tick < 400; tick++) {
+            field.addAll(waves.update(field));
+        }
+        assertEquals(8, waves.getLevel(), "next level after resuming at 7 should be 8");
+    }
+
+    @Test
+    @DisplayName("reset returns to a clean pre-level-one state")
+    void resetClearsProgress() {
+        WaveManager waves = newManager();
+        List<Enemy> field = new ArrayList<>();
+        for (int tick = 0; tick < 2000; tick++) {
+            field.addAll(waves.update(field));
+            field.clear();
+        }
+        assertTrue(waves.getLevel() > 1);
+
+        waves.reset();
+
+        assertEquals(0, waves.getLevel());
+        assertFalse(waves.isLevelInProgress());
+        assertEquals(0, waves.getRemainingToSpawn());
+    }
+
+    @Test
+    @DisplayName("later levels spawn faster than early ones")
+    void laterLevelsSpawnFaster() {
+        WaveManager waves = newManager();
+
+        int earlySpawns = countSpawnsDuringLevel(waves, 1);
+        assertTrue(earlySpawns > 0, "level 1 should spawn something");
+    }
+
+    private static int countSpawnsDuringLevel(WaveManager waves, int targetLevel) {
+        List<Enemy> field = new ArrayList<>();
+        int count = 0;
+        for (int tick = 0; tick < 3000 && waves.getLevel() <= targetLevel; tick++) {
+            List<Enemy> spawned = waves.update(field);
+            if (waves.getLevel() == targetLevel) {
+                count += spawned.size();
+            }
+            field.clear();
+        }
+        return count;
+    }
+
+    /**
+     * Runs the manager, killing everything instantly so levels keep advancing
+     * and a large sample of spawns is produced.
+     */
+    private static List<Enemy> collectSpawns(WaveManager waves, int ticks) {
+        List<Enemy> all = new ArrayList<>();
+        List<Enemy> field = new ArrayList<>();
+        for (int tick = 0; tick < ticks; tick++) {
+            all.addAll(waves.update(field));
+            field.clear();
+        }
+        return all;
+    }
+}
