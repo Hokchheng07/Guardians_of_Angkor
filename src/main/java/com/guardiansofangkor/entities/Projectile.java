@@ -15,7 +15,32 @@ import com.guardiansofangkor.matching.WordTarget;
  */
 public class Projectile implements WordTarget {
 
+    /** What threw this, which decides whether it can be typed away at all. */
+    public enum Kind {
+        /**
+         * A Yeak's cursed bolt. Carries a short word and is cleared by typing
+         * it, preempting whatever the player was already part-way through.
+         */
+        CURSED_BOLT,
+
+        /**
+         * Boss venom. Typeable, like everything else — deflected by typing the
+         * word it carries.
+         *
+         * <p>It only works because the finale's verse is typed one word at a
+         * time: the buffer is always a partial word, so the prefix matcher can
+         * weigh a bolt and the verse's next word against the same keystrokes.
+         * The words are drawn to never collide with the verse's own.
+         *
+         * <p>Kept as a separate kind from a Yeak's bolt because it is drawn
+         * differently, flies far more slowly, and is spawned by a phase rather
+         * than by an enemy.
+         */
+        VENOM
+    }
+
     private final String word;
+    private final Kind kind;
 
     private final double startX;
     private final double startY;
@@ -25,7 +50,13 @@ public class Projectile implements WordTarget {
     /** Total ticks the flight should take. Shrinks with level. */
     private final int flightTicks;
 
-    private int ticksFlown;
+    /**
+     * Fractional so a Slow Tide genuinely slows a bolt in flight. Rounding this
+     * to whole ticks would let a slowed bolt arrive at full speed, which reads
+     * as the boon being broken rather than as a design choice.
+     */
+    private double ticksFlown;
+
     private boolean alive = true;
     private boolean landed;
 
@@ -41,12 +72,21 @@ public class Projectile implements WordTarget {
     private int hitFlashTicks;
     private int defeatTicks;
 
+    /** A typeable cursed bolt. */
     public Projectile(String word,
                       double startX, double startY,
                       double targetX, double targetY,
                       int flightTicks) {
+        this(word, startX, startY, targetX, targetY, flightTicks, Kind.CURSED_BOLT);
+    }
+
+    public Projectile(String word,
+                      double startX, double startY,
+                      double targetX, double targetY,
+                      int flightTicks, Kind kind) {
+        this.kind = kind == null ? Kind.CURSED_BOLT : kind;
         if (word == null || word.isEmpty()) {
-            throw new IllegalArgumentException("word must not be null or empty");
+            throw new IllegalArgumentException("a projectile must carry a word");
         }
         this.word = word;
         this.startX = startX;
@@ -56,7 +96,19 @@ public class Projectile implements WordTarget {
         this.flightTicks = Math.max(1, flightTicks);
     }
 
+    /** Advances one tick at full pace. */
     public void update() {
+        update(1.0);
+    }
+
+    /**
+     * Advances one tick, scaled by how fast the world is running — 0 under a
+     * Time Freeze, a fraction under a Slow Tide.
+     *
+     * <p>The fade after interception is deliberately not scaled: it is feedback,
+     * not threat, and a frozen death animation looks like a stall.
+     */
+    public void update(double timeScale) {
         justLanded = false;
 
         if (hitFlashTicks > 0) {
@@ -66,7 +118,13 @@ public class Projectile implements WordTarget {
             defeatTicks++;
             return;
         }
-        ticksFlown++;
+
+        double scale = Math.max(0.0, timeScale);
+        if (scale <= 0.0001) {
+            return;
+        }
+
+        ticksFlown += scale;
         if (ticksFlown >= flightTicks) {
             landed = true;
             justLanded = true;
@@ -76,7 +134,7 @@ public class Projectile implements WordTarget {
 
     /** Flight progress, 0 at the throwing hand and 1 at the temple. */
     public double getProgress() {
-        return Math.min(1.0, ticksFlown / (double) flightTicks);
+        return Math.min(1.0, ticksFlown / flightTicks);
     }
 
     public double getX() {
@@ -128,6 +186,15 @@ public class Projectile implements WordTarget {
     @Override
     public boolean isActive() {
         return alive;
+    }
+
+    public Kind getKind() {
+        return kind;
+    }
+
+    /** True when this is boss venom rather than a thrown bolt. */
+    public boolean isVenom() {
+        return kind == Kind.VENOM;
     }
 
     public int getHitFlashTicks() {

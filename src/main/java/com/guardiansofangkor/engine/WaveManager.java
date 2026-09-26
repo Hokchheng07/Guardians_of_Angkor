@@ -4,37 +4,21 @@ import com.guardiansofangkor.entities.ApproachPath;
 import com.guardiansofangkor.entities.Enemy;
 import com.guardiansofangkor.entities.EnemyType;
 import com.guardiansofangkor.i18n.WordBank;
+import com.guardiansofangkor.i18n.WordPolicy;
 import com.guardiansofangkor.util.GameConfig;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
-/**
- * Owns level composition, spawn pacing and escalation.
- *
- * <p>Enemies materialise back along a 45-degree line from the temple — up-left
- * or up-right — and walk down and inward toward it. Spawning happens on-screen
- * rather than beyond the edges, which is why every spawn is accompanied by a
- * puff of smoke: without it monsters would visibly pop into existence.
- *
- * <p>All difficulty scaling is delegated to {@link DifficultyCurve} so balance
- * lives in one readable place.
- */
 public class WaveManager {
 
-    /** Every 5th level is a Naga mini-boss level. */
-    private static final int MINI_BOSS_INTERVAL = 5;
-
-    /** Krong Reap appears at this level. */
-    private static final int FINAL_BOSS_LEVEL = 15;
-
-    /** Pause between a level being cleared and the next starting. */
     private static final int INTERMISSION_TICKS = GameConfig.TARGET_FPS * 2;
 
-    private final WordBank wordBank;
+    private WordBank wordBank;
     private final Random random;
 
+    private Difficulty difficulty;
     private int level;
     private int remainingToSpawn;
     private int spawnCooldown;
@@ -43,40 +27,66 @@ public class WaveManager {
     private int lastDirection = -1;
 
     public WaveManager(WordBank wordBank) {
-        this(wordBank, new Random());
+        this(wordBank, Difficulty.defaultChoice(), new Random());
     }
 
-    /** Seeded constructor so level composition is reproducible in tests. */
+    public WaveManager(WordBank wordBank, Difficulty difficulty) {
+        this(wordBank, difficulty, new Random());
+    }
+
     public WaveManager(WordBank wordBank, Random random) {
+        this(wordBank, Difficulty.defaultChoice(), random);
+    }
+
+    public WaveManager(WordBank wordBank, Difficulty difficulty, Random random) {
         this.wordBank = wordBank == null ? new WordBank(null) : wordBank;
+        this.difficulty = difficulty == null ? Difficulty.defaultChoice() : difficulty;
         this.random = random == null ? new Random() : random;
     }
 
-    /**
-     * Advances spawn timing by one tick.
-     *
-     * @param activeEnemies enemies currently on the field, used to detect a
-     *                      cleared level and to avoid duplicate words
-     * @return enemies spawned this tick; usually empty
-     */
+    private boolean isPlazaFull(List<Enemy> activeEnemies) {
+        int alive = 0;
+        for (Enemy enemy : activeEnemies) {
+            if (enemy.isActive()) {
+                alive++;
+            }
+        }
+        return alive >= difficulty.getMaxConcurrentEnemies();
+    }
+
     public List<Enemy> update(List<Enemy> activeEnemies) {
         List<Enemy> spawned = new ArrayList<>();
 
         if (!levelInProgress) {
+            // The intermission counts down FIRST, even on the last level. The
+            // run-complete check used to come before it, which froze the
+            // countdown on the final level — and isBossMilestoneDue waits for
+            // it to reach zero, so the final boss never arrived and the run
+            // hung in an endless intermission instead of being won.
             if (intermissionCooldown > 0) {
                 intermissionCooldown--;
+                return spawned;
+            }
+            if (isRunComplete()) {
+                return spawned;
+            }
+            // GAUNTLET UPGRADE: Hit the brakes on a boss level and let GameState trigger the boss.
+            if (difficulty.isBossLevel(level)) {
                 return spawned;
             }
             beginLevel(level + 1);
         }
 
         if (remainingToSpawn > 0) {
+            if (isPlazaFull(activeEnemies)) {
+                return spawned;
+            }
             if (spawnCooldown > 0) {
                 spawnCooldown--;
             } else {
                 spawned.add(spawnOne(activeEnemies));
                 remainingToSpawn--;
-                spawnCooldown = DifficultyCurve.spawnIntervalTicks(level);
+                spawnCooldown = DifficultyCurve.spawnIntervalTicks(level, difficulty);
             }
         } else if (activeEnemies.isEmpty()) {
             levelInProgress = false;
@@ -86,7 +96,6 @@ public class WaveManager {
         return spawned;
     }
 
-    /** True the tick a level finishes, so GameState knows to autosave. */
     public boolean isLevelCleared() {
         return !levelInProgress && intermissionCooldown == INTERMISSION_TICKS;
     }
@@ -94,47 +103,127 @@ public class WaveManager {
     private void beginLevel(int newLevel) {
         this.level = newLevel;
         this.levelInProgress = true;
-        this.remainingToSpawn = DifficultyCurve.enemyCount(newLevel);
+        this.remainingToSpawn = DifficultyCurve.enemyCount(newLevel, difficulty);
         this.spawnCooldown = 0;
     }
 
     private Enemy spawnOne(List<Enemy> activeEnemies) {
-        EnemyType type = chooseType();
+        return spawnOne(activeEnemies, chooseType(), List.of());
+    }
 
-        List<String> inPlay = new ArrayList<>();
+    public Enemy spawnBossMinion(List<Enemy> activeEnemies, List<String> reservedWords) {
+        EnemyType type = WaveWeights.pick(Math.max(1, level), difficulty, random);
+        return spawnOne(activeEnemies == null ? List.of() : activeEnemies,
+                type, reservedWords == null ? List.of() : reservedWords);
+    }
+
+    public Enemy spawnBossMinion(EnemyType type, List<Enemy> activeEnemies, List<String> reservedWords) {
+        return spawnOne(activeEnemies == null ? List.of() : activeEnemies,
+                type, reservedWords == null ? List.of() : reservedWords);
+    }
+
+    public Enemy spawnSpecific(EnemyType type, List<Enemy> activeEnemies) {
+        return spawnOne(activeEnemies == null ? List.of() : activeEnemies, type, List.of());
+    }
+
+    private Enemy spawnOne(List<Enemy> activeEnemies, EnemyType type,
+                           List<String> reservedWords) {
+        List<String> inPlay = new ArrayList<>(reservedWords);
         for (Enemy enemy : activeEnemies) {
-            inPlay.add(enemy.getWord());
+            inPlay.addAll(enemy.getAllWords());
         }
-        String word = wordBank.wordFor(type, inPlay);
 
-        // Alternate sides, with a random chance to repeat so it is not metronomic.
+        WordPolicy policy = currentPolicy();
+        List<String> words = new ArrayList<>();
+        int chainLength = chainLengthFor(type);
+
+        for (int i = 0; i < chainLength; i++) {
+            String word = wordFor(type, inPlay, policy);
+            words.add(word);
+            inPlay.add(word);
+        }
+
         int direction = random.nextInt(4) == 0 ? lastDirection : -lastDirection;
         lastDirection = direction;
 
-        // Ground types walk in from a flank or descend the causeway; flyers do
-        // the same two shapes but at hover altitude.
         ApproachPath[] routes = ApproachPath.forBehaviour(type.getGroundBehavior());
         ApproachPath path = routes[random.nextInt(routes.length)];
 
-        // Varying the run means monsters do not all appear at the same few pixels.
-        // The ceiling is per-type: a high-hovering flyer has less headroom before
-        // its word plate would collide with the HUD bar.
         int maxRun = path.maxRunFor(type.anchorTargetY(), type.spawnHeadroom());
         int run = path.runMin() + random.nextInt(Math.max(1, maxRun - path.runMin() + 1));
 
-        double speed = DifficultyCurve.speedFor(type, level);
+        double speed = DifficultyCurve.speedFor(type, level, difficulty);
 
-        return new Enemy(type, path, word, run, direction, speed);
+        return new Enemy(type, path, words, run, direction, speed);
+    }
+
+    public WordPolicy currentPolicy() {
+        return wordBank.policyFor(difficulty.getWordBankKey(), Math.max(1, level));
+    }
+
+    private String wordFor(EnemyType type, List<String> inPlay, WordPolicy policy) {
+        if (type.isChainedType()) {
+            return wordBank.bossWord(inPlay, policy);
+        }
+        return wordBank.wordFor(type, inPlay, policy,
+                difficulty.getWordMinShift(), difficulty.getWordMaxShift());
+    }
+
+    private int chainLengthFor(EnemyType type) {
+        int max = type.getMaxChainLength();
+        if (max <= 1) {
+            return 1;
+        }
+        int min = Math.min(2, max);
+        return min + random.nextInt(max - min + 1);
     }
 
     private EnemyType chooseType() {
-        if (level == FINAL_BOSS_LEVEL && remainingToSpawn == 1) {
-            return EnemyType.KRONG_REAP;
-        }
-        if (level % MINI_BOSS_INTERVAL == 0 && remainingToSpawn == 1) {
-            return EnemyType.NAGA;
-        }
-        return WaveWeights.pick(level, random);
+        // Removed hardcoded Naga logic. We rely on the Gauntlet now!
+        return WaveWeights.pick(level, difficulty, random);
+    }
+
+    // NEW GAUNTLET METHODS
+    public boolean isBossMilestoneDue() {
+        // Tells GameState that the intermission is over and a boss wave has been reached
+        return !levelInProgress && intermissionCooldown == 0 && difficulty.isBossLevel(level);
+    }
+
+    public void resumeAfterBoss() {
+        // Restarts the engine for the next wave
+        beginLevel(level + 1);
+    }
+
+    public boolean isRunComplete() {
+        return difficulty.isWinnable()
+                && !levelInProgress
+                && level >= difficulty.getFinalLevel();
+    }
+
+    public int getFinalLevel() {
+        return difficulty.getFinalLevel();
+    }
+
+    public Difficulty getDifficulty() {
+        return difficulty;
+    }
+
+    public void setDifficulty(Difficulty difficulty) {
+        this.difficulty = difficulty == null ? Difficulty.defaultChoice() : difficulty;
+    }
+
+    /**
+     * Switches the vocabulary the next spawn draws from, e.g. after a language
+     * change. Words already in play are untouched — only what the next spawn
+     * asks for changes.
+     */
+    public void setWordBank(WordBank wordBank) {
+        this.wordBank = wordBank == null ? new WordBank(null) : wordBank;
+    }
+
+    /** True when the level just begun is this tier's final boss level. */
+    public boolean isFinalBossLevel() {
+        return difficulty.hasFinalBoss() && level == difficulty.getFinalBossLevel();
     }
 
     public int getLevel() {
@@ -149,12 +238,10 @@ public class WaveManager {
         return remainingToSpawn;
     }
 
-    /** True while the game is between levels. Used by the HUD for the banner. */
     public boolean isIntermission() {
         return !levelInProgress && intermissionCooldown > 0;
     }
 
-    /** Restores spawn state after loading a save. */
     public void resumeAtLevel(int savedLevel) {
         this.level = Math.max(0, savedLevel);
         this.levelInProgress = false;
@@ -162,7 +249,6 @@ public class WaveManager {
         this.intermissionCooldown = INTERMISSION_TICKS;
     }
 
-    /** Full reset for a new run. */
     public void reset() {
         this.level = 0;
         this.levelInProgress = false;

@@ -58,6 +58,26 @@ public class TargetResolver {
     public ResolveResult submit(String typedSoFar,
                                 List<? extends WordTarget> projectiles,
                                 List<? extends WordTarget> enemies) {
+        return submit(typedSoFar, projectiles, Collections.emptyList(), enemies);
+    }
+
+    /**
+     * Re-resolves against the current buffer, with power-up pickups sitting
+     * between the two existing tiers.
+     *
+     * <p>The ordering is by time budget, shortest first. A bolt lands in a
+     * second or two, a dropped boon fades in seven, an enemy takes as long as it
+     * takes to walk — so a prefix that could mean any of them should mean the
+     * one about to disappear. Putting pickups above enemies is also what makes
+     * collecting one a real decision: reaching for a boon breaks off whatever
+     * word you were part-way through.
+     *
+     * @param pickups power-up drops waiting to be claimed; may be empty
+     */
+    public ResolveResult submit(String typedSoFar,
+                                List<? extends WordTarget> projectiles,
+                                List<? extends WordTarget> pickups,
+                                List<? extends WordTarget> enemies) {
 
         String typed = typedSoFar == null ? "" : typedSoFar;
 
@@ -68,9 +88,12 @@ public class TargetResolver {
             return ResolveResult.empty();
         }
 
-        // Projectiles preempt enemies — only fall through when nothing in the
-        // priority list matches this prefix.
+        // Each tier preempts the ones below it — only fall through when nothing
+        // in the higher list matches this prefix.
         List<WordTarget> matches = widen(WordMatcher.candidates(projectiles, typed));
+        if (matches.isEmpty()) {
+            matches = widen(WordMatcher.candidates(pickups, typed));
+        }
         if (matches.isEmpty()) {
             matches = widen(WordMatcher.candidates(enemies, typed));
         }
@@ -157,6 +180,44 @@ public class TargetResolver {
 
     public TypoPolicy getTypoPolicy() {
         return typoPolicy;
+    }
+
+    /**
+     * Records a keystroke resolved somewhere other than here.
+     *
+     * <p>The final boss is typed against a paragraph rather than against a
+     * prefix-matched target, so it bypasses {@link #submit}. Without this the
+     * HUD's accuracy readout would freeze for the whole fight, which reads as a
+     * broken stat rather than as a different mechanic.
+     *
+     * @param correct true for an accepted keystroke, false for a mistype
+     */
+    public void noteExternalInput(boolean correct) {
+        if (correct) {
+            correctInputs++;
+        } else {
+            typoCount++;
+        }
+    }
+
+    /**
+     * Publishes the candidates chosen by a matcher that bypassed {@link #submit}.
+     *
+     * <p>The finale resolves its own input — a verse word, a summon and a bolt
+     * are three different kinds of target and are not in one list — so this
+     * object never sees those keystrokes. Without somewhere to put the result,
+     * {@link #getHighlighted()} stays empty for the whole boss fight and every
+     * renderer that asks it "is this target lit?" is told no.
+     *
+     * <p>That was a real bug and a spreading one: summoned monsters never turned
+     * gold as they were typed, and the fix had already been open-coded once in
+     * the projectile path. Routing the boss's candidates back through here keeps
+     * one answer to that question instead of one per entity type.
+     */
+    public void noteExternalCandidates(List<WordTarget> candidates) {
+        highlighted = candidates == null || candidates.isEmpty()
+                ? Collections.emptyList()
+                : List.copyOf(candidates);
     }
 
     public int getCorrectInputs() {

@@ -8,49 +8,73 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 
-/**
- * Decides which enemy types can appear in a given wave and how likely each is.
- *
- * <p>Kept separate from {@link WaveManager} so difficulty tuning is one small
- * readable table rather than branches buried in spawn code.
- */
-final class WaveWeights {
+public final class WaveWeights {
 
-    /** Level at which each type first appears. */
     private static final Map<EnemyType, Integer> UNLOCK_WAVE = new EnumMap<>(EnemyType.class);
-
-    /** Relative spawn weight once unlocked. */
     private static final Map<EnemyType, Integer> WEIGHT = new EnumMap<>(EnemyType.class);
+    private static final Map<Difficulty, Integer> UNLOCK_DELAY = new EnumMap<>(Difficulty.class);
 
     static {
+        UNLOCK_DELAY.put(Difficulty.EASY, 2);
+        UNLOCK_DELAY.put(Difficulty.MEDIUM, 1);
+        UNLOCK_DELAY.put(Difficulty.HARD, 0);
+        UNLOCK_DELAY.put(Difficulty.ENDLESS, 0);
+    }
+
+    static {
+        // STANDARD MINIONS
         UNLOCK_WAVE.put(EnemyType.BEISACH, 1);
         UNLOCK_WAVE.put(EnemyType.AHP, 2);
         UNLOCK_WAVE.put(EnemyType.YEAK, 3);
-        UNLOCK_WAVE.put(EnemyType.STEC_KANTOAB, 5);
+        UNLOCK_WAVE.put(EnemyType.KMAOCH, 5);
         UNLOCK_WAVE.put(EnemyType.PRET, 6);
-        // Bosses are placed explicitly by WaveManager, never randomly.
+
+        // ELITE MINIONS - Newly added to normal spawn pool for Gauntlet modes!
+        UNLOCK_WAVE.put(EnemyType.CHARGER, 7);
+        UNLOCK_WAVE.put(EnemyType.GARUDA, 9);
+        UNLOCK_WAVE.put(EnemyType.SPLITTER, 12);
+        UNLOCK_WAVE.put(EnemyType.ARAK, 15);
+
+        // Bosses are placed explicitly by WaveManager/GameState, never randomly!
         UNLOCK_WAVE.put(EnemyType.NAGA, Integer.MAX_VALUE);
         UNLOCK_WAVE.put(EnemyType.KRONG_REAP, Integer.MAX_VALUE);
+        UNLOCK_WAVE.put(EnemyType.YAKSHA_COMMANDER, Integer.MAX_VALUE);
+        UNLOCK_WAVE.put(EnemyType.CORRUPTED_APSARA, Integer.MAX_VALUE);
+        UNLOCK_WAVE.put(EnemyType.REAM_EYSO, Integer.MAX_VALUE);
 
         WEIGHT.put(EnemyType.BEISACH, 5);
         WEIGHT.put(EnemyType.AHP, 4);
         WEIGHT.put(EnemyType.YEAK, 3);
-        WEIGHT.put(EnemyType.STEC_KANTOAB, 2);
+        WEIGHT.put(EnemyType.KMAOCH, 2);
         WEIGHT.put(EnemyType.PRET, 2);
-        WEIGHT.put(EnemyType.NAGA, 0);
-        WEIGHT.put(EnemyType.KRONG_REAP, 0);
+
+        // Elite weights
+        WEIGHT.put(EnemyType.CHARGER, 2);
+        WEIGHT.put(EnemyType.GARUDA, 2);
+        WEIGHT.put(EnemyType.SPLITTER, 1);
+        WEIGHT.put(EnemyType.ARAK, 1);
     }
 
     private WaveWeights() {
-        // Utility class — not instantiable.
+        // Utility class
     }
 
-    /** Every non-boss type available at {@code wave}. Never empty. */
     static List<EnemyType> available(int wave) {
+        return available(wave, Difficulty.reference());
+    }
+
+    static List<EnemyType> available(int wave, Difficulty difficulty) {
+        int delay = UNLOCK_DELAY.getOrDefault(
+                difficulty == null ? Difficulty.reference() : difficulty, 0);
+
         List<EnemyType> types = new ArrayList<>();
         for (EnemyType type : EnemyType.values()) {
             Integer unlock = UNLOCK_WAVE.get(type);
-            if (unlock != null && wave >= unlock) {
+            if (unlock == null || unlock == Integer.MAX_VALUE) {
+                continue;
+            }
+            int effective = type == EnemyType.BEISACH ? unlock : Math.max(1, unlock + delay);
+            if (wave >= effective) {
                 types.add(type);
             }
         }
@@ -60,9 +84,28 @@ final class WaveWeights {
         return types;
     }
 
-    /** Picks a type for {@code wave}, respecting the weight table. */
+    static List<EnemyType> newlyUnlockedAt(int wave, Difficulty difficulty) {
+        if (wave <= 1) {
+            return List.of();
+        }
+        List<EnemyType> before = available(wave - 1, difficulty);
+        List<EnemyType> now = available(wave, difficulty);
+
+        List<EnemyType> fresh = new ArrayList<>();
+        for (EnemyType type : now) {
+            if (!before.contains(type)) {
+                fresh.add(type);
+            }
+        }
+        return fresh;
+    }
+
     static EnemyType pick(int wave, Random random) {
-        List<EnemyType> pool = available(wave);
+        return pick(wave, Difficulty.reference(), random);
+    }
+
+    static EnemyType pick(int wave, Difficulty difficulty, Random random) {
+        List<EnemyType> pool = available(wave, difficulty);
 
         int total = 0;
         for (EnemyType type : pool) {

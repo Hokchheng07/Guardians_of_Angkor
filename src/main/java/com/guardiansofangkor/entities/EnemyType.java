@@ -19,12 +19,73 @@ import com.guardiansofangkor.util.GameConfig;
  * frequently reorders Khmer diacritics.
  */
 public enum EnemyType {
+    /**
+     * The Punisher (Garuda). A hovering enemy that lunges forward
+     * every time the player makes a typo against any target.
+     */
+    /**
+     * The gauntlet bosses (Difficulty.getMilestoneBoss). Each is fought as a
+     * BossFight, which types a paragraph from the word bank's boss pools — the
+     * word windows here are NOT what the fight uses. They are kept honest (4-6)
+     * anyway, because a boss can also be dropped in as a plain enemy from the
+     * Sandbox tray, and a window of 1 would hand it a one-keystroke word.
+     */
 
-    /** Common. Bread-and-butter enemy. Art pending. */
+    ABYSSAL_NAGA("Abyssal Naga", "នាគ", "Boss",
+            "Boss4.png", GroundBehavior.GROUNDED,
+            240, 0, 4, 6,
+            0.05, 0.0, 1.0, 0, 1, false),
+    NAGA_HEAD("Serpent Head", "ក្បាលនាគ", "Minion",
+            "BossHead.png", GroundBehavior.GROUNDED,
+            160, 0, 3, 5,
+            0.15, 0.0, 1.0, 0, 1, false),
+
+
+    CORRUPTED_APSARA("Corrupted Apsara", "អប្សរា", "Boss",
+            "Boss3.png", GroundBehavior.GROUNDED,
+            220, 0, 4, 6,
+            0.05, 0.0, 1.0, 0, 1, false),
+
+    REAM_EYSO("Ream Eyso", "រាមឥសូរ", "Boss",
+            "Boss2.png", GroundBehavior.FLOATING,
+            200, 120, 4, 6,
+            0.05, 0.0, 1.0, 0, 1, false),
+
+    YAKSHA_COMMANDER("Yaksha Commander", "មេទ័ពយក្ស", "Boss",
+            "Boss1.png", GroundBehavior.GROUNDED,
+            250, 0, 4, 6,
+            0.05, 0.0, 1.0, 0, 1, false),
+
+    GARUDA("Punisher", "គ្រុឌ", "Punisher",
+            "Punisher.png", GroundBehavior.FLOATING,
+            150, 120, 4, 7,
+            0.15, 0.02, 1.0, 0, 1, false),
+
+    SMING("Obscurer", "ស្មឹង", "Obscurer",
+            "Sming.png", GroundBehavior.GROUNDED,
+            160, 0, 5, 8,
+            0.45, 0.02, 1.0, 0, 1, false),
+
+    SPLITTER("Splitter", "រូបចម្លាក់", "Splitter",
+            "Splitter.png", GroundBehavior.GROUNDED,
+            190, 0, 4, 7,
+            0.55, 0.025, 1.2, 0, 1, false),
+
+    ARAK("Arak", "អារក្ស", "Summoner",
+            "Arak.png", GroundBehavior.GROUNDED,
+            230, 0, 7, 10,
+            0.35, 0.015, 0.8, 0, 1, true),
+
+    CHARGER("Charger", "គោព្រៃ", "Charger",
+            "Demonbull.png", GroundBehavior.GROUNDED,
+            160, 0, 5, 7,
+            0.3, 0.02, 0.6, 0, 1, false),
+
+    /** Common. Bread-and-butter enemy. */
     BEISACH("Beisach", "បិសាច", "Common",
-            "beisach_transparent.png", GroundBehavior.GROUNDED,
+            "Beisach.png", GroundBehavior.GROUNDED,
             115, 0, 3, 5,
-            1.0, 0.075, 2.1, 0),
+            1.0, 0.075, 2.1, 0, 1, false),
 
     /**
      * Grunt. The big ogre — deliberately the largest non-boss on screen, and the
@@ -33,37 +94,45 @@ public enum EnemyType {
     YEAK("Yeak", "យក្ស", "Grunt",
             "yeak_transparent.png", GroundBehavior.GROUNDED,
             215, 0, 5, 7,
-            0.85, 0.035, 1.4, 330),
+            0.85, 0.035, 1.4, 330, 1, true),
 
     /** Swarm. Short words, fast, spawns in groups. Flies. Gets frantic fast. */
     AHP("Ahp", "អាប", "Swarm",
             "ahp_transparent.png", GroundBehavior.FLOATING,
             105, 155, 2, 4,
-            1.7, 0.11, 3.2, 0),
+            1.7, 0.11, 3.2, 0, 1, false),
 
-    /** Heavy. Long words, slow approach. Barely speeds up. Art pending. */
+    /**
+     * Heavy. Long words, slow approach. Barely speeds up.
+     *
+     * <p>The tallest thing in the roster short of a boss — taller than Yeak,
+     * who is the bulkiest. The two read as heavy in different ways, which is
+     * the point: Yeak is wide and solid, Pret is a gaunt column. Only the
+     * height is set here; width follows the trimmed art's own proportions, so
+     * making him taller cannot stretch him.
+     */
     PRET("Pret", "ប្រេត", "Heavy",
-            "pret_transparent.png", GroundBehavior.GROUNDED,
-            185, 0, 8, 12,
-            0.65, 0.018, 1.0, 0),
+            "Pret.png", GroundBehavior.GROUNDED,
+            250, 0, 8, 12,
+            0.65, 0.018, 1.0, 0, 1, true),
 
-    /** Mimic. Its word shifts mid-type (Phase 10 behaviour). Floats. Art pending. */
-    STEC_KANTOAB("Stec Kantoab", "សើចកន្តួប", "Mimic",
-            "stec_kantoab_transparent.png", GroundBehavior.FLOATING,
-            130, 120, 4, 6,
-            1.0, 0.06, 2.0, 0),
+    /** Mimic. Its word shifts mid-type (Phase 10 behaviour). Floats. */
+    KMAOCH("Kmaoch", "ខ្មោច", "Mimic",
+            "Kmaoch.png", GroundBehavior.FLOATING,
+            175, 120, 4, 6,
+            1.0, 0.06, 2.0, 0, 1, false),
 
     /** Mini-boss. Chains 2-3 words before dying. Coiled on the ground. */
     NAGA("Naga", "នាគ", "Mini-boss",
             "Naga.png", GroundBehavior.GROUNDED,
             240, 0, 5, 8,
-            0.6, 0.02, 1.0, 0),
+            0.6, 0.02, 1.0, 0, 3, true),
 
     /** Final boss. Full-phrase typing. */
-    KRONG_REAP("Krong Reap", "ក្រុងរាព", "Final boss",
+    KRONG_REAP("Krong Reap", "ក្រុងរាពណ៍", "Boss",
             "krong_reap_transparent.png", GroundBehavior.GROUNDED,
-            330, 0, 10, 24,
-            0.5, 0.015, 0.9, 0);
+            250, 0, 4, 6,
+            0.05, 0.0, 1.0, 0, 1, false);
 
     private final String displayName;
     private final String khmerName;
@@ -78,13 +147,15 @@ public enum EnemyType {
     private final double levelSpeedGain;
     private final double maxSpeedMultiplier;
     private final int throwIntervalTicks;
+    private final int maxChainLength;
+    private final boolean dropsBoons;
 
     EnemyType(String displayName, String khmerName, String tier,
               String spriteFile, GroundBehavior groundBehavior,
               int targetHeight, int hoverHeight,
               int minWordLength, int maxWordLength,
               double speedMultiplier, double levelSpeedGain, double maxSpeedMultiplier,
-              int throwIntervalTicks) {
+              int throwIntervalTicks, int maxChainLength, boolean dropsBoons) {
         this.displayName = displayName;
         this.khmerName = khmerName;
         this.tier = tier;
@@ -98,6 +169,8 @@ public enum EnemyType {
         this.levelSpeedGain = levelSpeedGain;
         this.maxSpeedMultiplier = maxSpeedMultiplier;
         this.throwIntervalTicks = throwIntervalTicks;
+        this.maxChainLength = maxChainLength;
+        this.dropsBoons = dropsBoons;
     }
 
     public String getDisplayName() {
@@ -185,6 +258,50 @@ public enum EnemyType {
     /** True when this type can hurl projectiles at the temple. */
     public boolean canThrow() {
         return throwIntervalTicks > 0;
+    }
+
+    /**
+     * Most words this type can demand before it dies.
+     *
+     * <p>One for ordinary enemies. Mini-bosses carry more, and the spawner
+     * randomises within the range so two encounters are not identical.
+     */
+    public int getMaxChainLength() {
+        return maxChainLength;
+    }
+
+    /**
+     * True when killing this type can leave a power-up behind.
+     *
+     * <p>Only the grounded heavies and the mini-boss: Yeak, Pret and Naga. Two
+     * reasons. They are the slow, long-word, genuinely difficult kills, so a
+     * boon reads as payment for the effort rather than as loot that fell out of
+     * the trash mob. And they arrive one or two at a time rather than in
+     * swarms, so drops stay spaced out instead of arriving in clusters the
+     * player cannot collect anyway.
+     */
+    public boolean dropsBoons() {
+        return dropsBoons;
+    }
+
+    /**
+     * Half-hearts lost when one of these reaches the temple.
+     *
+     * <p>Flyers cost half. They are fast, short-worded and arrive several at
+     * once; charging a full life apiece would let one bad Ahp wave end a run,
+     * which is not the kind of pressure the swarm is for. Walkers cost the full
+     * heart, because reaching the temple means the player lost a word they had
+     * a long time to type.
+     */
+    public int breachDamage() {
+        return isGrounded()
+                ? GameConfig.DAMAGE_GROUNDED_BREACH
+                : GameConfig.DAMAGE_FLYING_BREACH;
+    }
+
+    /** True when this type takes several words to kill. */
+    public boolean isChainedType() {
+        return maxChainLength > 1;
     }
 
     /**

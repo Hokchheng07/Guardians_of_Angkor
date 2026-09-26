@@ -33,20 +33,30 @@ public record ResolveResult(
         return EMPTY_RESULT;
     }
 
-    static ResolveResult typo(String lastValidBuffer) {
-        return new ResolveResult(MatchStatus.TYPO, List.of(), null, lastValidBuffer);
-    }
-
     static ResolveResult ambiguous(List<? extends WordTarget> candidates, String buffer) {
         return new ResolveResult(
                 MatchStatus.AMBIGUOUS, List.copyOf(candidates), null, buffer);
     }
 
-    static ResolveResult locked(WordTarget target, String buffer) {
+    // The three below are public because the final boss resolves its own typing
+    // against a paragraph rather than through TargetResolver, and still has to
+    // answer in this shape — that is what lets the input field's typo flash and
+    // clear-on-complete keep working for a target the matcher never sees.
+
+    /**
+     * @param lastValidBuffer what the input field should fall back to. Empty
+     *                        means "clear it", which is how the boss expresses
+     *                        a sentence being reset by a mistype.
+     */
+    public static ResolveResult typo(String lastValidBuffer) {
+        return new ResolveResult(MatchStatus.TYPO, List.of(), null, lastValidBuffer);
+    }
+
+    public static ResolveResult locked(WordTarget target, String buffer) {
         return new ResolveResult(MatchStatus.LOCKED, List.of(target), target, buffer);
     }
 
-    static ResolveResult completed(WordTarget target, String buffer) {
+    public static ResolveResult completed(WordTarget target, String buffer) {
         return new ResolveResult(MatchStatus.COMPLETED, List.of(target), target, buffer);
     }
 

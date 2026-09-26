@@ -55,15 +55,23 @@ public final class AutosaveHook {
         hookThread = null;
     }
 
-    /** Saves now, swallowing any failure. Also used for the wave-clear autosave. */
+    /**
+     * Saves now, swallowing any failure. Also used for the level-clear autosave.
+     *
+     * <p>Catches {@link Throwable} rather than just RuntimeException: this runs
+     * on the shutdown path, where an Error thrown from a hook thread can stall
+     * the JVM from exiting. A failed save is a far smaller problem than a
+     * process the player cannot close.
+     */
     public void saveQuietly() {
         try {
             SaveData data = progressSupplier.get();
             if (data != null) {
                 saveManager.save(data);
             }
-        } catch (RuntimeException e) {
-            // Nothing useful can be done here, and throwing would stall shutdown.
+        } catch (Throwable t) {
+            // Deliberately silent during shutdown — stderr may already be
+            // closed, and there is no recovery available either way.
         }
     }
 }
