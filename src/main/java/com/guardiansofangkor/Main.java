@@ -12,6 +12,7 @@ import com.guardiansofangkor.matching.ResolveResult;
 import com.guardiansofangkor.renderer.GamePanel;
 import com.guardiansofangkor.renderer.MenuPanel;
 import com.guardiansofangkor.renderer.SandboxTray;
+import com.guardiansofangkor.audio.SoundManager;
 import com.guardiansofangkor.renderer.SpriteCache;
 import com.guardiansofangkor.save.AutosaveHook;
 import com.guardiansofangkor.save.SaveData;
@@ -113,6 +114,10 @@ public final class Main {
         });
         autosave.register();
 
+        // Music starts at the saved volume, before the menu is on screen.
+        SoundManager.apply(saved.audio());
+        SoundManager.startPlaylist();
+
         SpriteCache sprites = new SpriteCache();
 
         // ---- game screen ---------------------------------------------------
@@ -184,8 +189,16 @@ public final class Main {
             panel.repaint();
         }));
 
+        // The engine counts shots; the UI sounds them. Sampled once per tick, so
+        // several shots landing in one tick make one bow sound, not a pile-up.
+        int[] shotsHeard = {state.getShotsLoosed()};
+
         GameLoop loop = new GameLoop(state, () -> {
             input.tick();
+            if (state.getShotsLoosed() != shotsHeard[0]) {
+                shotsHeard[0] = state.getShotsLoosed();
+                SoundManager.playSFX("Shooting.wav");
+            }
             keys.tick();
             panel.tick();
 
@@ -274,7 +287,8 @@ public final class Main {
                 state.setLanguage(chosen);
                 input.setTypingFont(FontManager.wordFont(chosen, 22, Font.BOLD));
             }
-            // Volumes are read by whatever plays sound; nothing to push here.
+            // Volumes take effect immediately, including on the music playing.
+            SoundManager.apply(menuState.getAudio());
         }));
 
         // Settings are written once, on the way out of Options, rather than on

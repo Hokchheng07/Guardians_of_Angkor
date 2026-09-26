@@ -25,32 +25,39 @@ class LevelPreviewTest {
     }
 
     @Test
-    @DisplayName("every mini-boss level is telegraphed, including past the table")
-    void miniBossLevelsAreTelegraphed() {
-        for (int level : new int[] {5, 10, 20, 25, 100}) {
+    @DisplayName("every boss level names its boss, including Endless past any table")
+    void bossLevelsAreTelegraphed() {
+        for (int level = 10; level <= 40; level += 10) {
             LevelPreview preview = LevelPreview.forLevel(level, Difficulty.MEDIUM);
-            assertNotNull(preview, "level " + level + " is a mini-boss level");
-            assertTrue(preview.hint().contains("Naga"),
-                    "level " + level + " should mention the Naga, got: " + preview.hint());
+            String boss = Difficulty.MEDIUM.getMilestoneBoss(level).getDisplayName();
+            assertNotNull(preview, "Medium level " + level + " is a boss level");
+            assertTrue(preview.hint().contains(boss),
+                    "level " + level + " should name " + boss + ", got: " + preview.hint());
         }
+        for (int level : new int[] {60, 100}) {
+            LevelPreview preview = LevelPreview.forLevel(level, Difficulty.ENDLESS);
+            String boss = Difficulty.ENDLESS.getMilestoneBoss(level).getDisplayName();
+            assertNotNull(preview, "Endless level " + level);
+            assertTrue(preview.hint().contains(boss), "got: " + preview.hint());
+        }
+        assertNull(Difficulty.MEDIUM.getMilestoneBoss(5), "the fifth-level Naga is gone");
     }
 
     @Test
-    @DisplayName("the final boss level gets its own hint, not the Naga one")
-    void finalBossOverridesMiniBoss() {
-        LevelPreview preview = LevelPreview.forLevel(15, Difficulty.MEDIUM);
+    @DisplayName("the finale names the tier's final boss")
+    void finaleNamesTheFinalBoss() {
+        LevelPreview preview = LevelPreview.forLevel(
+                Difficulty.MEDIUM.getFinalLevel(), Difficulty.MEDIUM);
 
         assertNotNull(preview);
-        assertTrue(preview.hint().contains("Krong Reap"));
-        assertFalse(preview.hint().contains("coils"),
-                "level 15 on Medium is the finale, not a mini-boss visit");
+        assertTrue(preview.hint().contains("Ream Eyso"), "got: " + preview.hint());
     }
 
     @Test
     @DisplayName("the hint follows the tier's own boss")
     void hintFollowsTheTierBoss() {
         // The tiers end on different levels and with different monsters.
-        // Announcing the wrong finale is worse than announcing nothing, and
+        // Announcing the wrong boss is worse than announcing nothing, and
         // announcing it on the wrong level is worse still.
         LevelPreview easyFinale = LevelPreview.forLevel(
                 Difficulty.EASY.getFinalBossLevel(), Difficulty.EASY);
@@ -61,8 +68,8 @@ class LevelPreviewTest {
         LevelPreview mediumFinale = LevelPreview.forLevel(
                 Difficulty.MEDIUM.getFinalBossLevel(), Difficulty.MEDIUM);
         assertNotNull(mediumFinale);
-        assertTrue(mediumFinale.hint().contains("Krong Reap"),
-                "Medium's finale is Krong Reap, got: " + mediumFinale.hint());
+        assertTrue(mediumFinale.hint().contains("Ream Eyso"),
+                "Medium's finale is Ream Eyso, got: " + mediumFinale.hint());
 
         LevelPreview hardFinale = LevelPreview.forLevel(
                 Difficulty.HARD.getFinalBossLevel(), Difficulty.HARD);
@@ -72,8 +79,8 @@ class LevelPreviewTest {
 
         LevelPreview mediumAtTen = LevelPreview.forLevel(10, Difficulty.MEDIUM);
         assertNotNull(mediumAtTen);
-        assertTrue(mediumAtTen.hint().contains("coils"),
-                "level 10 on Medium is only a mini-boss, got: " + mediumAtTen.hint());
+        assertTrue(mediumAtTen.hint().contains("Yaksha Commander"),
+                "level 10 opens every gauntlet, got: " + mediumAtTen.hint());
     }
 
     /** The level a type first appears on for a tier, from the same table the game uses. */
@@ -112,26 +119,25 @@ class LevelPreviewTest {
     }
 
     @Test
-    @DisplayName("a level that is both a mini-boss and an arrival says both")
+    @DisplayName("a level that is both a boss and an arrival says both")
     void collisionsMentionBoth() {
-        // Which level this is moves with the tier — on Easy, Yeak's delayed
-        // arrival lands on level 5, which is also a Naga level. Dropping either
+        // Which levels coincide moves with the tier — on Medium, the Punisher
+        // arrives on level 10, which is also the first boss. Dropping either
         // fact silently would misinform the player, so the banner says both.
         boolean found = false;
 
         for (Difficulty tier : List.of(Difficulty.EASY, Difficulty.MEDIUM, Difficulty.HARD)) {
-            for (int level = 5; level <= 20; level += 5) {
+            for (int level = 10; level <= tier.getFinalLevel(); level += 10) {
                 List<EnemyType> arrivals = WaveWeights.newlyUnlockedAt(level, tier);
-                if (arrivals.isEmpty() || level == tier.getFinalBossLevel()) {
-                    // Nothing to collide with, or the finale outranks both.
+                if (arrivals.isEmpty()) {
                     continue;
                 }
 
                 LevelPreview preview = LevelPreview.forLevel(level, tier);
                 assertNotNull(preview, tier + " level " + level);
-                assertTrue(preview.hint().contains("Naga"),
-                        tier + " level " + level + " dropped the mini-boss, got: "
-                                + preview.hint());
+                String boss = tier.getMilestoneBoss(level).getDisplayName();
+                assertTrue(preview.hint().contains(boss),
+                        tier + " level " + level + " dropped the boss, got: " + preview.hint());
 
                 boolean named = false;
                 for (EnemyType type : arrivals) {
@@ -145,7 +151,7 @@ class LevelPreviewTest {
         }
 
         assertTrue(found,
-                "no tier has a level that is both a mini-boss level and an arrival, "
+                "no tier has a level that is both a boss level and an arrival, "
                         + "so this rule is no longer being exercised at all");
     }
 
@@ -154,7 +160,7 @@ class LevelPreviewTest {
     void quietLevelsReturnNull() {
         // A banner that always carries a third line trains players to ignore it.
         assertNull(LevelPreview.forLevel(8));
-        assertNull(LevelPreview.forLevel(12));
+        assertNull(LevelPreview.forLevel(14));
     }
 
     @Test

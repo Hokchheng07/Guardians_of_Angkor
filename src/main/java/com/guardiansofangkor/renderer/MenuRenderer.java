@@ -295,8 +295,11 @@ public class MenuRenderer {
 
     private void drawBackdrop(Graphics2D g2, BufferedImage background) {
         if (background != null) {
-            // Pre-scaled to the window by SpriteCache, so this is a 1:1 blit.
-            g2.drawImage(background, 0, 0, null);
+            // Pre-scaled to the screen's device size by SpriteCache, so drawing
+            // it into the window's logical size is a 1:1 blit on the device.
+            // The explicit size matters: on a 2x screen the image is 2560 wide.
+            g2.drawImage(background, 0, 0,
+                    GameConfig.SCREEN_WIDTH, GameConfig.SCREEN_HEIGHT, null);
             return;
         }
         g2.setPaint(new GradientPaint(
@@ -406,9 +409,8 @@ public class MenuRenderer {
         for (int i = 0; i < tiers.length; i++) {
             Difficulty difficulty = tiers[i];
             boolean selected = state.getSelectedDifficulty() == difficulty;
-            // Only Endless is unbuilt. Medium and Hard are finished and simply
-            // locked until they are earned, so they render dark but unbadged —
-            // pressing one explains what would open it.
+            // All four tiers are playable. The progress record is retained for
+            // completion history, but it does not gate the difficulty picker.
             drawButton(g2,
                     difficulty.getDisplayName().toUpperCase(java.util.Locale.ROOT),
                     entryBounds(i, MenuState.Screen.DIFFICULTY).y,
@@ -878,7 +880,7 @@ public class MenuRenderer {
      * It brightens its border and slides across instead, which says "you are
      * here" without saying "this works".
      *
-     * @param unbuilt whether to badge the plate SOON. Deliberately separate from
+     * @param unbuilt whether to badge the plate SOON. Kept generic for future
      *                {@code enabled}, because there are two quite different
      *                reasons a button can be dark. SOON means the feature does
      *                not exist yet and no amount of playing will produce it. A

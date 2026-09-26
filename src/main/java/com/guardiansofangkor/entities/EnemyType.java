@@ -23,6 +23,39 @@ public enum EnemyType {
      * The Punisher (Garuda). A hovering enemy that lunges forward
      * every time the player makes a typo against any target.
      */
+    /**
+     * The gauntlet bosses (Difficulty.getMilestoneBoss). Each is fought as a
+     * BossFight, which types a paragraph from the word bank's boss pools — the
+     * word windows here are NOT what the fight uses. They are kept honest (4-6)
+     * anyway, because a boss can also be dropped in as a plain enemy from the
+     * Sandbox tray, and a window of 1 would hand it a one-keystroke word.
+     */
+
+    ABYSSAL_NAGA("Abyssal Naga", "នាគ", "Boss",
+            "Boss4.png", GroundBehavior.GROUNDED,
+            240, 0, 4, 6,
+            0.05, 0.0, 1.0, 0, 1, false),
+    NAGA_HEAD("Serpent Head", "ក្បាលនាគ", "Minion",
+            "BossHead.png", GroundBehavior.GROUNDED,
+            160, 0, 3, 5,
+            0.15, 0.0, 1.0, 0, 1, false),
+
+
+    CORRUPTED_APSARA("Corrupted Apsara", "អប្សរា", "Boss",
+            "Boss3.png", GroundBehavior.GROUNDED,
+            220, 0, 4, 6,
+            0.05, 0.0, 1.0, 0, 1, false),
+
+    REAM_EYSO("Ream Eyso", "រាមឥសូរ", "Boss",
+            "Boss2.png", GroundBehavior.FLOATING,
+            200, 120, 4, 6,
+            0.05, 0.0, 1.0, 0, 1, false),
+
+    YAKSHA_COMMANDER("Yaksha Commander", "មេទ័ពយក្ស", "Boss",
+            "Boss1.png", GroundBehavior.GROUNDED,
+            250, 0, 4, 6,
+            0.05, 0.0, 1.0, 0, 1, false),
+
     GARUDA("Punisher", "គ្រុឌ", "Punisher",
             "Punisher.png", GroundBehavior.FLOATING,
             150, 120, 4, 7,
@@ -96,10 +129,10 @@ public enum EnemyType {
             0.6, 0.02, 1.0, 0, 3, true),
 
     /** Final boss. Full-phrase typing. */
-    KRONG_REAP("Krong Reap", "ក្រុងរាព", "Final boss",
+    KRONG_REAP("Krong Reap", "ក្រុងរាពណ៍", "Boss",
             "krong_reap_transparent.png", GroundBehavior.GROUNDED,
-            330, 0, 10, 24,
-            0.5, 0.015, 0.9, 0, 1, true);
+            250, 0, 4, 6,
+            0.05, 0.0, 1.0, 0, 1, false);
 
     private final String displayName;
     private final String khmerName;

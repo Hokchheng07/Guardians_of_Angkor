@@ -15,6 +15,7 @@ import java.util.Random;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -240,39 +241,32 @@ class WaveManagerTest {
     }
 
     @Test
-    @DisplayName("the Naga arrives every fifth level with a real word chain")
-    void nagaAppearsEveryFifthLevel() {
+    @DisplayName("waves hold at every tenth level for the boss, and never spawn one themselves")
+    void wavesHoldForTheGauntlet() {
+        // The Naga used to be a random mini-boss every fifth level. The boss
+        // gauntlet replaced that: bosses come only on every tenth level, and it
+        // is GameState that summons them — the wave table never does.
         WaveManager waves = newManager();
         List<Enemy> field = new ArrayList<>();
 
-        int nagaLevels = 0;
-        int seenLevels = 0;
-        int lastLevel = 0;
-
-        for (int tick = 0; tick < 40_000 && waves.getLevel() <= 12; tick++) {
-            List<Enemy> spawned = waves.update(field);
-            if (waves.getLevel() != lastLevel) {
-                lastLevel = waves.getLevel();
-                seenLevels++;
-            }
-            for (Enemy enemy : spawned) {
-                if (enemy.getType() == EnemyType.NAGA) {
-                    nagaLevels++;
-                    assertEquals(0, waves.getLevel() % 5,
-                            "a Naga appeared on level " + waves.getLevel());
-                    assertTrue(enemy.isChained(),
-                            "a mini-boss must take more than one word");
-                    assertTrue(enemy.getChainLength() >= 2
-                                    && enemy.getChainLength() <= 3,
-                            "chain should be 2-3 words, got " + enemy.getChainLength());
-                }
+        for (int tick = 0; tick < 40_000 && !waves.isBossMilestoneDue(); tick++) {
+            for (Enemy enemy : waves.update(field)) {
+                assertNotEquals(EnemyType.NAGA, enemy.getType(),
+                        "the Naga spawned from the wave table on level " + waves.getLevel());
             }
             field.clear();
         }
+        assertTrue(waves.isBossMilestoneDue(), "the waves should reach the level-10 boss");
+        assertEquals(10, waves.getLevel());
 
-        assertTrue(seenLevels > 10, "should have run through several levels");
-        assertTrue(nagaLevels >= 2,
-                "expected a Naga on levels 5 and 10, saw " + nagaLevels);
+        // Held: nothing spawns while the boss is owed.
+        for (int tick = 0; tick < 600; tick++) {
+            assertTrue(waves.update(field).isEmpty(), "spawned during a boss hold");
+        }
+        assertEquals(10, waves.getLevel(), "the level must not advance past an unfought boss");
+
+        waves.resumeAfterBoss();
+        assertEquals(11, waves.getLevel(), "beating the boss moves on to the next level");
     }
 
     @Test
@@ -314,7 +308,9 @@ class WaveManagerTest {
     void endlessNeverCompletes() {
         WaveManager waves = new WaveManager(new WordBank(Language.ENGLISH, new Random(8)),
                 Difficulty.ENDLESS, new Random(8));
-        waves.resumeAtLevel(40);
+        // 41, not 40: level 40 is a boss level, where the waves correctly wait
+        // for GameState to run the boss.
+        waves.resumeAtLevel(41);
 
         List<Enemy> field = new ArrayList<>();
         for (int tick = 0; tick < 4000; tick++) {
@@ -322,7 +318,7 @@ class WaveManagerTest {
             field.clear();
             assertFalse(waves.isRunComplete(), "Endless ended, which is its one job not to do");
         }
-        assertTrue(waves.getLevel() > 40, "Endless should keep climbing");
+        assertTrue(waves.getLevel() > 41, "Endless should keep climbing");
     }
 
     @Test

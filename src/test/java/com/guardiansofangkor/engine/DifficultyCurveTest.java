@@ -47,7 +47,14 @@ class DifficultyCurveTest {
         double atTwenty = DifficultyCurve.speedMultiplier(type, 20);
         double atHundred = DifficultyCurve.speedMultiplier(type, 100);
 
-        assertEquals(type.getSpeedMultiplier(), atOne, 0.0001,
+        // Beisach and Ahp are the swarm types and were deliberately halved when
+        // the game was made easier, at every level — so their level-one speed
+        // is half their configured multiplier. Everything else starts exactly
+        // at its configured value.
+        double expected = type == EnemyType.BEISACH || type == EnemyType.AHP
+                ? type.getSpeedMultiplier() * 0.5
+                : type.getSpeedMultiplier();
+        assertEquals(expected, atOne, 0.0001,
                 "level 1 should be the configured base speed");
         assertTrue(atTwenty >= atOne, "should not slow down as levels climb");
         assertTrue(atHundred <= type.getMaxSpeedMultiplier() + 0.0001,

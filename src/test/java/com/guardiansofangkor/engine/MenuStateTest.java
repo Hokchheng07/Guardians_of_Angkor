@@ -381,13 +381,13 @@ class MenuStateTest {
     }
 
     @Test
-    @DisplayName("all four tiers are listed; only Endless is unbuilt")
+    @DisplayName("all four tiers are listed and playable")
     void allTiersAreListed() {
         assertEquals(4, Difficulty.values().length);
         assertTrue(Difficulty.EASY.isImplemented());
         assertTrue(Difficulty.MEDIUM.isImplemented());
         assertTrue(Difficulty.HARD.isImplemented());
-        assertFalse(Difficulty.ENDLESS.isImplemented());
+        assertTrue(Difficulty.ENDLESS.isImplemented());
     }
 
     /** A picker open for a player who has beaten everything up to {@code tier}. */
@@ -449,8 +449,8 @@ class MenuStateTest {
     }
 
     @Test
-    @DisplayName("unbuilt is now the only reason a tier can refuse")
-    void onlyUnbuiltTiersRefuse() {
+    @DisplayName("all four tiers can start")
+    void everyTierCanStart() {
         MenuState state = atDifficulty();
 
         for (Difficulty tier : List.of(Difficulty.EASY, Difficulty.MEDIUM,
@@ -458,24 +458,20 @@ class MenuStateTest {
             assertTrue(tier.isImplemented(), tier + " should be built");
             assertTrue(state.isEnabled(tier), tier + " should be playable");
         }
-        assertFalse(Difficulty.ENDLESS.isImplemented(),
-                "Endless is the only tier that is genuinely not built");
-        assertFalse(state.isEnabled(Difficulty.ENDLESS),
-                "and it must stay unavailable rather than start a tier that cannot end");
+        assertTrue(Difficulty.ENDLESS.isImplemented(),
+                "Endless is a playable survival mode");
+        assertTrue(state.isEnabled(Difficulty.ENDLESS),
+                "Endless should be available from the difficulty picker");
     }
 
     @Test
-    @DisplayName("an unbuilt tier says so even when its predecessor is cleared")
-    void unbuiltBeatsLocked() {
-        // Endless sits behind Hard on the ladder and is also not built. The
-        // player should be told the honest reason, which is the second one.
+    @DisplayName("Endless remains playable after Hard is cleared")
+    void endlessStartsAfterHardClear() {
         MenuState state = atDifficultyWithCleared(
                 Difficulty.EASY, Difficulty.MEDIUM, Difficulty.HARD);
         state.select(Difficulty.ENDLESS);
 
-        assertEquals(MenuState.Outcome.NONE, press(state));
-        assertTrue(state.getLockedMessage().contains("not ready"),
-                "got: " + state.getLockedMessage());
+        assertEquals(MenuState.Outcome.START_RUN, press(state));
     }
 
     @Test
@@ -487,19 +483,13 @@ class MenuStateTest {
     }
 
     @Test
-    @DisplayName("the unbuilt tiers refuse to start and say why")
+    @DisplayName("all difficulty tiers can start")
     void lockedTiersRefuseToStart() {
         for (Difficulty difficulty : Difficulty.values()) {
-            if (difficulty.isImplemented()) {
-                continue;
-            }
             MenuState state = atDifficulty();
             state.select(difficulty);
-
-            assertEquals(MenuState.Outcome.NONE, press(state),
-                    difficulty + " must not start a run");
-            assertTrue(state.getLockedMessage().contains(difficulty.getDisplayName()),
-                    "the message should name the tier, got: " + state.getLockedMessage());
+            assertEquals(MenuState.Outcome.START_RUN, press(state),
+                    difficulty + " should be playable");
         }
     }
 

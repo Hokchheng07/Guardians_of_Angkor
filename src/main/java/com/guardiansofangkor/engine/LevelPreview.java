@@ -33,15 +33,16 @@ public record LevelPreview(String hint) {
             11, "Little is slow now",
             13, "The temple lights dim");
 
-    /** Levels that are a multiple of this are Naga mini-boss levels. */
-    private static final int MINI_BOSS_INTERVAL = 5;
-
     static {
         ARRIVAL.put(EnemyType.AHP, "Ahp swarms take to the air");
         ARRIVAL.put(EnemyType.YEAK, "Yeak arrives — and he throws");
         ARRIVAL.put(EnemyType.KMAOCH, "Kmaoch drifts in");
         ARRIVAL.put(EnemyType.PRET, "Pret drags a long name behind it");
         ARRIVAL.put(EnemyType.BEISACH, "Beisach walk the causeway");
+        ARRIVAL.put(EnemyType.CHARGER, "Chargers lower their horns");
+        ARRIVAL.put(EnemyType.GARUDA, "The Punisher circles — typos feed it");
+        ARRIVAL.put(EnemyType.SPLITTER, "Splitters break into more");
+        ARRIVAL.put(EnemyType.ARAK, "Arak summons from the dark");
     }
 
     /**
@@ -68,28 +69,27 @@ public record LevelPreview(String hint) {
         }
         Difficulty tier = difficulty == null ? Difficulty.reference() : difficulty;
 
-        // The tier's own finale takes precedence over everything below.
-        if (tier.hasFinalBoss() && level == tier.getFinalBossLevel()) {
-            return new LevelPreview(
-                    tier.getFinalBossType().getDisplayName() + " comes for the temple");
-        }
-
+        // The gauntlet: a boss closes every tenth level, and which one comes
+        // from the tier's own list (Difficulty.getMilestoneBoss) — the same
+        // lookup GameState uses to summon it, so the banner cannot promise a
+        // different boss than the one that arrives. It used to announce a Naga
+        // every fifth level, a mini-boss the gauntlet replaced.
+        // getMilestoneBoss answers for the whole block of ten (11-19 all return
+        // the level-10 boss), so the banner asks only on the tenth level itself.
+        EnemyType boss = level % 10 == 0 ? tier.getMilestoneBoss(level) : null;
         EnemyType arriving = firstAnnounceable(WaveWeights.newlyUnlockedAt(level, tier));
-        boolean miniBoss = level % MINI_BOSS_INTERVAL == 0;
 
-        // The two can land on the same level, and which one that is moves with
-        // the tier — so rather than picking a winner and silently dropping the
-        // other, say both. Naming the monster first keeps the line scannable.
-        if (miniBoss && arriving != null) {
-            return new LevelPreview(
-                    "Naga at the gate — " + arriving.getDisplayName() + " too");
+        // A boss level can also be an arrival level, and which ones coincide
+        // moves with the tier — so rather than silently dropping one, say both.
+        if (boss != null && arriving != null) {
+            return new LevelPreview(boss.getDisplayName() + " at the gate — "
+                    + arriving.getDisplayName() + " too");
+        }
+        if (boss != null) {
+            return new LevelPreview(boss.getDisplayName() + " comes for the temple");
         }
         if (arriving != null) {
             return new LevelPreview(ARRIVAL.get(arriving));
-        }
-        // Mini-bosses are rule-based, so they keep working past any table.
-        if (miniBoss) {
-            return new LevelPreview("A Naga coils at the gate");
         }
 
         String atmosphere = ATMOSPHERE.get(level);

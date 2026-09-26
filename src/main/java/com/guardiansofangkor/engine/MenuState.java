@@ -66,7 +66,7 @@ public class MenuState {
 
     /** What the caller should do in response to an activation. */
     public enum Outcome {
-        /** Nothing happened, or the highlighted entry is not ready. */
+        /** Nothing happened, or the highlighted entry could not be activated. */
         NONE,
 
         /**
@@ -106,7 +106,7 @@ public class MenuState {
         EXIT
     }
 
-    /** How long the "not ready" nudge stays on screen, in ticks. */
+    /** How long a locked-entry nudge stays on screen, in ticks. */
     private static final int LOCKED_FLASH_TICKS = 90;
 
     /**
@@ -485,15 +485,6 @@ public class MenuState {
      * and earned. This is what greys the button out.
      */
     public boolean isEnabled(Difficulty difficulty) {
-        // Built is the only requirement. Tiers used to also have to be EARNED —
-        // clear Easy to open Medium, and so on — and that gate is gone: a
-        // player who wants Hard on their first run can have it, and anyone
-        // marking or demonstrating this does not have to play through two
-        // tiers to see the third.
-        //
-        // {@link DifficultyProgress} is deliberately still tracked. It is no
-        // longer a lock, but it is still the record of what has actually been
-        // beaten, which the end-of-run card and the save file both want.
         return difficulty != null && difficulty.isImplemented();
     }
 
@@ -539,7 +530,7 @@ public class MenuState {
         }
     }
 
-    /** The "not ready" line to show, or empty when there is none. */
+    /** The locked-entry line to show, or empty when there is none. */
     public String getLockedMessage() {
         return lockedMessage;
     }

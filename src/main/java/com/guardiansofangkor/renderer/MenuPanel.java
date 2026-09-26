@@ -1,5 +1,6 @@
 package com.guardiansofangkor.renderer;
 
+import com.guardiansofangkor.audio.SoundManager;
 import com.guardiansofangkor.engine.Difficulty;
 import com.guardiansofangkor.engine.MenuItem;
 import com.guardiansofangkor.engine.MenuState;
@@ -51,6 +52,12 @@ public class MenuPanel extends JPanel {
     private Runnable onExit = () -> { };
     private Runnable onSettingsChanged = () -> { };
 
+    /**
+     * What was highlighted last time input was handled, so moving the
+     * highlight — by key or by mouse — can sound the hover tick exactly once.
+     */
+    private String lastHighlight = "";
+
     /** The volume row being dragged, or null when no slider is held. */
     private MenuState.OptionRow draggingSlider;
     private Consumer<MenuState.Screen> onScreenChanged = screen -> { };
@@ -75,6 +82,7 @@ public class MenuPanel extends JPanel {
             @Override
             public void mouseMoved(MouseEvent e) {
                 hoverAt(e.getX(), e.getY());
+                soundHighlightChange();
             }
 
             @Override
@@ -131,6 +139,7 @@ public class MenuPanel extends JPanel {
     /** Starts the idle animation and takes keyboard focus. */
     public void activateScreen() {
         state.reset();
+        syncHighlight();
         animator.start();
         requestFocusInWindow();
         repaint();
@@ -143,7 +152,28 @@ public class MenuPanel extends JPanel {
 
     // ---- input -------------------------------------------------------------
 
+    /** Plays the hover tick when the highlighted entry has changed. */
+    private void soundHighlightChange() {
+        String now = state.getScreen() + ":" + state.getSelectedIndex();
+        if (!now.equals(lastHighlight)) {
+            if (!lastHighlight.isEmpty()) {
+                SoundManager.playSFX("hover.wav");
+            }
+            lastHighlight = now;
+        }
+    }
+
+    /** Forgets the highlight without a sound, e.g. when a new screen opens. */
+    private void syncHighlight() {
+        lastHighlight = state.getScreen() + ":" + state.getSelectedIndex();
+    }
+
     private void handleKey(KeyEvent e) {
+        handleKeyInner(e);
+        soundHighlightChange();
+    }
+
+    private void handleKeyInner(KeyEvent e) {
         switch (e.getKeyCode()) {
             case KeyEvent.VK_UP, KeyEvent.VK_W -> {
                 state.moveUp();
@@ -161,7 +191,11 @@ public class MenuPanel extends JPanel {
             case KeyEvent.VK_ESCAPE, KeyEvent.VK_BACK_SPACE -> {
                 // Exit is immediate; backing out gets the same press delay as
                 // any other button.
-                dispatch(state.back());
+                MenuState.Outcome backed = state.back();
+                if (backed == MenuState.Outcome.PENDING) {
+                    SoundManager.playSFX("click.wav");
+                }
+                dispatch(backed);
                 repaint();
             }
             default -> {
@@ -234,6 +268,10 @@ public class MenuPanel extends JPanel {
         // Most presses resolve later through pollReady; a settings toggle
         // resolves at once, so its outcome has to be acted on here.
         MenuState.Outcome outcome = state.activate();
+        if (outcome == MenuState.Outcome.PENDING
+                || outcome == MenuState.Outcome.SETTINGS_CHANGED) {
+            SoundManager.playSFX("click.wav");
+        }
         if (outcome == MenuState.Outcome.SETTINGS_CHANGED) {
             dispatch(outcome);
         }
@@ -248,8 +286,12 @@ public class MenuPanel extends JPanel {
             case START_SANDBOX -> onStartSandbox.run();
             case EXIT -> onExit.run();
             case SETTINGS_CHANGED -> onSettingsChanged.run();
-            case OPEN_HERO, OPEN_DIFFICULTY, OPEN_OPTIONS, BACK ->
-                    onScreenChanged.accept(state.getScreen());
+            case OPEN_HERO, OPEN_DIFFICULTY, OPEN_OPTIONS, BACK -> {
+                // A new screen starts on its default entry; that is not the
+                // player moving the highlight, so it makes no hover sound.
+                syncHighlight();
+                onScreenChanged.accept(state.getScreen());
+            }
             case PENDING, NONE -> {
                 // Still depressing, or a locked entry that has already explained
                 // itself. Nothing to do either way.

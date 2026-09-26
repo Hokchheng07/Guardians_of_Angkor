@@ -19,10 +19,12 @@ class EnemyTypeTest {
     private static final Set<EnemyType> EXPECTED_GROUNDED = EnumSet.of(
             EnemyType.SMING, EnemyType.SPLITTER, EnemyType.ARAK,
             EnemyType.CHARGER, EnemyType.BEISACH, EnemyType.YEAK,
-            EnemyType.PRET, EnemyType.NAGA, EnemyType.KRONG_REAP);
+            EnemyType.PRET, EnemyType.NAGA, EnemyType.KRONG_REAP,
+            EnemyType.YAKSHA_COMMANDER, EnemyType.CORRUPTED_APSARA,
+            EnemyType.ABYSSAL_NAGA, EnemyType.NAGA_HEAD);
 
     private static final Set<EnemyType> EXPECTED_FLOATING = EnumSet.of(
-            EnemyType.GARUDA, EnemyType.AHP, EnemyType.KMAOCH);
+            EnemyType.GARUDA, EnemyType.AHP, EnemyType.KMAOCH, EnemyType.REAM_EYSO);
 
     @Test
     @DisplayName("every legged or coiled monster is grounded")
@@ -36,7 +38,7 @@ class EnemyTypeTest {
     }
 
     @Test
-    @DisplayName("only Garuda, Ahp and Kmaoch float")
+    @DisplayName("only Garuda, Ahp, Kmaoch and Ream Eyso float")
     void onlyIntendedMonstersFloat() {
         for (EnemyType type : EXPECTED_FLOATING) {
             assertFalse(type.isGrounded(),

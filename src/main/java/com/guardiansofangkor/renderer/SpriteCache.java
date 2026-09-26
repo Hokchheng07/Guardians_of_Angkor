@@ -805,30 +805,40 @@ public class SpriteCache {
     }
 
     /**
-     * An opaque, screen-sized copy of a full-bleed backdrop.
+     * An opaque copy of a full-bleed backdrop at the screen's DEVICE size —
+     * 2560x1440 on a Retina display, 1280x720 on a plain one.
      *
-     * <p>The delivered art is 1672x941 and the window is 1280x720, so drawing it
-     * directly means rescaling one and a half million pixels every frame to
-     * produce the one image on screen guaranteed never to change. Opaque rather
-     * than ARGB because it is the bottom layer: there is nothing behind it to
-     * blend with, and skipping the alpha channel skips the blend.
+     * <p>Built once so the frame never rescales the one image guaranteed never
+     * to change. Opaque rather than ARGB because it is the bottom layer: there
+     * is nothing behind it to blend with, and skipping the alpha channel skips
+     * the blend.
+     *
+     * <p>Device size, not window size, is the whole point. This used to shrink
+     * the 1672x941 art to the 1280x720 window, and on a 2x screen the OS then
+     * stretched that back up to 2560x1440 every frame — the painting was
+     * resampled down and then up again, losing a third of its detail and then
+     * smearing what was left. Built at device size it is resampled exactly
+     * once, straight from the source, and lands 1:1 on the screen's pixels, so
+     * the blit is still the fast unscaled copy. Callers must draw it with an
+     * explicit 1280x720 destination.
      */
     private static BufferedImage toBackdrop(BufferedImage source) {
         if (source == null) {
             return null;
         }
         try {
-            BufferedImage copy = new BufferedImage(
-                    GameConfig.SCREEN_WIDTH, GameConfig.SCREEN_HEIGHT,
-                    BufferedImage.TYPE_INT_RGB);
+            int width = (int) Math.round(GameConfig.SCREEN_WIDTH * DISPLAY_SCALE);
+            int height = (int) Math.round(GameConfig.SCREEN_HEIGHT * DISPLAY_SCALE);
+            BufferedImage copy = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
             Graphics2D g = copy.createGraphics();
             try {
+                // Bicubic: this runs once per backdrop, and on a 2x screen it is
+                // an enlargement, where bilinear visibly softens edges.
                 g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
-                        RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                        RenderingHints.VALUE_INTERPOLATION_BICUBIC);
                 g.setRenderingHint(RenderingHints.KEY_RENDERING,
                         RenderingHints.VALUE_RENDER_QUALITY);
-                g.drawImage(source, 0, 0,
-                        GameConfig.SCREEN_WIDTH, GameConfig.SCREEN_HEIGHT, null);
+                g.drawImage(source, 0, 0, width, height, null);
             } finally {
                 g.dispose();
             }

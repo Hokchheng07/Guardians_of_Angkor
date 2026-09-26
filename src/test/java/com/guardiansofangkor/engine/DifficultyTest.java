@@ -23,25 +23,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DifficultyTest {
 
     @Test
-    @DisplayName("Hard is the reference tuning, so all its scales are neutral")
+    @DisplayName("Hard is the reference for spawning and enemy count")
     void hardIsTheBaseline() {
-        // The reference moved here from Medium when the tiers were rebalanced:
-        // what shipped as Medium was promoted to Hard unchanged, and the label
-        // moved with the numbers rather than the numbers being rewritten.
+        // Hard keeps the neutral spawn gap and enemy count that the bare curves
+        // describe. It is no longer neutral on speed or words: the easier-game
+        // rebalance locked every tier's speed at 0.60 and made Hard's words
+        // one to two letters longer than the baseline.
         assertEquals(Difficulty.HARD, Difficulty.reference());
-        assertEquals(1.0, Difficulty.HARD.getSpeedScale(), 0.0001);
         assertEquals(1.0, Difficulty.HARD.getSpawnIntervalScale(), 0.0001);
-        assertEquals(0, Difficulty.HARD.getWordMinShift());
-        assertEquals(0, Difficulty.HARD.getWordMaxShift());
+        assertEquals(1.0, Difficulty.HARD.getEnemyCountScale(), 0.0001);
+        assertTrue(Difficulty.HARD.getWordMinShift() > 0, "Hard asks for longer words");
     }
 
     @Test
-    @DisplayName("Hard matches the single-argument curves exactly")
+    @DisplayName("Hard's spawn gap matches the single-argument curve exactly")
     void hardMatchesBareCurves() {
         for (int level = 1; level <= 20; level++) {
-            assertEquals(DifficultyCurve.baseSpeed(level),
-                    DifficultyCurve.baseSpeed(level, Difficulty.HARD), 0.0001,
-                    "level " + level);
             assertEquals(DifficultyCurve.spawnIntervalTicks(level),
                     DifficultyCurve.spawnIntervalTicks(level, Difficulty.HARD),
                     "level " + level);
@@ -49,14 +46,14 @@ class DifficultyTest {
     }
 
     @Test
-    @DisplayName("Easy is substantially slower than the reference tuning")
-    void easyIsSlowerThanTheReference() {
-        double ratio = Difficulty.EASY.getSpeedScale() / Difficulty.HARD.getSpeedScale();
-
-        assertTrue(ratio < 1.0, "Easy must be slower");
-        assertTrue(ratio <= 0.65,
-                "Easy was reported as still too hard to finish; expected at least 35% "
-                        + "slower, got " + Math.round((1 - ratio) * 100) + "%");
+    @DisplayName("every campaign tier moves at the same locked speed")
+    void speedIsLockedAcrossTiers() {
+        // The rebalance stopped using speed as the difficulty lever: fast
+        // monsters were what made the game feel unfair. Tiers now differ in how
+        // often enemies come, how many, and how long their words are.
+        for (Difficulty tier : List.of(Difficulty.EASY, Difficulty.MEDIUM, Difficulty.HARD)) {
+            assertEquals(0.60, tier.getSpeedScale(), 0.0001, tier + " speed scale");
+        }
     }
 
     @Test
@@ -64,10 +61,8 @@ class DifficultyTest {
     void tiersEscalateEvenly() {
         // The reported problem was a single jump from Easy to what is now Hard.
         // Medium exists to halve that jump, so it has to sit genuinely between
-        // the two on every lever rather than hugging one end.
-        assertTrue(Difficulty.EASY.getSpeedScale() < Difficulty.MEDIUM.getSpeedScale());
-        assertTrue(Difficulty.MEDIUM.getSpeedScale() < Difficulty.HARD.getSpeedScale());
-
+        // the two on every lever that still differs between tiers. Speed is not
+        // one of them any more — it is locked, see speedIsLockedAcrossTiers.
         assertTrue(Difficulty.EASY.getSpawnIntervalScale()
                 > Difficulty.MEDIUM.getSpawnIntervalScale());
         assertTrue(Difficulty.MEDIUM.getSpawnIntervalScale()
@@ -82,9 +77,10 @@ class DifficultyTest {
     @Test
     @DisplayName("Medium sits near the midpoint rather than beside either neighbour")
     void mediumIsActuallyInTheMiddle() {
-        double easy = Difficulty.EASY.getSpeedScale();
-        double hard = Difficulty.HARD.getSpeedScale();
-        double medium = Difficulty.MEDIUM.getSpeedScale();
+        // Measured on the spawn gap, the main lever left once speed was locked.
+        double easy = Difficulty.EASY.getSpawnIntervalScale();
+        double hard = Difficulty.HARD.getSpawnIntervalScale();
+        double medium = Difficulty.MEDIUM.getSpawnIntervalScale();
 
         double position = (medium - easy) / (hard - easy);
         assertTrue(position > 0.35 && position < 0.65,
@@ -93,28 +89,30 @@ class DifficultyTest {
     }
 
     @Test
-    @DisplayName("late levels were pulled back within reach of a fast typist")
-    void theLateGameRampWasDamped() {
-        // Level eleven on the reference tuning was reported as unreactable at
-        // 102 words per minute. That is not difficulty, it is a wall, and the
-        // fix is to the slope rather than to the starting speed.
-        assertTrue(DifficultyCurve.LEVEL_RAMP_DAMPING < 1.0,
-                "the ramp must actually be damped");
-
-        double undampedAtEleven = 0.40 + 10 * 0.035;
-        assertTrue(DifficultyCurve.baseSpeed(11) < undampedAtEleven,
-                "level eleven should be slower than it used to be");
-        assertEquals(0.40, DifficultyCurve.baseSpeed(1), 0.0001,
-                "but level one must be untouched — the opening was never the problem");
+    @DisplayName("campaign speed does not climb with the level; only Endless ramps")
+    void campaignSpeedIsFlat() {
+        // Late levels were reported as unreactable even for a fast typist. The
+        // rebalance answered that by holding campaign speed at its level-one
+        // value for the whole run; Endless alone keeps escalating.
+        for (Difficulty tier : List.of(Difficulty.EASY, Difficulty.MEDIUM, Difficulty.HARD)) {
+            assertEquals(DifficultyCurve.baseSpeed(1, tier),
+                    DifficultyCurve.baseSpeed(tier.getFinalLevel(), tier), 0.0001,
+                    tier + " should be as fast on its last level as its first");
+        }
+        assertTrue(DifficultyCurve.baseSpeed(40, Difficulty.ENDLESS)
+                        > DifficultyCurve.baseSpeed(1, Difficulty.ENDLESS),
+                "Endless must still get faster");
+        assertEquals(0.20, DifficultyCurve.baseSpeed(1), 0.0001, "the bare curve opens slow");
+        assertTrue(DifficultyCurve.baseSpeed(500) <= 0.75 + 0.0001, "and is capped");
     }
 
     @Test
-    @DisplayName("Easy is slower at every level, not just early on")
-    void easyIsSlowerAtEveryLevel() {
-        for (int level = 1; level <= 30; level++) {
-            assertTrue(DifficultyCurve.baseSpeed(level, Difficulty.EASY)
-                            < DifficultyCurve.baseSpeed(level, Difficulty.MEDIUM),
-                    "Easy caught up to Medium at level " + level);
+    @DisplayName("Easy gives more room between spawns at every level, not just early on")
+    void easyIsGentlerAtEveryLevel() {
+        for (int level = 1; level <= 40; level++) {
+            assertTrue(DifficultyCurve.spawnIntervalTicks(level, Difficulty.EASY)
+                            >= DifficultyCurve.spawnIntervalTicks(level, Difficulty.MEDIUM),
+                    "Easy crowded in faster than Medium at level " + level);
         }
     }
 
@@ -222,12 +220,12 @@ class DifficultyTest {
     @Test
     @DisplayName("each tier runs a longer game than the one below it")
     void tiersRunProgressivelyLonger() {
-        // Tiers used to share one length, on the theory that a tier changes how
-        // hard a run is rather than how long. Climbing the ladder is now meant
-        // to be signing up for more as well as for faster, so the counts differ.
-        assertEquals(10, Difficulty.EASY.getWaveCount());
-        assertEquals(15, Difficulty.MEDIUM.getWaveCount());
-        assertEquals(20, Difficulty.HARD.getWaveCount());
+        // Climbing the ladder means signing up for a longer run and more bosses:
+        // a boss closes every tenth level, so Easy meets two, Medium four and
+        // Hard all five.
+        assertEquals(20, Difficulty.EASY.getWaveCount());
+        assertEquals(40, Difficulty.MEDIUM.getWaveCount());
+        assertEquals(50, Difficulty.HARD.getWaveCount());
 
         for (Difficulty tier : List.of(Difficulty.EASY, Difficulty.MEDIUM, Difficulty.HARD)) {
             assertTrue(tier.isWinnable(), tier + " must be finishable");
@@ -239,14 +237,12 @@ class DifficultyTest {
     }
 
     @Test
-    @DisplayName("Endless is structured but not playable")
-    void endlessIsScaffoldingOnly() {
-        // The tuning is real so nothing has to special-case a half-configured
-        // tier; the mode itself is simply not built yet.
-        assertFalse(Difficulty.ENDLESS.isImplemented());
+    @DisplayName("Endless is playable survival mode")
+    void endlessIsPlayable() {
+        assertTrue(Difficulty.ENDLESS.isImplemented());
         assertEquals(Integer.MAX_VALUE, Difficulty.ENDLESS.getFinalLevel());
         assertTrue(Difficulty.ENDLESS.getEnemyCountScale() > 0,
-                "the scaffolding still has to be configured, not left at zero");
+                "the survival tuning must be configured, not left at zero");
     }
 
     // ---- the unlock ladder -------------------------------------------------
@@ -333,10 +329,28 @@ class DifficultyTest {
     }
 
     @Test
-    @DisplayName("Medium and Hard end with Krong Reap")
-    void heavierTiersEndWithKrongReap() {
-        assertEquals(EnemyType.KRONG_REAP, Difficulty.MEDIUM.getFinalBossType());
+    @DisplayName("Medium ends with Ream Eyso, Hard with Krong Reap")
+    void heavierTiersFinales() {
+        assertEquals(EnemyType.REAM_EYSO, Difficulty.MEDIUM.getFinalBossType());
         assertEquals(EnemyType.KRONG_REAP, Difficulty.HARD.getFinalBossType());
+    }
+
+    @Test
+    @DisplayName("a boss closes every tenth level, in the tier's own order")
+    void gauntletEveryTenthLevel() {
+        for (Difficulty tier : List.of(Difficulty.EASY, Difficulty.MEDIUM, Difficulty.HARD)) {
+            int bosses = tier.getFinalLevel() / 10;
+            // Only the tenth levels are asked — GameState summons on those alone.
+            for (int level = 10; level <= tier.getFinalLevel(); level += 10) {
+                assertNotNull(tier.getMilestoneBoss(level),
+                        tier + " level " + level + " needs a boss");
+            }
+            assertEquals(tier.getFinalBossType(), tier.getMilestoneBoss(tier.getFinalLevel()),
+                    tier + " must end on its final boss");
+            assertTrue(bosses >= 2, tier + " should meet at least two bosses");
+        }
+        assertEquals(EnemyType.YAKSHA_COMMANDER, Difficulty.EASY.getMilestoneBoss(10),
+                "every tier opens its gauntlet with the Yaksha Commander");
     }
 
     @Test
